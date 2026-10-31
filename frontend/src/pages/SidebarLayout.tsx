@@ -105,7 +105,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         {user && user.username ? (
           <div className="mb-6">
             <p className="font-semibold capitalize">Ciao, {user.username}</p>
-            <p className="text-sm capitalize text-gray-300">{user.role.name}</p>
+            <p className="text-sm capitalize text-gray-300">{user.role?.name}</p>
             <Link to="/profile" state={{ from: location.pathname + location.search }} className="text-blue-300 text-sm block mt-1">
               <span className="flex items-center gap-2"><FiUser className="shrink-0"/>Gestione profilo</span>
             </Link>

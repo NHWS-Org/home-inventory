@@ -41,7 +41,7 @@ export default function GlobalBarcodeScan() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { user } = useAuth();
-  const canEdit = user?.role.name !== 'viewer';
+  const canEdit = Boolean(user?.role?.name && user.role.name !== 'viewer');
 
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scan, setScan] = useState<Scan | null>(null);

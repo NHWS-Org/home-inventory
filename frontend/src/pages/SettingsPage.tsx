@@ -22,7 +22,7 @@ export default function SettingsPage() {
     { name: "Barcode", component: <BarcodeManagementPage />, adminOnly: true },
     { name: "Audit", component: <AuditLogPage /> },
     //{ name: "Info", component: <InfoPage /> },
-  ].filter((tab) => !('adminOnly' in tab) || user?.role.name === 'admin');
+  ].filter((tab) => !('adminOnly' in tab) || user?.role?.name === 'admin');
   const [activeTab, setActiveTab] = useState("Generale");
 
   const currentTab = tabs.find((tab) => tab.name === activeTab);

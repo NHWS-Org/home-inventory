@@ -38,8 +38,9 @@ export function HistoryModal({
   entityName,
 }: HistoryModalProps) {
   const authContext = useContext(AuthContext);
-  const isAdmin = authContext?.user?.role?.name === 'admin';
-  const canRollback = authContext?.user?.role?.name !== 'viewer';
+  const user = authContext?.user;
+  const isAdmin = user?.role?.name === 'admin';
+  const canRollback = Boolean(user?.role?.name && user.role.name !== 'viewer');
   const [versions, setVersions] = useState<(ItemVersion | InventoryVersion)[]>([]);
     const displayedVersions = useMemo(
       () => [...versions].sort((a, b) => b.version_num - a.version_num),

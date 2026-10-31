@@ -131,7 +131,7 @@ export default function UserManagementPage() {
   };
 
   const filteredUsers = users.filter(user =>
-    (roleFilter === "all" || user.role.name === roleFilter) &&
+    (roleFilter === "all" || user.role?.name === roleFilter) &&
     (statusFilter === "all" || (statusFilter === "active" ? !user.is_blocked : user.is_blocked))
   );
 
@@ -147,7 +147,7 @@ export default function UserManagementPage() {
             className="w-full border rounded p-1"
           >
             <option value="all">Tutti i ruoli</option>
-            {[...new Set(users.map(u => u.role.name))].map(role => (
+            {[...new Set(users.map(u => u.role?.name).filter(Boolean))].map(role => (
               <option key={role} value={role}>{role}</option>
             ))}
           </select>
@@ -182,7 +182,7 @@ export default function UserManagementPage() {
               <tr key={user.id}>
                 <td className="p-2 border">{user.username}</td>
                 <td className="p-2 border">{user.email}</td>
-                <td className="p-2 border">{user.role.name}</td>
+                <td className="p-2 border">{user.role?.name ?? "-"}</td>
                 <td className="p-2 border text-center">{user.is_blocked ? "🔴 Bloccato" : "🟢 Attivo"}</td>
                 <td className="p-2 border">{new Date(user.data_ins).toLocaleString()}</td>
                 <td className="p-2 border">{new Date(user.data_mod).toLocaleString()}</td>

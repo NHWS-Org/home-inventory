@@ -1,7 +1,6 @@
 // src/components/ProtectedRoute.tsx
 import { useAuth } from "../useAuth";
 import { Navigate } from "react-router-dom";
-import { User } from '../types';
 import Spinner from "../components/Spinner";
 
 interface ProtectedRouteProps {
@@ -10,7 +9,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-  const { user } = useAuth() as unknown as { user: User | null };
+  const { user } = useAuth();
   if (user === null) {
     const hasToken = Boolean(localStorage.getItem("access_token"));
     if (hasToken) {
@@ -19,7 +18,7 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
     return <Navigate to="/login" replace />;
   }
 
-  if (requireAdmin && user.role.name !== "admin") {
+  if (requireAdmin && user.role?.name !== "admin") {
     return <Navigate to="/" replace />;
   }
 

@@ -269,7 +269,7 @@ export function SwipeableItemRow({
     delta: 40,
   });
 
-  const isViewer = user?.role.name === 'viewer';
+  const isViewer = user?.role?.name === 'viewer';
 
   const cloneItem = () => {
     const cloned = {
@@ -624,6 +624,9 @@ export default function InventoryDetailPage() {
   const isMobile = window.innerWidth < 768;
   const authContext = useContext(AuthContext);
   const user = authContext?.user ?? null;
+  const isAdmin = user?.role?.name === 'admin';
+  const isViewer = user?.role?.name === 'viewer';
+  const canEdit = Boolean(user?.role?.name && user.role.name !== 'viewer');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const importExportSheetDrag = useBottomSheetDrag(() => setIsShareModalOpen(false));
   const [csvTextarea, setCsvTextarea] = useState('');
@@ -734,10 +737,10 @@ useEffect(() => {
     if (!target) return;
     openedItemParam.current = key;
     queueMicrotask(() => {
-      if (user?.role.name === 'viewer') setFilterText(target.name);
+      if (isViewer) setFilterText(target.name);
       else setItemBeingEdited(target);
     });
-  }, [items, location.search, location.key, id, user?.role.name]);
+  }, [items, location.search, location.key, id, isViewer]);
 
   useEffect(() => {
     if (!itemBeingEdited) {
@@ -1104,7 +1107,7 @@ useEffect(() => {
                 </button>
               </div>
             </div>
-            {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
+            {(isInventory || isChecklist) && canEdit && (
               <div className="flex w-full items-center gap-1.5 sm:w-auto sm:gap-2">
                 <label className="hidden sm:inline text-sm font-medium whitespace-nowrap">Template filtro:</label>
                 <select
@@ -1218,7 +1221,7 @@ useEffect(() => {
             <span className="hidden md:inline">Elimina {( selectedItems.length )}</span>
           </button>
         )}
-        {isChecklist && user?.role.name !== 'viewer' && (
+        {isChecklist && canEdit && (
           <button
             onClick={() => setIsAddFromInventoryOpen(true)}
             className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-white shadow-lg hover:bg-emerald-700"
@@ -1228,7 +1231,7 @@ useEffect(() => {
             <span className="hidden md:inline">📥 Da inventario</span>
           </button>
         )}
-        {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
+        {(isInventory || isChecklist) && canEdit && (
           <MetadataFilterManager
             inventoryId={inventory?.id ?? Number(id)}
             currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
@@ -1238,7 +1241,7 @@ useEffect(() => {
             triggerClassName="!flex !h-10 !min-h-10 !min-w-12 !items-center !justify-center !rounded-xl !px-3 !py-2"
           />
         )}
-        {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
+        {(isInventory || isChecklist) && canEdit && (
           <button
             onClick={() => {
               const now = new Date();
@@ -1258,7 +1261,7 @@ useEffect(() => {
             <span className="hidden md:inline">📲 WhatsApp</span>
           </button>
         )}
-        {(isInventory || isChecklist) && user?.role.name === 'admin' && (
+        {(isInventory || isChecklist) && isAdmin && (
           <button
             onClick={() => setIsShareModalOpen(true)}
             className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-green-600 px-3 py-2 text-white shadow-lg hover:bg-green-700"
@@ -1267,7 +1270,7 @@ useEffect(() => {
             <span className="hidden md:inline">Import/Export</span>
           </button>
         )}
-        {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
+        {(isInventory || isChecklist) && canEdit && (
           <>
             <button
               onClick={() => {
@@ -1292,7 +1295,7 @@ useEffect(() => {
         )}
       </div>}
 
-      {isMobile && user?.role.name !== 'viewer' && (isInventory || isChecklist) && (
+      {isMobile && canEdit && (isInventory || isChecklist) && (
         <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center">
           {isMoreActionsOpen && (
             <>
@@ -1341,7 +1344,7 @@ useEffect(() => {
                   }}
                   className="min-h-11 w-full rounded-xl bg-green-700 px-3 text-left text-sm font-medium text-white"
                 >📲 Condividi su WhatsApp</button>
-                {user?.role.name === 'admin' && (
+                {isAdmin && (
                   <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsShareModalOpen(true); }} className="min-h-11 w-full rounded-xl bg-green-600 px-3 text-left text-sm font-medium text-white">
                     📤 Importa / esporta
                   </button>
@@ -1448,7 +1451,7 @@ useEffect(() => {
                 <label className="block text-sm font-medium">Descrizione</label>
                 <input type="text" className="min-h-12 w-full border rounded p-3" value={newItemDescription} onChange={(e) => setNewItemDescription(e.target.value)} />
               </div>
-              {isChecklist && user?.role.name !== "viewer" && (
+              {isChecklist && canEdit && (
                 <ListLinkField
                   current={newItemLink ? { name: newItemLink.item.name, qty: newItemLink.qty } : null}
                   onPick={async (picked, qty) => {
@@ -1709,7 +1712,7 @@ useEffect(() => {
                     </label>
                   </div>
                 )}
-                {isChecklist && !isCloning && user?.role.name !== "viewer" && (
+                {isChecklist && !isCloning && canEdit && (
                   <ListLinkField
                     current={itemBeingEdited.assignment
                       ? { name: itemBeingEdited.assignment.source_name ?? "", inventoryName: itemBeingEdited.assignment.source_inventory_name, qty: itemBeingEdited.assignment.qty }

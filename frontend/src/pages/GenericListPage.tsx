@@ -127,6 +127,26 @@ function EditNameModal({ isOpen, onClose, onSave, name, onNameChange }: {
   );
 }
 
+function renderHighlightedText(text: string): React.ReactNode {
+  if (!text) return null;
+  const parts = text.split(/\*\*(.*?)\*\*/g);
+  if (parts.length === 1) return text;
+  return parts.map((part, index) => {
+    if (!part) return null;
+    if (index % 2 === 1) {
+      return (
+        <span
+          key={index}
+          style={{ backgroundColor: '#cce5ff', padding: '0 2px', borderRadius: '2px' }}
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
 export default function GenericListPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -134,6 +154,10 @@ export default function GenericListPage() {
   const initialFilter = searchParams.get('filtro') || '';
   const authContext = useContext(AuthContext);
   const user = authContext?.user;
+  const isAdmin = user?.role?.name === 'admin';
+  const isModerator = user?.role?.name === 'moderator';
+  const canEdit = Boolean(user?.role?.name && user.role.name !== 'viewer');
+  const canManage = Boolean(isAdmin || isModerator);
   const basePath = location.pathname.split("/")[1] as 'inventories' | 'checklists';
   const isInventory = basePath === 'inventories';
   //const isChecklist = basePath === 'checklists';
@@ -249,7 +273,7 @@ export default function GenericListPage() {
       const allUsersList = await getInventorySharableUsers(item.id);
       const allGroupsList = await getAllInventoryGroups();
       setAllUsers((allUsersList as { username: string; role?: { name: string } }[])
-        .filter(u => u.role && u.role.name !== 'admin')
+        .filter(u => u.role?.name !== 'admin')
         .map(u => u.username));
       setAllGroups((allGroupsList as { id: number, name: string }[]).map(g => ({ id: g.id, name: g.name })));
       setPermissionsTarget(item);
@@ -267,7 +291,7 @@ export default function GenericListPage() {
       const allUsersList = await getChecklistSharableUsers(item.id);
       const allGroupsList = await getAllChecklistGroups();
       setAllUsers((allUsersList as { username: string; role?: { name: string } }[])
-        .filter(u => u.role && u.role.name !== 'admin')
+        .filter(u => u.role?.name !== 'admin')
         .map(u => u.username));
       setAllGroups((allGroupsList as { id: number, name: string }[]).map(g => ({ id: g.id, name: g.name })));
       setPermissionsTarget(item);
@@ -389,7 +413,7 @@ export default function GenericListPage() {
           </div>
         )}
       </div>
-      {user && user.role.name !== 'viewer' && (
+      {canEdit && (
         <>
           <NewItemModal
             isOpen={isModalOpen}
@@ -450,7 +474,7 @@ export default function GenericListPage() {
                     <p className="text-sm text-gray-500 dark:ext-gray-300 sm:ml-4 text-right sm:text-right w-full sm:w-auto">
                       Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
                     </p>
-                    {(user?.role.name === 'admin' || user?.role.name === 'moderator') && (
+                    {canManage && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -519,40 +543,24 @@ export default function GenericListPage() {
                           };
                         }) => (
                           <li key={item.id}>
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: `${item.quantity}x ${(item.highlighted?.name || item.name)}`.replace(
-                                  /\*\*(.*?)\*\*/g,
-                                  "<span style='background-color: #cce5ff; padding: 0 2px; border-radius: 2px;'>$1</span>"
-                                )
-                              }}
-                            />
+                            <span>
+                              {item.quantity}x {renderHighlightedText(item.highlighted?.name || item.name)}
+                            </span>
                             {item.highlighted?.description && item.highlighted.description.trim() && (
                               <>
                                 {' – '}
-                                <span
-                                  className="text-gray-500"
-                                  dangerouslySetInnerHTML={{
-                                    __html: item.highlighted.description.replace(
-                                      /\*\*(.*?)\*\*/g,
-                                      "<span style='background-color: #cce5ff; padding: 0 2px; border-radius: 2px;'>$1</span>"
-                                    )
-                                  }}
-                                />
+                                <span className="text-gray-500">
+                                  {renderHighlightedText(item.highlighted.description)}
+                                </span>
                               </>
                             )}
                             {item.highlighted?.metadata_text && item.highlighted.metadata_text.length > 0 && (
                               <ul className="ml-4 mt-1 list-disc text-xs text-gray-600 dark:text-gray-700">
                                 {item.highlighted.metadata_text.map((metadata, index) => (
                                   <li key={`${item.id}-meta-${index}`}>
-                                    <span
-                                      dangerouslySetInnerHTML={{
-                                        __html: `${metadata.definition_label}: ${metadata.value_text}`.replace(
-                                          /\*\*(.*?)\*\*/g,
-                                          "<span style='background-color: #cce5ff; padding: 0 2px; border-radius: 2px;'>$1</span>"
-                                        ),
-                                      }}
-                                    />
+                                    <span>
+                                      {metadata.definition_label}: {renderHighlightedText(metadata.value_text)}
+                                    </span>
                                   </li>
                                 ))}
                               </ul>
@@ -604,7 +612,7 @@ export default function GenericListPage() {
             <span className="hidden md:inline">Elimina </span>
           </button>
         )}
-        {user?.role.name !== 'viewer' && (
+        {canEdit && (
           <>
             <button
               onClick={() => setIsModalOpen(true)}
