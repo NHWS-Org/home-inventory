@@ -1,31 +1,36 @@
-import { useState } from "react";
-import GeneralSettings from "./settings/GeneralSettings";
-import UserManagementPage from "./settings/UserManagementPage";
-//import RoleManagementPage from "./settings/RoleManagementPage";
-import GroupManagementPage from "./settings/GroupManagementPage";
-import MetadataDefinitionsPage from "./settings/MetadataDefinitionsPage";
-//import InfoPage from "./settings/InfoPage";
-import BackupManagementPage from "./settings/BackupManagementPage";
-import AuditLogPage from "./settings/AuditLogPage";
-import BarcodeManagementPage from "./settings/BarcodeManagementPage";
+import { useState, lazy, Suspense } from "react";
+import Spinner from "../components/Spinner";
 import { useAuth } from "../useAuth";
+
+const GeneralSettings = lazy(() => import("./settings/GeneralSettings"));
+const UserManagementPage = lazy(() => import("./settings/UserManagementPage"));
+const GroupManagementPage = lazy(() => import("./settings/GroupManagementPage"));
+const MetadataDefinitionsPage = lazy(() => import("./settings/MetadataDefinitionsPage"));
+const BackupManagementPage = lazy(() => import("./settings/BackupManagementPage"));
+const BarcodeManagementPage = lazy(() => import("./settings/BarcodeManagementPage"));
+const AuditLogPage = lazy(() => import("./settings/AuditLogPage"));
+
+interface TabItem {
+  name: string;
+  Component: React.ComponentType;
+  adminOnly?: boolean;
+}
 
 export default function SettingsPage() {
   const { user } = useAuth();
-  const tabs = [
-    { name: "Generale", component: <GeneralSettings /> },
-    { name: "Utenti", component: <UserManagementPage /> },
-    //{ name: "Ruoli", component: <RoleManagementPage /> },
-    { name: "Gruppi", component: <GroupManagementPage /> },
-    { name: "Metadati", component: <MetadataDefinitionsPage /> },
-    { name: "Backup", component: <BackupManagementPage /> },
-    { name: "Barcode", component: <BarcodeManagementPage />, adminOnly: true },
-    { name: "Audit", component: <AuditLogPage /> },
-    //{ name: "Info", component: <InfoPage /> },
-  ].filter((tab) => !('adminOnly' in tab) || user?.role?.name === 'admin');
+  const tabs: TabItem[] = [
+    { name: "Generale", Component: GeneralSettings },
+    { name: "Utenti", Component: UserManagementPage },
+    { name: "Gruppi", Component: GroupManagementPage },
+    { name: "Metadati", Component: MetadataDefinitionsPage },
+    { name: "Backup", Component: BackupManagementPage },
+    { name: "Barcode", Component: BarcodeManagementPage, adminOnly: true },
+    { name: "Audit", Component: AuditLogPage },
+  ].filter((tab) => !tab.adminOnly || user?.role?.name === 'admin');
   const [activeTab, setActiveTab] = useState("Generale");
 
   const currentTab = tabs.find((tab) => tab.name === activeTab);
+  const CurrentComponent = currentTab?.Component;
 
   return (
     <div className="p-4 overflow-x-hidden w-full max-w-full">
@@ -44,7 +49,11 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
-      <div>{currentTab?.component}</div>
+      <div>
+        <Suspense fallback={<Spinner />}>
+          {CurrentComponent && <CurrentComponent />}
+        </Suspense>
+      </div>
     </div>
   );
 }

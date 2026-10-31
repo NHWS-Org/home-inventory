@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@headlessui/react": "^2.2.9",
-    "@tailwindcss/vite": "^4.1.17",
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",
     "axios": "^1.15.0",
@@ -20,18 +19,16 @@
     "react-dom": "^19.2.1",
     "react-icons": "^5.5.0",
     "react-router-dom": "^7.18.2",
-    "react-swipeable": "^7.0.2",
-    "reactflow": "^11.11.4"
+    "react-swipeable": "^7.0.2"
   },
   "overrides": {
     "follow-redirects": "^1.16.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@types/axios": "^0.14.4",
+    "@tailwindcss/vite": "^4.1.17",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@types/react-router-dom": "^5.3.3",
     "@vitejs/plugin-react": "^5.1.2",
     "autoprefixer": "^10.4.22",
     "eslint": "^9.39.1",

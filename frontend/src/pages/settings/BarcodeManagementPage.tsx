@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, lazy, Suspense } from 'react';
 import {
   clearAdminBarcodeCache,
   correctAdminBarcode,
@@ -10,7 +10,7 @@ import {
   type AdminBarcodeDebugResult,
   type AdminBarcodeRecord,
 } from '../../api';
-import BarcodeScanner from '../../components/BarcodeScanner';
+const BarcodeScanner = lazy(() => import('../../components/BarcodeScanner'));
 
 const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code', 'data_matrix'];
 
@@ -225,7 +225,11 @@ export default function BarcodeManagementPage() {
         )}
       </section>
 
-      <BarcodeScanner open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={(value, scannedFormat) => { setCode(value); setFormat(scannedFormat || ''); setDebugResult(null); setScannerOpen(false); }} />
+      {scannerOpen && (
+        <Suspense fallback={null}>
+          <BarcodeScanner open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={(value, scannedFormat) => { setCode(value); setFormat(scannedFormat || ''); setDebugResult(null); setScannerOpen(false); }} />
+        </Suspense>
+      )}
     </section>
   );
 }

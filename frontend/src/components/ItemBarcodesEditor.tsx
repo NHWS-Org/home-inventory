@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { addItemBarcode, deleteItemBarcode } from '../api';
 import { ItemBarcode } from '../types';
-import BarcodeScanner from './BarcodeScanner';
+const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 
 interface Props {
   itemId: number;
@@ -86,14 +86,18 @@ export default function ItemBarcodesEditor({ itemId, barcodes, onChange }: Props
         </button>
       </div>
       {error && <p className="text-red-600 text-sm mt-1">{error}</p>}
-      <BarcodeScanner
-        open={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        onDetected={(code, format) => {
-          setScannerOpen(false);
-          void add(code, format);
-        }}
-      />
+      {scannerOpen && (
+        <Suspense fallback={null}>
+          <BarcodeScanner
+            open={scannerOpen}
+            onClose={() => setScannerOpen(false)}
+            onDetected={(code, format) => {
+              setScannerOpen(false);
+              void add(code, format);
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

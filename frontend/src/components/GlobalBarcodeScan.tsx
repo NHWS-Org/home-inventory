@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Dialog } from '@headlessui/react';
 import {
@@ -12,7 +12,7 @@ import {
   updateItem,
 } from '../api';
 import type { BarcodeLookupResult, BarcodeMatch } from '../types';
-import BarcodeScanner from './BarcodeScanner';
+const BarcodeScanner = lazy(() => import('./BarcodeScanner'));
 import { useAuth } from '../useAuth';
 import { useKeyboardScanner } from '../useKeyboardScanner';
 import { useBottomSheetDrag } from './useBottomSheetDrag';
@@ -270,7 +270,11 @@ export default function GlobalBarcodeScan() {
         📷
       </button>
 
-      <BarcodeScanner open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={(c, f) => void handleCode(c, f)} />
+      {scannerOpen && (
+        <Suspense fallback={null}>
+          <BarcodeScanner open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={(c, f) => void handleCode(c, f)} />
+        </Suspense>
+      )}
 
       <Dialog open={loading || scan !== null || error !== null} onClose={() => !busy && !loading && closeAll()} className="relative z-50">
         <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
