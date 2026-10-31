@@ -26,7 +26,7 @@ BOOK_SOURCE = ("openlibrary", "https://openlibrary.org")
 # Fallback per i libri non presenti su Open Library (es. editoria italiana). La chiave e' opzionale,
 # ma senza chiave la quota giornaliera condivisa di Google e' spesso esaurita (errore, mai cache negativa).
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
-USER_AGENT = "home-inventory/1.0 (https://github.com/napalmz/home-inventory)"
+USER_AGENT = "home-inventory/1.0 (https://github.com/NHWS-Org/home-inventory)"
 HTTP_TIMEOUT_SECONDS = 4
 CACHE_TTL_FOUND = timedelta(days=30)
 CACHE_TTL_NOT_FOUND = timedelta(days=1)

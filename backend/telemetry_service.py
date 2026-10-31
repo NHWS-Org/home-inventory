@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TELEMETRY_URL = "https://home-inventory-telemetry.nhws.workers.dev/ping"
 INSTANCE_ID_KEY = "TELEMETRY_INSTANCE_ID"
 HTTP_TIMEOUT_SECONDS = 5
-USER_AGENT = "home-inventory-telemetry/1.0 (https://github.com/napalmz/home-inventory)"
+USER_AGENT = "home-inventory-telemetry/1.0 (https://github.com/NHWS-Org/home-inventory)"
 
 
 def telemetry_enabled() -> bool:

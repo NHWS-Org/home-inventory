@@ -1,8 +1,9 @@
 # Usa un'immagine di base con Python
 FROM python:3.14.4-slim-bookworm
 
-LABEL org.opencontainers.image.source="https://github.com/napalmz/home-inventory" \
-      org.opencontainers.image.description="Home Inventory backend: FastAPI API for the shared household inventory app."
+LABEL org.opencontainers.image.source="https://github.com/NHWS-Org/home-inventory" \
+      org.opencontainers.image.description="Home Inventory backend: FastAPI API for the shared household inventory app." \
+      org.opencontainers.image.maintainer="napalmz"
 
 # Imposta le variabili d'ambiente
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -51,6 +52,3 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 
 HEALTHCHECK --interval=60s --timeout=5s --retries=3 \
   CMD curl -fs http://localhost:8000/system/health-check || exit 1
-
-LABEL org.opencontainers.image.source="https://github.com/NHWS-Org/home-inventory"
-LABEL org.opencontainers.image.maintainer="napalmz"

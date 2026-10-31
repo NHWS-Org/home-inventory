@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { version as frontendVersion } from "../../package.json";
 import { AboutStats, getAboutStats, getApiVersion } from "../api";
 
-const REPO_URL = "https://github.com/napalmz/home-inventory";
+const REPO_URL = "https://github.com/NHWS-Org/home-inventory";
 
 function countryName(code: string): string {
   try {
