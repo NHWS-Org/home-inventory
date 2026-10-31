@@ -6,13 +6,25 @@ import {
   getUsers,
   getSetting,
   setSetting,
+  getInventories,
+  getChecklists,
 } from "../../api";
-import { User } from "../../types";
-import { InventoryVersion, ItemVersion } from "../../types";
+import { User, InventoryVersion, ItemVersion } from "../../types";
+import {
+  parseDiffEntries,
+  getInventoryTypeIcon,
+  getInventoryPath,
+} from "../../utils/auditDiff";
 
 type OperationFilter = "" | "CREATE" | "UPDATE" | "DELETE";
 type TargetFilter = "ALL" | "ITEMS" | "INVENTORIES";
 type UserScopeFilter = "" | "active" | "none" | "deleted";
+
+interface InventoryOption {
+  id: number;
+  name: string;
+  type: "INVENTORY" | "CHECKLIST";
+}
 
 function toLocalInputValue(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -22,6 +34,8 @@ function toLocalInputValue(date: Date): string {
 export default function AuditLogPage() {
   const [target, setTarget] = useState<TargetFilter>("ALL");
   const [operation, setOperation] = useState<OperationFilter>("");
+  const [selectedInventoryId, setSelectedInventoryId] = useState("");
+  const [inventories, setInventories] = useState<InventoryOption[]>([]);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [userScope, setUserScope] = useState<UserScopeFilter>("");
   const [users, setUsers] = useState<User[]>([]);
@@ -47,64 +61,6 @@ export default function AuditLogPage() {
     [inventoryLogs]
   );
 
-  const getInventoryTypeIcon = (inventoryType?: string | null) =>
-    inventoryType === "CHECKLIST" ? "📝" : "📦";
-
-  const getInventoryPath = (inventoryType: string | null | undefined, inventoryId: number) => {
-    if (inventoryType === "CHECKLIST") return `/checklists/${inventoryId}`;
-    if (inventoryType === "INVENTORY") return `/inventories/${inventoryId}`;
-    return null;
-  };
-
-  const isChecklistChecked = (value: unknown) => {
-    const numeric = Number(value);
-    return !Number.isNaN(numeric) && numeric > 0;
-  };
-
-  const renderChecklistStatus = (value: unknown) => (
-    <span
-      className="inline-flex h-6 w-6 items-center justify-center rounded border border-gray-400 bg-gray-100 text-gray-700 dark:border-gray-500 dark:bg-gray-700 dark:text-gray-200"
-      style={{
-        fontSize: "16px",
-        lineHeight: "1",
-        fontWeight: "600",
-      }}
-      aria-hidden="true"
-      title={isChecklistChecked(value) ? "check" : "uncheck"}
-    >
-      {isChecklistChecked(value) ? "✓" : ""}
-    </span>
-  );
-
-  const fieldLabel = (field: string) => {
-    const labels: Record<string, string> = {
-      name: "Nome",
-      description: "Descrizione",
-      quantity: "Quantita",
-      inventory_id: "Inventario",
-      owner_id: "Proprietario",
-      type: "Tipo",
-    };
-    return labels[field] || field;
-  };
-
-  const formatValue = (value: unknown) => {
-    if (value === null || value === undefined || value === "") return "vuoto";
-    if (typeof value === "boolean") return value ? "si" : "no";
-    return String(value);
-  };
-
-  const formatTypedMetadataValue = (typed: unknown): string => {
-    if (typed === null || typed === undefined) return "vuoto";
-    if (typeof typed !== "object") return String(typed);
-    const t = typed as Record<string, unknown>;
-    if (t.value_text !== undefined && t.value_text !== null) return String(t.value_text);
-    if (t.value_number !== undefined && t.value_number !== null) return String(t.value_number);
-    if (t.value_boolean !== undefined && t.value_boolean !== null) return t.value_boolean ? "sì" : "no";
-    if (t.value_date !== undefined && t.value_date !== null) return String(t.value_date);
-    return "vuoto";
-  };
-
   const renderDiff = (log: ItemVersion | InventoryVersion) => {
     if (log.operation === "CREATE") {
       return <span className="text-green-700 dark:text-green-400">Record creato</span>;
@@ -116,52 +72,26 @@ export default function AuditLogPage() {
       return <span className="text-gray-500">Nessuna modifica dettagliata</span>;
     }
 
-    try {
-      const parsed = JSON.parse(log.diff) as Record<string, unknown>;
-      const entries = Object.entries(parsed);
-      if (entries.length === 0) {
-        return <span className="text-gray-500">Nessuna modifica rilevata</span>;
-      }
+    const isChecklist =
+      "inventory_type" in log
+        ? log.inventory_type === "CHECKLIST"
+        : "type" in log && log.type === "CHECKLIST";
+    const entries = parseDiffEntries(log.diff, isChecklist);
 
-      const rows: React.ReactNode[] = [];
-      for (const [field, values] of entries) {
-        if (field === "metadata" && Array.isArray(values)) {
-          for (const change of values) {
-            const c = change as Record<string, unknown>;
-            const label = (c.definition_label as string | undefined) ?? (c.definition_key as string | undefined) ?? "Metadato";
-            rows.push(
-              <div key={`meta-${String(c.definition_id)}`}>
-                <span className="font-semibold">{label}:</span>{" "}
-                <span>{`${formatTypedMetadataValue(c.from)} -> ${formatTypedMetadataValue(c.to)}`}</span>
-              </div>
-            );
-          }
-        } else {
-          const v = values as { from: unknown; to: unknown } | null | undefined;
-          rows.push(
-            <div key={field}>
-              {field === "quantity" && "inventory_type" in log && log.inventory_type === "CHECKLIST" ? (
-                <>
-                  <span className="font-semibold">Status:</span>{" "}
-                  {renderChecklistStatus(v?.from)}
-                  <span>{" -> "}</span>
-                  {renderChecklistStatus(v?.to)}
-                </>
-              ) : (
-                <>
-                  <span className="font-semibold">{fieldLabel(field)}:</span>{" "}
-                  <span>{`${formatValue(v?.from)} -> ${formatValue(v?.to)}`}</span>
-                </>
-              )}
-            </div>
-          );
-        }
-      }
-
-      return <div className="space-y-1">{rows}</div>;
-    } catch {
-      return <span className="text-gray-500">Formato diff non valido</span>;
+    if (entries.length === 0) {
+      return <span className="text-gray-500">Nessuna modifica rilevata</span>;
     }
+
+    return (
+      <div className="space-y-1">
+        {entries.map((entry) => (
+          <div key={entry.field}>
+            <span className="font-semibold">{entry.label}:</span>{" "}
+            <span>{entry.formattedChange}</span>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   const loadLogs = useCallback(async () => {
@@ -169,9 +99,11 @@ export default function AuditLogPage() {
     setMessage("");
     try {
       const userId = selectedUserId ? Number(selectedUserId) : undefined;
+      const invId = selectedInventoryId ? Number(selectedInventoryId) : undefined;
+
       if (target === "ALL" || target === "ITEMS") {
         const logs = await getItemAuditLogs(
-          undefined,
+          invId,
           userId,
           userScope || undefined,
           operation || undefined,
@@ -185,6 +117,7 @@ export default function AuditLogPage() {
 
       if (target === "ALL" || target === "INVENTORIES") {
         const logs = await getInventoryAuditLogs(
+          invId,
           userId,
           userScope || undefined,
           operation || undefined,
@@ -201,7 +134,7 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [target, selectedUserId, userScope, operation, fromDate, toDate]);
+  }, [target, selectedInventoryId, selectedUserId, userScope, operation, fromDate, toDate]);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -209,6 +142,22 @@ export default function AuditLogPage() {
       setUsers(list);
     } catch {
       setUsers([]);
+    }
+  }, []);
+
+  const loadInventories = useCallback(async () => {
+    try {
+      const [invList, chkList] = await Promise.all([
+        getInventories(),
+        getChecklists(),
+      ]);
+      const combined: InventoryOption[] = [
+        ...invList.map((i) => ({ id: i.id, name: i.name, type: "INVENTORY" as const })),
+        ...chkList.map((c) => ({ id: c.id, name: c.name, type: "CHECKLIST" as const })),
+      ].sort((a, b) => a.name.localeCompare(b.name));
+      setInventories(combined);
+    } catch {
+      setInventories([]);
     }
   }, []);
 
@@ -223,9 +172,10 @@ export default function AuditLogPage() {
 
   useEffect(() => {
     loadUsers();
+    loadInventories();
     loadRetention();
     loadLogs();
-  }, [loadUsers, loadRetention, loadLogs]);
+  }, [loadUsers, loadInventories, loadRetention, loadLogs]);
 
   const onChangeSelectedUser = (value: string) => {
     setSelectedUserId(value);
@@ -307,7 +257,7 @@ export default function AuditLogPage() {
       <div className="border rounded p-4 space-y-3">
         <h3 className="font-semibold">Audit logs</h3>
 
-        <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex flex-wrap gap-2">
           <select
             value={target}
             onChange={(e) => setTarget(e.target.value as TargetFilter)}
@@ -316,6 +266,19 @@ export default function AuditLogPage() {
             <option value="ALL">Tutti</option>
             <option value="ITEMS">Solo item</option>
             <option value="INVENTORIES">Solo inventari/liste</option>
+          </select>
+
+          <select
+            value={selectedInventoryId}
+            onChange={(e) => setSelectedInventoryId(e.target.value)}
+            className="border rounded px-2 py-1"
+          >
+            <option value="">Inventario/Lista: tutti</option>
+            {inventories.map((inv) => (
+              <option key={`${inv.type}-${inv.id}`} value={String(inv.id)}>
+                {inv.type === "CHECKLIST" ? "📝" : "📦"} {inv.name} (#{inv.id})
+              </option>
+            ))}
           </select>
 
           <select

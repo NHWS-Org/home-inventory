@@ -832,6 +832,7 @@ export async function getItemAuditLogs(
 }
 
 export async function getInventoryAuditLogs(
+  inventoryId?: number,
   userId?: number,
   userScope?: "active" | "none" | "deleted",
   operation?: string,
@@ -841,6 +842,7 @@ export async function getInventoryAuditLogs(
 ): Promise<InventoryVersion[]> {
   const response = await api.get('/audit/logs/inventories', {
     params: {
+      ...(inventoryId && { inventory_id: inventoryId }),
       ...(userId && { user_id: userId }),
       ...(userScope && { user_scope: userScope }),
       ...(operation && { operation }),

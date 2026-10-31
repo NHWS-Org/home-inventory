@@ -17,6 +17,7 @@ import {
   deleteChecklistHistoryVersions,
 } from '../api';
 import { AuthContext } from '../auth-context-instance';
+import { parseDiffEntries } from '../utils/auditDiff';
 
 interface HistoryModalProps {
   isOpen: boolean;
@@ -57,55 +58,6 @@ export function HistoryModal({
   const [selectedVersionNums, setSelectedVersionNums] = useState<number[]>([]);
   const sheetDrag = useBottomSheetDrag(onClose);
 
-  const fieldLabel = (field: string) => {
-    const labels: Record<string, string> = {
-      name: 'Nome',
-      description: 'Descrizione',
-      quantity: 'Quantita',
-      inventory_id: 'Inventario',
-      owner_id: 'Proprietario',
-      type: 'Tipo',
-    };
-    return labels[field] || field;
-  };
-
-  const formatValue = (value: unknown) => {
-    if (value === null || value === undefined || value === '') return 'vuoto';
-    if (typeof value === 'boolean') return value ? 'si' : 'no';
-    return String(value);
-  };
-
-  const formatTypedMetadataValue = (typed: unknown): string => {
-    if (typed === null || typed === undefined) return 'vuoto';
-    if (typeof typed !== 'object') return String(typed);
-    const t = typed as Record<string, unknown>;
-    if (t.value_text !== undefined && t.value_text !== null) return String(t.value_text);
-    if (t.value_number !== undefined && t.value_number !== null) return String(t.value_number);
-    if (t.value_boolean !== undefined && t.value_boolean !== null) return t.value_boolean ? 'sì' : 'no';
-    if (t.value_date !== undefined && t.value_date !== null) return String(t.value_date);
-    return 'vuoto';
-  };
-
-  const formatChecklistState = (value: unknown) => {
-    const numeric = Number(value);
-    return !Number.isNaN(numeric) && numeric > 0;
-  };
-
-  const renderChecklistStatus = (value: unknown) => (
-    <span
-      className="inline-flex h-6 w-6 items-center justify-center rounded border border-gray-400 bg-gray-100 text-gray-700 dark:border-gray-500 dark:bg-gray-700 dark:text-gray-200"
-      style={{
-        fontSize: "16px",
-        lineHeight: "1",
-        fontWeight: "600",
-      }}
-      aria-hidden="true"
-      title={formatChecklistState(value) ? 'check' : 'uncheck'}
-    >
-      {formatChecklistState(value) ? '✓' : ''}
-    </span>
-  );
-
   const describeVersion = (version: ItemVersion | InventoryVersion): { label: string; content: ReactNode }[] => {
     if (version.operation === 'CREATE') {
       return [{ label: 'Azione', content: 'Record creato' }];
@@ -118,52 +70,20 @@ export function HistoryModal({
       return [{ label: 'Modifiche', content: 'Nessuna modifica dettagliata disponibile' }];
     }
 
-    try {
-      const parsed = JSON.parse(version.diff) as Record<string, unknown>;
-      const entries = Object.entries(parsed);
-      if (entries.length === 0) {
-        return [{ label: 'Modifiche', content: 'Nessuna modifica rilevata' }];
-      }
+    const isChecklistQuantity =
+      version.operation === 'UPDATE' &&
+      entityType === 'item' &&
+      itemContainerType === 'CHECKLIST';
 
-      const isChecklistQuantity =
-        version.operation === 'UPDATE' &&
-        entityType === 'item' &&
-        itemContainerType === 'CHECKLIST';
-
-      const result: { label: string; content: ReactNode }[] = [];
-
-      for (const [field, values] of entries) {
-        if (field === 'metadata' && Array.isArray(values)) {
-          for (const change of values) {
-            const c = change as Record<string, unknown>;
-            const label = (c.definition_label as string | undefined) ?? (c.definition_key as string | undefined) ?? 'Metadato';
-            result.push({
-              label,
-              content: `${formatTypedMetadataValue(c.from)} -> ${formatTypedMetadataValue(c.to)}`,
-            });
-          }
-        } else {
-          const v = values as { from: unknown; to: unknown } | null | undefined;
-          result.push({
-            label: field === 'quantity' && isChecklistQuantity ? 'Status' : fieldLabel(field),
-            content:
-              field === 'quantity' && isChecklistQuantity
-                ? (
-                  <>
-                    {renderChecklistStatus(v?.from)}
-                    <span>{' -> '}</span>
-                    {renderChecklistStatus(v?.to)}
-                  </>
-                )
-                : `${formatValue(v?.from)} -> ${formatValue(v?.to)}`,
-          });
-        }
-      }
-
-      return result;
-    } catch {
-      return [{ label: 'Modifiche', content: 'Formato modifiche non leggibile' }];
+    const entries = parseDiffEntries(version.diff, isChecklistQuantity);
+    if (entries.length === 0) {
+      return [{ label: 'Modifiche', content: 'Nessuna modifica rilevata' }];
     }
+
+    return entries.map((entry) => ({
+      label: entry.label,
+      content: entry.formattedChange,
+    }));
   };
 
   const fetchHistory = useCallback(async () => {

@@ -1,5 +1,5 @@
 import { useParams, useLocation, Link } from "react-router-dom";
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import {
   getInventoryById, getInventoryItems,
   getChecklistById, getChecklistItems,
@@ -882,7 +882,7 @@ useEffect(() => {
         }
       };
 
-    const applyTemplateToList = async (templateId: number) => {
+    const applyTemplateToList = useCallback(async (templateId: number) => {
       try {
         const template: FilterTemplate = await getFilterTemplate(templateId);
         const root = template.criteria as Record<string, unknown>;
@@ -974,7 +974,7 @@ useEffect(() => {
       } catch {
         alert('Errore durante l\'applicazione del template.');
       }
-    };
+    }, [id]);
 
   useEffect(() => {
     if (selectedTemplateId === '' || !inventory) {
@@ -982,7 +982,7 @@ useEffect(() => {
     }
 
     void applyTemplateToList(selectedTemplateId);
-  }, [selectedTemplateId, inventory?.id, items]);
+  }, [selectedTemplateId, inventory, items, applyTemplateToList]);
 
   const addItemSheetDrag = useBottomSheetDrag(() => setisInsertMode(false));
   const editItemSheetDrag = useBottomSheetDrag(() => setItemBeingEdited(null));
