@@ -38,7 +38,7 @@ import {
 } from "./types";
 
 function getApiBaseUrl() {
-  return window.APP_CONFIG?.VITE_BACKEND_BASE_URL || '/api';
+  return '/api';
 }
 
 const api = axios.create({
@@ -183,7 +183,7 @@ export const updateUser = async (
     password?: string;
     is_blocked: boolean;
     role_id: number;
-}) => {
+  }) => {
   const response = await api.put(`/user/users/${id}`, data);
   return response.data;
 };
@@ -611,7 +611,7 @@ export async function downloadBackup(filename: string): Promise<void> {
   const response = await api.get(`/backup/download/${encodeURIComponent(filename)}`, {
     responseType: 'blob'
   });
-  
+
   const blob = new Blob([response.data as Blob]);
   const url = window.URL.createObjectURL(blob);
 
@@ -621,7 +621,7 @@ export async function downloadBackup(filename: string): Promise<void> {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  
+
   window.URL.revokeObjectURL(url);
 }
 
