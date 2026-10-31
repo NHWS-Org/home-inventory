@@ -37,28 +37,43 @@ import {
   FilterTemplateScopePreview,
 } from "./types";
 
-let api: ReturnType<typeof axios.create>;
-
 function getApiBaseUrl() {
-  //console.error("VITE_BACKEND_BASE_URL:", window.APP_CONFIG?.VITE_BACKEND_BASE_URL);
-  //return window.APP_CONFIG?.VITE_BACKEND_BASE_URL ?? 'http://localhost:8001';
-  return '/api';
+  return window.APP_CONFIG?.VITE_BACKEND_BASE_URL || '/api';
 }
 
-export function createApiInstance() {
-  api = axios.create({
-    baseURL: getApiBaseUrl(),
-    withCredentials: false,
-  });
+const api = axios.create({
+  baseURL: getApiBaseUrl(),
+  withCredentials: false,
+});
 
-  api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem('access_token');
+      if (
+        typeof window !== 'undefined' &&
+        window.location.pathname !== '/login' &&
+        window.location.pathname !== '/register'
+      ) {
+        window.location.href = '/login';
+      }
     }
-    return config;
-  });
+    return Promise.reject(error);
+  }
+);
+
+export function createApiInstance() {
+  api.defaults.baseURL = getApiBaseUrl();
 }
 
 export { api };

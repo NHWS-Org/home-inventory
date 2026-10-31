@@ -9,12 +9,13 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <Spinner />;
+  }
+
   if (user === null) {
-    const hasToken = Boolean(localStorage.getItem("access_token"));
-    if (hasToken) {
-      return <Spinner />;
-    }
     return <Navigate to="/login" replace />;
   }
 
