@@ -29,12 +29,14 @@ export default function SettingsPage() {
 
   return (
     <div className="p-4 overflow-x-hidden w-full max-w-full">
-      <div className="sticky top-0 z-10 bg-white dark:bg-gray-900 flex flex-wrap gap-2 border-b mb-4">
+      <div className="sticky top-0 z-10 bg-white dark:bg-gray-900 flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 mb-4">
         {tabs.map((tab) => (
           <button
             key={tab.name}
-            className={`px-4 py-2 ${
-              tab.name === activeTab ? "border-b-2 border-blue-500 font-semibold" : ""
+            className={`px-4 py-2 transition-colors ${
+              tab.name === activeTab
+                ? "border-b-2 border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400 font-semibold"
+                : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
             }`}
             onClick={() => setActiveTab(tab.name)}
           >

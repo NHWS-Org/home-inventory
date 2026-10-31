@@ -446,12 +446,12 @@ export default function BackupManagementPage() {
           type="file"
           accept=".sql"
           onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
-          className="border rounded p-1"
+          className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1"
         />
         <button
           onClick={uploadBackupLocal}
           disabled={loading || !selectedFile}
-          className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700"
+          className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
         >
           Carica Backup
           {loading && <span className="ml-2 animate-spin">⏳</span>}
@@ -460,13 +460,13 @@ export default function BackupManagementPage() {
       <button
         onClick={createBackupLocal}
         disabled={loading}
-        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
       >
         Crea Backup
         {loading && <span className="ml-2 animate-spin">⏳</span>}
       </button>
 
-      <details className="border rounded p-3 bg-gray-50 dark:bg-gray-800" open={false}>
+      <details className="border border-gray-200 dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-800" open={false}>
         <summary className="cursor-pointer font-medium select-none">
           Mappa compatibilita versioni DB
         </summary>
@@ -550,7 +550,7 @@ export default function BackupManagementPage() {
             onKeyDown={(e) => {
               if (e.key === "Escape") setFilterText("");
             }}
-            className="border rounded p-1 w-full sm:w-64"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1 w-full sm:w-64"
           />
         </div>
         <div>
@@ -558,7 +558,7 @@ export default function BackupManagementPage() {
           <select
             value={backupTypeFilter}
             onChange={(e) => setBackupTypeFilter(e.target.value as "all" | "manual" | "auto" | "uploaded")}
-            className="border rounded px-2 py-1"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded px-2 py-1"
           >
             <option value="all">Tutti</option>
             <option value="manual">Manuali</option>
@@ -571,7 +571,7 @@ export default function BackupManagementPage() {
           <select
             value={sortField}
             onChange={(e) => setSortField(e.target.value as "filename" | "modified" | "size")}
-            className="border rounded px-2 py-1"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded px-2 py-1"
           >
             <option value="modified">Data</option>
             <option value="filename">Nome</option>
@@ -579,7 +579,7 @@ export default function BackupManagementPage() {
           </select>
           <button
             onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
-            className="ml-2 px-2 py-1 border rounded"
+            className="ml-2 px-2 py-1 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded"
           >
             {sortDirection === "asc" ? "↑" : "↓"}
           </button>
@@ -622,7 +622,11 @@ export default function BackupManagementPage() {
             return (
               <li
                 key={backup.filename}
-                className={`flex min-w-0 flex-col overflow-hidden border p-2 rounded sm:flex-row sm:justify-between sm:items-center ${isAuto ? "bg-yellow-50 border-yellow-400 dark:bg-yellow-500 dark:border-yellow-700 dark:text-black" : ""}`}
+                className={`flex min-w-0 flex-col overflow-hidden border p-2 rounded sm:flex-row sm:justify-between sm:items-center ${
+                  isAuto
+                    ? "bg-yellow-50 border-yellow-400 dark:bg-amber-950/30 dark:border-amber-700/60 dark:text-gray-100"
+                    : "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-100"
+                }`}
               >
                 <div className="flex min-w-0 w-full items-start gap-3 sm:flex-1">
                   <input
@@ -633,11 +637,11 @@ export default function BackupManagementPage() {
                     title={`Seleziona ${backup.filename}`}
                   />
                   <div className="min-w-0 flex-1">
-                  <div className="break-all">{backup.filename}
-                    {isAuto && <span className="inline-block text-xs font-semibold text-yellow-700 bg-yellow-200 rounded px-2 py-0.5 ml-2">Automatico</span>}
-                    {isUploaded && <span className="inline-block text-xs font-semibold text-blue-700 bg-blue-100 rounded px-2 py-0.5 ml-2">Caricato</span>}
+                  <div className="break-all font-medium">{backup.filename}
+                    {isAuto && <span className="inline-block text-xs font-semibold text-yellow-800 bg-yellow-200 dark:bg-amber-900/50 dark:text-amber-200 rounded px-2 py-0.5 ml-2">Automatico</span>}
+                    {isUploaded && <span className="inline-block text-xs font-semibold text-blue-800 bg-blue-100 dark:bg-blue-900/50 dark:text-blue-200 rounded px-2 py-0.5 ml-2">Caricato</span>}
                   </div>
-                  <div className="text-sm text-gray-600">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
                     {(backup.size / 1024).toFixed(2)} KB - {new Date(backup.modified).toLocaleString()}
                   </div>
                   <div className="mt-1 space-y-1 break-words text-xs text-gray-600 dark:text-gray-300">
