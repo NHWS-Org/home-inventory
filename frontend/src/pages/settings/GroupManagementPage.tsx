@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAllGroups, createGroup, updateGroup, deleteGroup, getAllRoles, getUsers, addUserToGroup, removeUserFromGroup } from "../../api";
+import { useBottomSheetDrag } from "../../components/useBottomSheetDrag";
 
 type Group = {
   id: number;
@@ -88,6 +89,9 @@ export default function GroupManagementPage() {
     setIsCreateModalOpen(false);
     setSelectedGroup(null);
   };
+  const createSheetDrag = useBottomSheetDrag(closeAllModals);
+  const editSheetDrag = useBottomSheetDrag(() => setSelectedGroup(null));
+  const usersSheetDrag = useBottomSheetDrag(() => setIsUserModalOpen(false));
 
   return (
     <div className="space-y-4 overflow-x-auto px-2 sm:px-4">
@@ -185,8 +189,9 @@ export default function GroupManagementPage() {
         </button>
       </div>
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="bg-white dark:bg-gray-900 p-6 rounded shadow-md w-full max-w-md space-y-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4">
+          <div style={{ transform: `translateY(${createSheetDrag.offset}px)`, transition: createSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-md sm:rounded-xl sm:p-6 sm:pb-6">
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...createSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
             <h3 className="text-lg font-semibold">Crea nuovo gruppo</h3>
             <input
               type="text"
@@ -231,8 +236,9 @@ export default function GroupManagementPage() {
       )}
       {selectedGroup && !isUserModalOpen && (
         <>
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-            <div className="bg-white dark:bg-gray-900 p-6 rounded shadow-md w-full max-w-md space-y-4">
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4">
+            <div style={{ transform: `translateY(${editSheetDrag.offset}px)`, transition: editSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-md sm:rounded-xl sm:p-6 sm:pb-6">
+              <button type="button" aria-label="Chiudi o trascina verso il basso" {...editSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
               <h3 className="text-lg font-semibold">Modifica gruppo</h3>
               <input
                 type="text"
@@ -279,8 +285,9 @@ export default function GroupManagementPage() {
         </>
       )}
       {isUserModalOpen && selectedGroup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="bg-white dark:bg-gray-900 p-6 rounded shadow-md w-full max-w-md space-y-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4">
+          <div style={{ transform: `translateY(${usersSheetDrag.offset}px)`, transition: usersSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-md sm:rounded-xl sm:p-6 sm:pb-6">
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...usersSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
             <h3 className="text-lg font-semibold">Utenti associati a {selectedGroup.name}</h3>
             <ul className="space-y-1 max-h-40 overflow-y-auto border rounded p-2 text-sm">
               {selectedGroup.users.map(uid => {

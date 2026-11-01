@@ -4,8 +4,8 @@ set -euo pipefail  # Interrompe l'esecuzione in caso di errore
 
 usage() {
   echo "Uso: $0 [release|dev]"
-  echo "  release (default): tagga backend/frontend con latest e con numero versione"
-  echo "  dev:               tagga backend/frontend con dev e con numero-versione-dev"
+  echo "  release (default): pubblica su Docker Hub e GHCR con latest e numero versione"
+  echo "  dev:               pubblica su Docker Hub e GHCR con dev e numero-versione-dev"
 }
 
 CHANNEL="${1:-release}"
@@ -40,21 +40,33 @@ PLATFORMS="linux/amd64,linux/arm64"
 # Variabili per i tag
 BACKEND_TAG_BASE="napalmzrpi/home-inventory-backend"
 FRONTEND_TAG_BASE="napalmzrpi/home-inventory-frontend"
+BACKEND_GHCR_TAG_BASE="ghcr.io/nhws-org/home-inventory-backend"
+FRONTEND_GHCR_TAG_BASE="ghcr.io/nhws-org/home-inventory-frontend"
 
 if [[ "$CHANNEL" == "release" ]]; then
   BACKEND_TAG_VERSION="$BACKEND_TAG_BASE:$BACKEND_VERSION"
   BACKEND_TAG_CHANNEL="$BACKEND_TAG_BASE:latest"
+  BACKEND_GHCR_TAG_VERSION="$BACKEND_GHCR_TAG_BASE:$BACKEND_VERSION"
+  BACKEND_GHCR_TAG_CHANNEL="$BACKEND_GHCR_TAG_BASE:latest"
   FRONTEND_TAG_VERSION="$FRONTEND_TAG_BASE:$FRONTEND_VERSION"
   FRONTEND_TAG_CHANNEL="$FRONTEND_TAG_BASE:latest"
+  FRONTEND_GHCR_TAG_VERSION="$FRONTEND_GHCR_TAG_BASE:$FRONTEND_VERSION"
+  FRONTEND_GHCR_TAG_CHANNEL="$FRONTEND_GHCR_TAG_BASE:latest"
 else
   BACKEND_TAG_VERSION="$BACKEND_TAG_BASE:${BACKEND_VERSION}-dev"
   BACKEND_TAG_CHANNEL="$BACKEND_TAG_BASE:dev"
+  BACKEND_GHCR_TAG_VERSION="$BACKEND_GHCR_TAG_BASE:${BACKEND_VERSION}-dev"
+  BACKEND_GHCR_TAG_CHANNEL="$BACKEND_GHCR_TAG_BASE:dev"
   FRONTEND_TAG_VERSION="$FRONTEND_TAG_BASE:${FRONTEND_VERSION}-dev"
   FRONTEND_TAG_CHANNEL="$FRONTEND_TAG_BASE:dev"
+  FRONTEND_GHCR_TAG_VERSION="$FRONTEND_GHCR_TAG_BASE:${FRONTEND_VERSION}-dev"
+  FRONTEND_GHCR_TAG_CHANNEL="$FRONTEND_GHCR_TAG_BASE:dev"
 fi
 
-echo "Tag backend: $BACKEND_TAG_VERSION e $BACKEND_TAG_CHANNEL"
-echo "Tag frontend: $FRONTEND_TAG_VERSION e $FRONTEND_TAG_CHANNEL"
+echo "Tag backend:"
+printf '  - %s\n' "$BACKEND_TAG_VERSION" "$BACKEND_TAG_CHANNEL" "$BACKEND_GHCR_TAG_VERSION" "$BACKEND_GHCR_TAG_CHANNEL"
+echo "Tag frontend:"
+printf '  - %s\n' "$FRONTEND_TAG_VERSION" "$FRONTEND_TAG_CHANNEL" "$FRONTEND_GHCR_TAG_VERSION" "$FRONTEND_GHCR_TAG_CHANNEL"
 
 # Funzione per chiedere conferma
 ask_confirmation() {
@@ -74,9 +86,11 @@ ask_confirmation() {
 if ask_confirmation "Vuoi costruire l'immagine per Backend?"; then
   echo "Costruzione dell'immagine per Backend..."
   cd backend || { echo "Directory backend non trovata"; exit 1; }
-  docker buildx build --platform $PLATFORMS --build-arg BACKEND_VERSION=$BACKEND_VERSION \
+  docker buildx build --platform $PLATFORMS --build-arg BACKEND_VERSION=$BACKEND_VERSION --build-arg IMAGE_CHANNEL=$CHANNEL \
     -t $BACKEND_TAG_VERSION \
     -t $BACKEND_TAG_CHANNEL \
+    -t $BACKEND_GHCR_TAG_VERSION \
+    -t $BACKEND_GHCR_TAG_CHANNEL \
     -f Dockerfile . --push
   BUILD_SERVER=true
   cd ../ || { echo "Directory principale non trovata"; exit 1; }
@@ -91,6 +105,8 @@ if ask_confirmation "Vuoi costruire l'immagine per Frontend?"; then
   docker buildx build --platform $PLATFORMS --build-arg FRONTEND_VERSION=$FRONTEND_VERSION \
     -t $FRONTEND_TAG_VERSION \
     -t $FRONTEND_TAG_CHANNEL \
+    -t $FRONTEND_GHCR_TAG_VERSION \
+    -t $FRONTEND_GHCR_TAG_CHANNEL \
     -f Dockerfile . --push
   BUILD_AGENT=true
   cd ../ || { echo "Directory principale non trovata"; exit 1; }

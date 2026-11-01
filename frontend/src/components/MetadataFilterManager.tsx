@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog } from '@headlessui/react';
+import { useBottomSheetDrag } from './useBottomSheetDrag';
 
 import {
   createFilterTemplate,
@@ -197,12 +198,18 @@ export default function MetadataFilterManager({
   definitions,
   allDefinitions,
   onTemplatesChanged,
+  triggerLabel,
+  triggerClassName = '',
+  onDialogClose,
 }: {
   inventoryId: number;
   currentContainerType: 'INVENTORY' | 'CHECKLIST';
   definitions: MetadataDefinition[];
   allDefinitions?: MetadataDefinition[];
   onTemplatesChanged?: (templates: FilterTemplateListItem[]) => void;
+  triggerLabel?: string;
+  triggerClassName?: string;
+  onDialogClose?: () => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [templates, setTemplates] = useState<FilterTemplateListItem[]>([]);
@@ -218,6 +225,7 @@ export default function MetadataFilterManager({
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState<'success' | 'error' | ''>('');
   const timerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const dialogPanelRef = useRef<HTMLDivElement>(null);
 
   const allDefs = allDefinitions ?? definitions;
   const defsByKind = useMemo(() => ({
@@ -259,7 +267,14 @@ export default function MetadataFilterManager({
   function closeAndReset() {
     setIsOpen(false);
     resetCreate();
+    onDialogClose?.();
   }
+
+  const sheetDrag = useBottomSheetDrag(closeAndReset);
+
+  useEffect(() => {
+    if (isOpen && dialogPanelRef.current) dialogPanelRef.current.scrollTop = 0;
+  }, [isOpen]);
 
   useEffect(() => {
     const load = async () => {
@@ -396,26 +411,41 @@ export default function MetadataFilterManager({
   return (
     <>
       <button
-        onClick={() => {
+        onClick={(event) => {
+          // The mobile trigger is inside the expandable actions menu. Keep that
+          // menu mounted while the dialog opens so its state is not discarded.
+          event.stopPropagation();
           resetCreate();
           setIsOpen(true);
         }}
-        className="py-2 px-4 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700"
+        className={`py-2 px-4 bg-indigo-600 text-white rounded-full shadow-lg hover:bg-indigo-700 ${triggerClassName}`}
       >
-        <span className="inline md:hidden">🧩</span>
-        <span className="hidden md:inline">Filtri metadata</span>
+        {triggerLabel ?? <>
+          <span className="inline md:hidden">🧩</span>
+          <span className="hidden md:inline">Filtri metadata</span>
+        </>}
       </button>
 
       <Dialog open={isOpen} onClose={closeAndReset} className="relative z-50">
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white dark:bg-gray-900 dark:text-white p-6 rounded w-full max-w-6xl space-y-4 max-h-[92vh] overflow-hidden">
-            <Dialog.Title className="text-lg font-semibold">
-              {editingTemplateId ? 'Modifica template filtri metadati' : 'Builder filtri metadati'}
-            </Dialog.Title>
+        <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+          <Dialog.Panel
+            ref={dialogPanelRef}
+            style={{ transform: `translateY(${sheetDrag.offset}px)`, transition: sheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }}
+            className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-white sm:max-w-6xl sm:rounded-xl sm:p-6 sm:pb-6 xl:overflow-hidden"
+          >
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...sheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden">
+              <span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
+            </button>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <Dialog.Title className="text-lg font-semibold">
+                {editingTemplateId ? 'Modifica template filtri metadati' : 'Builder filtri metadati'}
+              </Dialog.Title>
+              <button type="button" onClick={closeAndReset} aria-label="Chiudi filtri metadati" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gray-100 text-3xl leading-none text-gray-600 hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">×</button>
+            </div>
 
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] h-[78vh]">
-              <div className="space-y-4 min-h-0 flex flex-col">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:h-[78vh]">
+              <div className="space-y-4 xl:min-h-0 flex flex-col">
                 <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                   <div>
                     <label className="mb-1 block text-sm font-medium">Match mode</label>
@@ -446,7 +476,7 @@ export default function MetadataFilterManager({
                   )}
                 </div>
 
-                <div className="rounded border border-gray-200 p-3 dark:border-gray-700 flex-1 min-h-0 overflow-y-auto space-y-3">
+                <div className="rounded border border-gray-200 p-3 dark:border-gray-700 xl:flex-1 xl:min-h-0 xl:overflow-y-auto space-y-3">
                   {rows.map((row, index) => {
                     const options = defsFor(row.kind);
                     const selectedDefinition = options.find((definition) => definition.id === row.definitionId);
@@ -735,9 +765,9 @@ export default function MetadataFilterManager({
                 </div>
               </div>
 
-              <aside className="rounded border border-gray-200 p-4 dark:border-gray-700 overflow-y-auto">
+              <aside className="rounded border border-gray-200 p-4 dark:border-gray-700 xl:overflow-y-auto">
                 <h3 className="mb-3 font-semibold">Template salvati</h3>
-                <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
+                <div className="space-y-2 xl:max-h-[520px] xl:overflow-auto pr-1">
                   {templates.length === 0 ? (
                     <div className="text-sm text-gray-500 dark:text-gray-300">Nessun template disponibile.</div>
                   ) : (

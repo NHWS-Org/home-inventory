@@ -26,7 +26,69 @@ export interface Inventory {
     version_num: number;
 }
 
+export interface ItemBarcode {
+    id: number;
+    code: string;
+    format?: string | null;
+}
+
+export interface AssignmentSummary {
+    id: number;
+    list_checked: boolean;
+    source_item_id: number;
+    source_name: string | null;
+    source_inventory_id: number | null;
+    source_inventory_name: string | null;
+    source_stock: number | null;
+    source_net_qty: number | null;
+    qty: number;
+}
+
+export interface Assignment {
+    id: number;
+    list_item_id: number;
+    list_item_name: string | null;
+    list_id: number | null;
+    list_name: string | null;
+    list_checked: boolean;
+    source_item_id: number;
+    source_name: string | null;
+    source_inventory_id: number | null;
+    source_inventory_name: string | null;
+    source_stock: number | null;
+    source_net_qty: number | null;
+    qty: number;
+}
+
+export interface BarcodeMatch {
+    item_id: number;
+    name: string;
+    quantity: number | null;
+    inventory_id: number;
+    inventory_name: string | null;
+    inventory_type: string | null;
+}
+
+export interface BarcodeProduct {
+    name: string | null;
+    brand: string | null;
+    quantity_label: string | null;
+    image_url: string | null;
+    source: string | null;
+}
+
+export interface BarcodeLookupResult {
+    code: string;
+    matches: BarcodeMatch[];
+    product: BarcodeProduct | null;
+}
+
 export interface InventoryItem {
+    barcodes?: ItemBarcode[];
+    assignment?: AssignmentSummary | null;
+    assignment_count?: number;
+    assigned_qty?: number;
+    net_qty?: number | null;
     id: number;
     name: string;
     description: string;
@@ -55,6 +117,11 @@ export interface Checklist {
 }
 
 export interface ChecklistItem {
+    barcodes?: ItemBarcode[];
+    assignment?: AssignmentSummary | null;
+    assignment_count?: number;
+    assigned_qty?: number;
+    net_qty?: number | null;
     id: number;
     name: string;
     description: string;
@@ -71,6 +138,11 @@ export interface ChecklistItem {
 }
 
 export interface Item {
+    barcodes?: ItemBarcode[];
+    assignment?: AssignmentSummary | null;
+    assignment_count?: number;
+    assigned_qty?: number;
+    net_qty?: number | null;
     id: number;
     name: string;
     description: string;

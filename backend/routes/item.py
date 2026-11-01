@@ -3,9 +3,11 @@ from typing import Any, List, cast
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
-from models import User, Item, Inventory, ItemVersion
+from models import User, Item, Inventory, ItemVersion, ItemBarcode
+from assignment_service import apply_check_change, build_assignment_summary, pending_assigned_by_source
 from dependencies import get_db
-from schemas import ItemCreate, ItemUpdate, ItemDelete, ItemMetadataValueResponse, ItemResponse, ItemVersionResponse, VersionBulkDeleteRequest
+from schemas import ItemCreate, ItemUpdate, ItemDelete, ItemMetadataValueResponse, ItemResponse, ItemVersionResponse, VersionBulkDeleteRequest, ItemBarcodeCreate, ItemBarcodeResponse
+from barcode_service import normalize_code
 from routes.auth import get_current_user
 from routes.inventory import can_access_inventory
 from fastapi import status
@@ -150,12 +152,52 @@ def _write_item_version(
     )
     db.add(version)
 
+def _dedupe_barcodes(payloads: List[ItemBarcodeCreate]) -> list[tuple[str, str | None]]:
+    seen: dict[str, str | None] = {}
+    for payload in payloads:
+        code = normalize_code(payload.code)
+        if code and code not in seen:
+            seen[code] = payload.format
+    return list(seen.items())
+
+def _ensure_barcode_free(db: Session, code: str, inventory_id: int, exclude_item_id: int | None = None) -> None:
+    """Un codice identifica un solo item per inventario: segnala 409 con l'item in conflitto."""
+    query = (
+        db.query(Item)
+        .join(ItemBarcode, ItemBarcode.item_id == Item.id)
+        .filter(ItemBarcode.code == code, Item.inventory_id == inventory_id)
+    )
+    if exclude_item_id is not None:
+        query = query.filter(Item.id != exclude_item_id)
+    other = query.first()
+    if other:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Codice {code} gia' associato all'item '{other.name}' (id {other.id}) in questo inventario",
+        )
+
+def _assignment_fields(db: Session, item: Item) -> dict:
+    if item.inventory is not None and item.inventory.type == "CHECKLIST":
+        if item.list_assignment is None:
+            return {}
+        return {"assignment": build_assignment_summary(item.list_assignment)}
+    assigned = pending_assigned_by_source(db, [cast(int, item.id)]).get(cast(int, item.id), 0)
+    assignment_count = len(item.source_assignments)
+    if not assigned and not assignment_count:
+        return {}
+    return {
+        "assignment_count": assignment_count,
+        "assigned_qty": assigned,
+        "net_qty": cast(int, item.quantity or 0) - assigned,
+    }
+
 def _build_item_response(db: Session, item: Item) -> ItemResponse:
     current_version = db.query(func.max(ItemVersion.version_num)).filter(
         ItemVersion.item_id == item.id
     ).scalar() or 0
     return ItemResponse(
         id=cast(int, item.id),
+        barcodes=[ItemBarcodeResponse.model_validate(b) for b in item.barcodes],
         name=cast(str, item.name),
         description=cast(str | None, item.description),
         quantity=cast(int, item.quantity),
@@ -176,6 +218,7 @@ def _build_item_response(db: Session, item: Item) -> ItemResponse:
             for value in item.metadata_values
         ],
         version_num=current_version,
+        **_assignment_fields(db, item),
     )
 
 #############################################################################
@@ -198,9 +241,14 @@ def create_item(item: ItemCreate, db: Session = Depends(get_db), user=Depends(ge
         raise HTTPException(status_code=404, detail="Inventario non trovato")
     if not can_access_inventory(user, inventory, action="edit"):
         raise HTTPException(status_code=403, detail="Accesso negato")
-    db_item = Item(**item.model_dump())
+    new_barcodes = _dedupe_barcodes(item.barcodes)
+    for code, _fmt in new_barcodes:
+        _ensure_barcode_free(db, code, cast(int, inventory.id))
+    db_item = Item(**item.model_dump(exclude={"barcodes"}))
     db_item.user_ins = user.id
     db_item.user_mod = user.id
+    for code, fmt in new_barcodes:
+        db_item.barcodes.append(ItemBarcode(code=code, format=fmt, user_ins=user.id, user_mod=user.id))
     db.add(db_item)
     db.flush()                                   # ottieni db_item.id senza commit
     _write_item_version(db, db_item, "CREATE", user)
@@ -214,7 +262,13 @@ def create_item(item: ItemCreate, db: Session = Depends(get_db), user=Depends(ge
 #############################################################################
 # Aggiornamento item
 @router.patch("/{item_id}", response_model=ItemResponse)
-def update_item(item_id: int, item_update: ItemUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def update_item(
+    item_id: int,
+    item_update: ItemUpdate,
+    on_insufficient: str | None = None,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
     item = db.query(Item).get(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item non trovato")
@@ -222,12 +276,24 @@ def update_item(item_id: int, item_update: ItemUpdate, db: Session = Depends(get
         raise HTTPException(status_code=403, detail="Accesso negato")
 
     old_snapshot = _snapshot_item(item)         # cattura stato precedente
-    for field, value in item_update.model_dump(exclude_unset=True).items():
+    update_data = item_update.model_dump(exclude_unset=True)
+    new_inventory_id = update_data.get("inventory_id")
+    if new_inventory_id is not None and new_inventory_id != item.inventory_id:
+        for barcode in item.barcodes:
+            _ensure_barcode_free(db, cast(str, barcode.code), new_inventory_id, exclude_item_id=cast(int, item.id))
+    for field, value in update_data.items():
         if field in ("quantity") and value is not None:
             if isinstance(value, (int, float)) and value < 0:
                 raise HTTPException(status_code=400, detail=f"{field} non può essere negativo")
         setattr(item, field, value)
     item.user_mod = user.id
+    if "quantity" in update_data:
+        apply_check_change(
+            db, item, cast(int, old_snapshot["quantity"]), cast(int, item.quantity), user, on_insufficient,
+            lambda u, src: can_access_item(u, src, action="edit"),
+            lambda d, i, op, u, snap, merge: _write_item_version(d, i, op, u, snap, merge),
+            _snapshot_item,
+        )
     _write_item_version(db, item, "UPDATE", user, old_snapshot)
     db.commit()
     db.refresh(item)
@@ -235,6 +301,70 @@ def update_item(item_id: int, item_update: ItemUpdate, db: Session = Depends(get
     item.inventory.user_mod = user.id
     db.commit()
     return _build_item_response(db, item)
+
+#############################################################################
+# Codici a barre / QR dell'item
+@router.get("/{item_id}/barcodes", response_model=List[ItemBarcodeResponse])
+def list_item_barcodes(item_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    item = db.query(Item).get(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item non trovato")
+    if not can_access_item(user, item, action="view"):
+        raise HTTPException(status_code=403, detail="Accesso negato")
+    return item.barcodes
+
+@router.post("/{item_id}/barcodes", response_model=ItemBarcodeResponse, status_code=status.HTTP_201_CREATED)
+def add_item_barcode(item_id: int, payload: ItemBarcodeCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    item = db.query(Item).get(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item non trovato")
+    if not can_access_item(user, item, action="edit"):
+        raise HTTPException(status_code=403, detail="Accesso negato")
+    code = normalize_code(payload.code)
+    if not code:
+        raise HTTPException(status_code=400, detail="Codice vuoto")
+    _ensure_barcode_free(db, code, cast(int, item.inventory_id), exclude_item_id=cast(int, item.id))
+    if any(b.code == code for b in item.barcodes):
+        raise HTTPException(status_code=409, detail=f"Codice {code} gia' associato a questo item")
+
+    old_snapshot = _snapshot_item(item)
+    old_codes = [b.code for b in item.barcodes]
+    barcode = ItemBarcode(item_id=item.id, code=code, format=payload.format, user_ins=user.id, user_mod=user.id)
+    db.add(barcode)
+    db.flush()
+    db.refresh(item)
+    item.user_mod = user.id
+    _write_item_version(
+        db, item, "UPDATE", user, old_snapshot,
+        extra_diff={"barcodes": {"from": old_codes, "to": [b.code for b in item.barcodes]}},
+    )
+    db.commit()
+    db.refresh(barcode)
+    return barcode
+
+@router.delete("/{item_id}/barcodes/{barcode_id}")
+def delete_item_barcode(item_id: int, barcode_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    item = db.query(Item).get(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item non trovato")
+    if not can_access_item(user, item, action="edit"):
+        raise HTTPException(status_code=403, detail="Accesso negato")
+    barcode = db.query(ItemBarcode).filter(ItemBarcode.id == barcode_id, ItemBarcode.item_id == item_id).first()
+    if not barcode:
+        raise HTTPException(status_code=404, detail="Codice non trovato")
+
+    old_snapshot = _snapshot_item(item)
+    old_codes = [b.code for b in item.barcodes]
+    db.delete(barcode)
+    db.flush()
+    db.refresh(item)
+    item.user_mod = user.id
+    _write_item_version(
+        db, item, "UPDATE", user, old_snapshot,
+        extra_diff={"barcodes": {"from": old_codes, "to": [b.code for b in item.barcodes]}},
+    )
+    db.commit()
+    return {"detail": "Codice rimosso"}
 
 #############################################################################
 # Eliminazione item

@@ -1,5 +1,5 @@
 import { useParams, useLocation, Link } from "react-router-dom";
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import {
   getInventoryById, getInventoryItems,
   getChecklistById, getChecklistItems,
@@ -7,14 +7,20 @@ import {
   getMetadataDefinitions, listAllMetadataDefinitions, getItemMetadataValues,
   getFilterTemplates, getFilterTemplate,
   filterItemsByTextMetadata, filterItemsByNumericMetadata, filterItemsByDateMetadata, filterItemsByBooleanMetadata,
-  bulkUpsertItemMetadataValues, deleteItemMetadataValue } from "../api";
-import { Inventory, Item, User, MetadataDefinition, ItemMetadataValue, ItemMetadataValueUpsert, FilterTemplate, FilterTemplateListItem } from "../types";
+  bulkUpsertItemMetadataValues, deleteItemMetadataValue, createAssignment, deleteAssignment } from "../api";
+import { Inventory, InventoryItem, Item, User, MetadataDefinition, ItemMetadataValue, ItemMetadataValueUpsert, FilterTemplate, FilterTemplateListItem } from "../types";
 import { Dialog } from "@headlessui/react";
+import { FiArrowLeft, FiClock } from 'react-icons/fi';
+import { createPortal } from 'react-dom';
 import { useContext } from "react";
 import { AuthContext } from "../auth-context";
 import { useSwipeable } from 'react-swipeable';
 import { HistoryModal } from "../components/HistoryModal";
 import MetadataFilterManager from "../components/MetadataFilterManager";
+import { ITEMS_CHANGED_EVENT } from "../components/GlobalBarcodeScan";
+import ItemBarcodesEditor from "../components/ItemBarcodesEditor";
+import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
+import { AddFromInventoryDialog, AssignExistingListItemDialog, AssignToListDialog, EditAssignmentDialog, ListLinkField, SourceAssignmentsDialog } from "../components/AssignmentDialogs";
 
 interface Props {
   item: Item;
@@ -26,7 +32,7 @@ interface Props {
   selectedItems: number[];
   setSelectedItems: React.Dispatch<React.SetStateAction<number[]>>;
   setItemBeingEdited: (item: Item) => void;
-  updateItem: (id: number, item: Partial<Item>) => Promise<Item | null>;
+  updateItem: (id: number, item: Partial<Item>, onInsufficient?: 'zero') => Promise<Item | null>;
   deleteItem: (id: number) => Promise<void>;
   setIsCloning: React.Dispatch<React.SetStateAction<boolean>>;
   setItems: React.Dispatch<React.SetStateAction<Item[]>>;
@@ -142,9 +148,6 @@ function MetadataFieldsSection({
 
   return (
     <div className="mt-4 rounded border border-gray-200 p-3 dark:border-gray-700">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-        Metadati
-      </h3>
       <div className="space-y-3">
         {definitions.map((definition) => {
           const currentValue = getTypedValueForDefinition(definition, drafts[definition.id]);
@@ -190,8 +193,8 @@ function MetadataFieldsSection({
                 />
               )}
               {definition.field_type === 'DATE' && (
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                <div className="space-y-2">
+                  <div className="space-y-2">
                     <input
                       type="date"
                       className="w-full border rounded p-1 dark:bg-gray-800"
@@ -201,7 +204,7 @@ function MetadataFieldsSection({
                     {currentValue && (
                       <button
                         type="button"
-                        className="rounded border px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+                        className="min-h-11 w-full rounded border px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
                         onClick={() => onChange(definition, '')}
                       >
                         Svuota
@@ -239,6 +242,7 @@ export function SwipeableItemRow({
 }: Props) {
   const [action, setAction] = useState<'left' | 'right' | null>(null);
   const [isItemHistoryOpen, setIsItemHistoryOpen] = useState(false);
+  const [assignDialog, setAssignDialog] = useState<'assign' | 'link' | 'sources' | 'edit' | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
 
   // Gestione click fuori per chiudere i pulsanti swipe
@@ -265,7 +269,7 @@ export function SwipeableItemRow({
     delta: 40,
   });
 
-  const isViewer = user?.role.name === 'viewer';
+  const isViewer = user?.role?.name === 'viewer';
 
   const cloneItem = () => {
     const cloned = {
@@ -312,6 +316,37 @@ export function SwipeableItemRow({
     }
     setAction(null);
   };
+
+  const applyUpdate = (upd: Item | null) => {
+    if (upd) setItems(prev => prev.map(i => i.id === upd.id ? upd : i));
+  };
+
+  const toggleChecked = async (checked: boolean) => {
+    const updated = { ...item, quantity: checked ? 1 : 0 };
+    try {
+      applyUpdate(await updateItem(item.id, updated));
+    } catch (err) {
+      const detail = (err as { response?: { status?: number; data?: { detail?: { code?: string; available?: number; requested?: number; source_name?: string } } } })?.response;
+      if (detail?.status === 409 && detail.data?.detail?.code === 'insufficient_stock') {
+        const d = detail.data.detail;
+        if (window.confirm(`Stock insufficiente per "${d.source_name}": disponibili ${d.available}, richiesti ${d.requested}.\n\nOK = azzera lo stock e spunta\nAnnulla = non spuntare`)) {
+          try {
+            applyUpdate(await updateItem(item.id, updated, 'zero'));
+          } catch {
+            alert('Operazione non riuscita');
+          }
+        }
+        return;
+      }
+      alert('Operazione non riuscita');
+    }
+  };
+
+  const actionGridColumns = isEditMode && !isViewer
+    ? (isInventory ? 'grid-cols-6' : 'grid-cols-4')
+    : isInventory && !isViewer
+      ? 'grid-cols-5'
+      : 'grid-cols-2';
 
   return (
     <div
@@ -360,10 +395,10 @@ export function SwipeableItemRow({
           }
         }}
       >
-        <div className="flex flex-col w-full md:w-auto md:flex-row md:items-center">
+        <div className="flex w-full flex-row items-start gap-2 md:w-auto md:items-center">
           {isEditMode && (
-            <div className="mr-2 flex items-center">
-              <span className="text-xl">
+            <div className="flex shrink-0 items-center md:mr-1">
+              <span className="text-base">
                 {selectedItems.includes(item.id) ? '☑️' : '⬜️'}
               </span>
             </div>
@@ -374,59 +409,125 @@ export function SwipeableItemRow({
               <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
                 v{item.version_num}
               </span>
+              {(item.barcodes?.length ?? 0) > 0 && (
+                <span
+                  className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 px-2 py-1 rounded whitespace-nowrap"
+                  title={item.barcodes?.map((b) => b.code).join('\n')}
+                >
+                  🏷️ {item.barcodes?.length}
+                </span>
+              )}
             </div>
             {item.description && (
               <div className="text-sm text-gray-500 dark:text-gray-200">{item.description}</div>
             )}
+            {isChecklist && item.assignment && (
+              <button
+                type="button"
+                disabled={isViewer}
+                onClick={(e) => { e.stopPropagation(); setAssignDialog('edit'); }}
+                className={`mt-1 min-h-11 max-w-full self-start rounded-xl px-3 py-2 text-sm ${
+                  item.quantity === 0 && ((item.assignment.source_stock ?? 0) < item.assignment.qty || (item.assignment.source_net_qty ?? 0) < 0)
+                    ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
+                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
+                }`}
+              >
+                📦 ×{item.assignment.qty} · {item.assignment.source_inventory_name} · stock {item.assignment.source_stock ?? '?'}
+                {item.quantity === 0 && (item.assignment.source_net_qty ?? 0) < 0 ? ` · netto ${item.assignment.source_net_qty}` : ''}
+                {item.quantity === 0 && ((item.assignment.source_stock ?? 0) < item.assignment.qty || (item.assignment.source_net_qty ?? 0) < 0) ? ' ⚠️' : ''}
+              </button>
+            )}
+            {isChecklist && !item.assignment && !isViewer && !isEditMode && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setAssignDialog('link'); }}
+                className="mt-1 min-h-11 self-start rounded-xl bg-blue-100 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+              >
+                📥 Assegna
+              </button>
+            )}
+            {isInventory && ((item.assignment_count ?? 0) > 0 || (item.assigned_qty ?? 0) > 0) && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setAssignDialog('sources'); }}
+                className={`mt-1 min-h-11 max-w-full self-start rounded-xl px-3 py-2 text-sm ${
+                  (item.net_qty ?? 0) < 0
+                    ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
+                }`}
+                title="Quantità assegnate a liste"
+              >
+                📋 {item.assigned_qty ?? 0} assegnati → {item.net_qty ?? item.quantity} netti
+                {(item.assignment_count ?? 0) > (item.assigned_qty ?? 0) && ` · ${item.assignment_count} collegamenti`}
+              </button>
+            )}
             {item.metadata_values && item.metadata_values.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
+              <div className="mt-1 flex flex-wrap gap-1">
                 {item.metadata_values
                   .filter((value) => value.definition_label && formatItemMetadataValue(value))
                   .map((value) => (
                     <span
                       key={value.id}
-                      className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+                      className="rounded-full bg-slate-100 px-2 py-0.5 text-sm text-slate-700 dark:bg-slate-700 dark:text-slate-100"
                     >
                       {value.definition_label}: {formatItemMetadataValue(value)}
                     </span>
                   ))}
               </div>
             )}
-            <div className="text-xs text-gray-400">
+            <div className="mt-1 text-xs text-gray-400">
               Ultima modifica: {item.username_mod} - {new Date(item.data_mod).toLocaleString()}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 mt-2 md:mt-0 w-full md:w-auto justify-end">
+        <div className={`mt-2 grid w-full ${actionGridColumns} gap-1.5 md:mt-0 md:flex md:w-auto md:items-center md:justify-end`}>
           <button
-            className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 whitespace-nowrap"
+            type="button"
+            className="col-span-1 min-h-11 w-full rounded-lg bg-gray-200 px-1 text-base text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm md:whitespace-nowrap"
             onClick={(e) => {
               e.stopPropagation();
               setIsItemHistoryOpen(true);
             }}
             title="Visualizza cronologia item"
+            aria-label="Visualizza cronologia item"
           >
             <span className="inline md:hidden">🕓</span>
             <span className="hidden md:inline">Cronologia</span>
           </button>
+          {isInventory && !isViewer && !isEditMode && (
+            <button
+              type="button"
+            className="col-span-1 min-h-11 w-full rounded-lg bg-gray-200 px-1 text-base text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm md:whitespace-nowrap"
+              onClick={(e) => { e.stopPropagation(); setAssignDialog('assign'); }}
+              title="Assegna a una lista"
+              aria-label="Assegna a una lista"
+            >
+              <span className="inline md:hidden">📋</span>
+              <span className="hidden md:inline">📋 Assegna</span>
+            </button>
+          )}
           {isEditMode && !isViewer && (
             <>
               <button
-                className="px-2 py-1 bg-yellow-500 text-white rounded text-sm"
+                type="button"
+                className="col-span-1 min-h-11 w-full rounded-lg bg-yellow-500 px-1 text-lg text-white md:min-h-0 md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
                 onClick={(e) => {
                   e.stopPropagation();
                   cloneItem();
                 }}
+                aria-label="Clona item"
               >
                 <span className="inline md:hidden">📄</span>
                 <span className="hidden md:inline">📄 Clona</span>
               </button>
               <button
-                className="px-2 py-1 bg-blue-500 text-white rounded text-sm"
+                type="button"
+                className="col-span-1 min-h-11 w-full rounded-lg bg-blue-500 px-1 text-lg text-white md:min-h-0 md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
                 onClick={(e) => {
                   e.stopPropagation();
                   setItemBeingEdited(item);
                 }}
+                aria-label="Modifica item"
               >
                 <span className="inline md:hidden">✏️</span>
                 <span className="hidden md:inline">✏️ Modifica</span>
@@ -434,50 +535,52 @@ export function SwipeableItemRow({
             </>
           )}
           {isChecklist ? (
-            <div className="flex items-center justify-center h-full w-full">
+            <div className="col-span-1 flex min-h-11 w-full items-center justify-center md:h-full">
               <input
                 type="checkbox"
                 checked={item.quantity > 0}
                 disabled={isViewer}
                 onChange={(e) => {
                   if (isViewer) return;
-                  const updated = { ...item, quantity: e.target.checked ? 1 : 0 };
-                  updateItem(item.id, updated).then((upd) => {
-                    if (upd) {
-                      setItems(prev => prev.map(i => i.id === upd.id ? upd : i));
-                    }
-                  });
+                  toggleChecked(e.target.checked);
                 }}
-                className="w-7 h-7 accent-blue-600 focus:ring-2 rounded shadow-sm border-2 border-gray-400 dark:border-gray-600"
-                style={{ minWidth: '1.75rem', minHeight: '1.75rem' }}
+                className="h-10 w-10 accent-blue-600 focus:ring-2 rounded shadow-sm border-2 border-gray-400 dark:border-gray-600"
+                style={{ minWidth: '2.5rem', minHeight: '2.5rem' }}
                 aria-label="Completato"
               />
             </div>
           ) : isInventory && !isViewer ? (
-            <div className="flex items-center gap-2">
+            <div className="col-span-3 grid w-full grid-cols-3 gap-1.5 md:col-span-1 md:flex md:w-auto md:items-center">
               <button
-                className="px-2 py-1 bg-gray-400 rounded hover:bg-gray-600 text-sm"
+                type="button"
+                aria-label="Diminuisci quantità"
+                disabled={item.quantity <= 0}
+                className="min-h-11 w-full rounded-lg bg-gray-400 text-lg hover:bg-gray-600 disabled:opacity-40 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm"
                 onClick={(e) => {
                   e.stopPropagation();
-                  const updated = { ...item, quantity: item.quantity - 1 };
+                  const updated = { ...item, quantity: Math.max(0, item.quantity - 1) };
                   updateItem(item.id, updated).then((upd) => {
                     if (upd) {
                       setItems(prev => prev.map(i => i.id === upd.id ? upd : i));
+                      window.dispatchEvent(new Event(ITEMS_CHANGED_EVENT));
                     }
                   });
                 }}
               >
                 -
               </button>
-              <span className="min-w-[24px] text-center">{item.quantity}</span>
+              <span className="flex min-h-11 items-center justify-center rounded-lg border border-gray-200 text-base font-semibold dark:border-gray-700 md:min-h-0 md:min-w-[24px] md:rounded-none md:border-0 md:text-base md:font-normal">{item.quantity}</span>
               <button
-                className="px-2 py-1 bg-gray-400 rounded hover:bg-gray-600 rounded text-sm"
+                type="button"
+                aria-label="Aumenta quantità"
+                className="min-h-11 w-full rounded-lg bg-gray-400 text-lg hover:bg-gray-600 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm"
                 onClick={(e) => {
                   e.stopPropagation();
                   const updated = { ...item, quantity: item.quantity + 1 };
                   updateItem(item.id, updated).then((upd) => {
                     if (upd) {
                       setItems(prev => prev.map(i => i.id === upd.id ? upd : i));
+                      window.dispatchEvent(new Event(ITEMS_CHANGED_EVENT));
                     }
                   });
                 }}
@@ -490,6 +593,15 @@ export function SwipeableItemRow({
           )}
         </div>
       </li>
+
+      {assignDialog === 'assign' && <AssignToListDialog item={item} onClose={() => setAssignDialog(null)} />}
+      {assignDialog === 'sources' && <SourceAssignmentsDialog item={item} onClose={() => setAssignDialog(null)} />}
+      {assignDialog === 'link' && (
+        <AssignExistingListItemDialog item={item} onClose={() => setAssignDialog(null)} />
+      )}
+      {assignDialog === 'edit' && item.assignment && (
+        <EditAssignmentDialog assignment={item.assignment} listItemId={item.id} onClose={() => setAssignDialog(null)} />
+      )}
 
       <HistoryModal
         isOpen={isItemHistoryOpen}
@@ -512,22 +624,30 @@ export default function InventoryDetailPage() {
   const isMobile = window.innerWidth < 768;
   const authContext = useContext(AuthContext);
   const user = authContext?.user ?? null;
+  const isAdmin = user?.role?.name === 'admin';
+  const isViewer = user?.role?.name === 'viewer';
+  const canEdit = Boolean(user?.role?.name && user.role.name !== 'viewer');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const importExportSheetDrag = useBottomSheetDrag(() => setIsShareModalOpen(false));
   const [csvTextarea, setCsvTextarea] = useState('');
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const { id } = useParams();
   const location = useLocation();
   const [filterText, setFilterText] = useState(() => new URLSearchParams(location.search).get('filtro') || "");
+  const [isAddFromInventoryOpen, setIsAddFromInventoryOpen] = useState(false);
+  const [barcodeFilter, setBarcodeFilter] = useState<'all' | 'with' | 'without'>('all');
   const basePath = location.pathname.split("/")[1] as "inventories" | "checklists";
   const isInventory = basePath === "inventories";
   const isChecklist = basePath === "checklists";
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [isInsertMode, setisInsertMode] = useState(false);
+  const [newItemLink, setNewItemLink] = useState<{ item: InventoryItem; qty: number } | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [newItemName, setNewItemName] = useState("");
   const [newItemDescription, setNewItemDescription] = useState("");
   const [newItemQuantity, setNewItemQuantity] = useState(isChecklist ? 0 : 1);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<number[]>([]);
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'quantity'>(() => {
     const stored = localStorage.getItem('item_sortBy');
@@ -542,6 +662,7 @@ export default function InventoryDetailPage() {
     return 'asc';
   });
   const [itemBeingEdited, setItemBeingEdited] = useState<Item | null>(null);
+  const detailTopRef = useRef<HTMLDivElement>(null);
   const filtroParam = filterText;
   const [isCloning, setIsCloning] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -555,6 +676,19 @@ export default function InventoryDetailPage() {
   const [metadataFilterSummary, setMetadataFilterSummary] = useState<string | null>(null);
   const [filterTemplates, setFilterTemplates] = useState<FilterTemplateListItem[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | ''>('');
+
+  const editingMetadataRecap = metadataDefinitions
+    .filter((definition) => definition.is_active)
+    .flatMap((definition) => {
+      const rawValue = getTypedValueForDefinition(definition, editingMetadataDrafts[definition.id]).trim();
+      if (!rawValue) return [];
+      const value = definition.field_type === 'BOOLEAN'
+        ? (rawValue === 'true' ? 'Sì' : 'No')
+        : definition.field_type === 'LIST'
+          ? (definition.list_options?.find((option) => option.value === rawValue)?.label ?? rawValue)
+          : rawValue;
+      return [{ id: definition.id, label: definition.label, value }];
+    });
 
 useEffect(() => {
   const fetchData = async () => {
@@ -578,6 +712,35 @@ useEffect(() => {
   };
   fetchData();
 }, [id, isInventory]);
+
+  useEffect(() => {
+    const refresh = async () => {
+      if (!id) return;
+      const getItems = isInventory ? getInventoryItems : getChecklistItems;
+      const refreshed = await getItems(Number(id));
+      if (Array.isArray(refreshed)) setItems(refreshed as Item[]);
+    };
+    window.addEventListener(ITEMS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(ITEMS_CHANGED_EVENT, refresh);
+  }, [id, isInventory]);
+
+  const openedItemParam = useRef<string | null>(null);
+  useEffect(() => {
+    const itemParam = new URLSearchParams(location.search).get('item');
+    if (!itemParam) {
+      openedItemParam.current = null;
+      return;
+    }
+    const key = `${id}:${itemParam}:${location.key}`;
+    if (openedItemParam.current === key) return;
+    const target = items.find((i) => i.id === Number(itemParam));
+    if (!target) return;
+    openedItemParam.current = key;
+    queueMicrotask(() => {
+      if (isViewer) setFilterText(target.name);
+      else setItemBeingEdited(target);
+    });
+  }, [items, location.search, location.key, id, isViewer]);
 
   useEffect(() => {
     if (!itemBeingEdited) {
@@ -639,9 +802,14 @@ useEffect(() => {
       const matchesText =
         item.name.toLowerCase().includes(normalizedFilter) ||
         item.description?.toLowerCase().includes(normalizedFilter) ||
+        (item.barcodes ?? []).some((barcode) => barcode.code.toLowerCase().includes(normalizedFilter)) ||
         matchesTextMetadata;
 
-      return matchesMetadata && matchesText;
+      const hasBarcodes = (item.barcodes?.length ?? 0) > 0;
+      const matchesBarcodeFilter =
+        barcodeFilter === 'all' || (barcodeFilter === 'with' ? hasBarcodes : !hasBarcodes);
+
+      return matchesMetadata && matchesText && matchesBarcodeFilter;
     })
     .sort((a, b) => {
       // First, sort by checklist/inventory logic for completed/zero items
@@ -714,7 +882,7 @@ useEffect(() => {
         }
       };
 
-    const applyTemplateToList = async (templateId: number) => {
+    const applyTemplateToList = useCallback(async (templateId: number) => {
       try {
         const template: FilterTemplate = await getFilterTemplate(templateId);
         const root = template.criteria as Record<string, unknown>;
@@ -806,7 +974,7 @@ useEffect(() => {
       } catch {
         alert('Errore durante l\'applicazione del template.');
       }
-    };
+    }, [id]);
 
   useEffect(() => {
     if (selectedTemplateId === '' || !inventory) {
@@ -814,49 +982,70 @@ useEffect(() => {
     }
 
     void applyTemplateToList(selectedTemplateId);
-  }, [selectedTemplateId, inventory?.id, items]);
+  }, [selectedTemplateId, inventory, items, applyTemplateToList]);
+
+  const addItemSheetDrag = useBottomSheetDrag(() => setisInsertMode(false));
+  const editItemSheetDrag = useBottomSheetDrag(() => setItemBeingEdited(null));
 
   return (
-    <div className="relative p-4">
-      <div className="sticky top-0 bg-white dark:bg-gray-900 z-10 pb-2">
+    <div ref={detailTopRef} className="relative p-3 sm:p-4">
+      {inventory && (
+        <div className="fixed inset-x-4 top-20 z-50 md:hidden">
+          <div className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2">
+            <Link
+              to={`/${basePath}${filtroParam ? `?filtro=${encodeURIComponent(filtroParam)}` : ""}`}
+              aria-label={`Torna all'elenco ${isChecklist ? 'delle liste' : 'degli inventari'}`}
+              className="grid h-11 w-12 place-items-center rounded-xl bg-gray-100 text-xl text-blue-700 dark:bg-gray-800 dark:text-blue-300"
+            ><FiArrowLeft aria-hidden="true" /></Link>
+            <h1 className="truncate text-center text-lg font-bold" title={inventory.name}>{inventory.name}</h1>
+            <button type="button" onClick={() => setIsHistoryOpen(true)} aria-label="Apri log modifiche" title="Log modifiche" className="grid h-11 w-12 place-items-center rounded-xl bg-gray-100 text-lg text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <FiClock aria-hidden="true" />
+            </button>
+          </div>
+          <p className="mt-1 truncate px-1 text-xs leading-tight text-gray-600 dark:text-gray-300">
+            Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica: {new Date(inventory.data_mod).toLocaleString()}
+          </p>
+        </div>
+      )}
+      <div className="relative z-10 bg-white pb-1 dark:bg-gray-900 md:sticky md:top-0">
         <Link
           to={`/${basePath}${filtroParam ? `?filtro=${encodeURIComponent(filtroParam)}` : ""}`}
-          className="text-blue-500 hover:underline mb-2 inline-block"
+          className="mb-1 hidden text-sm text-blue-500 hover:underline md:inline-block"
         >
           ← Torna all'elenco {isChecklist ? "delle liste" : "degli inventari"}
         </Link>
         {inventory && (
           <>
-            <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
-              <h2 className="text-xl font-bold flex items-center gap-2">
+            <div className="mb-1 hidden flex-wrap items-center justify-between gap-2 md:flex">
+              <h2 className="flex items-center gap-1.5 text-lg font-bold sm:gap-2 sm:text-xl">
                 {isChecklist ? "Lista: " : "Inventario: "}
                 {inventory.name}
-                <span className="text-sm font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
+                <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-200 sm:px-2 sm:py-1 sm:text-sm">
                   v{inventory.version_num}
                 </span>
               </h2>
               <button
                 onClick={() => setIsHistoryOpen(true)}
-                className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 whitespace-nowrap"
+                className="h-10 w-10 shrink-0 rounded-lg bg-gray-200 px-1 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 sm:h-auto sm:w-auto sm:rounded sm:px-3 sm:py-1 sm:text-sm sm:whitespace-nowrap"
                 title="Visualizza cronologia modifiche"
               >
                 <span className="inline md:hidden">📋</span>
                 <span className="hidden md:inline">Cronologia</span>
               </button>
             </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+            <p className="mb-1 hidden text-xs text-gray-600 dark:text-gray-400 sm:mb-2 sm:text-sm md:block">
               Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica:{" "}
               {new Date(inventory.data_mod).toLocaleString()}
             </p>
-            <hr className="mb-2" />
+            <hr className="mb-1 hidden sm:mb-2 md:block" />
           </>
         )}
       </div>
 
       {inventory ? (
         <div>
-          <div className="sticky top-16 z-10 bg-white dark:bg-gray-900 mb-4 flex flex-wrap gap-2 items-center px-1 py-2 border-b">
-            <label className="text-sm font-medium">Ordina per:</label>
+          <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
+            <label className="hidden sm:inline text-sm font-medium">Ordina per:</label>
             <select
               value={sortBy}
               onChange={(e) => {
@@ -864,7 +1053,7 @@ useEffect(() => {
                 localStorage.setItem('item_sortBy', value);
                 setSortBy(value);
               }}
-              className="border rounded p-1"
+              className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none"
             >
               <option value="date">Data modifica</option>
               <option value="name">Nome</option>
@@ -876,13 +1065,13 @@ useEffect(() => {
                 localStorage.setItem('item_sortOrder', newOrder);
                 setSortOrder(newOrder);
               }}
-              className="border rounded p-1 px-2"
+              className="min-h-10 min-w-10 rounded border px-2 sm:min-h-0 sm:min-w-0 sm:py-1"
               title={`Ordina in ordine ${sortOrder === 'asc' ? 'decrescente' : 'crescente'}`}
             >
               {sortOrder === 'asc' ? '⬆️' : '⬇️'}
             </button>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 mb-4">
-              <div className="flex items-center gap-2">
+            <div className="w-full sm:w-auto">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 <input
                   type="text"
                   placeholder="Filtra la lista..."
@@ -893,23 +1082,34 @@ useEffect(() => {
                       setFilterText('');
                     }
                   }}
-                  className="border rounded p-1 w-full sm:w-auto"
+                  className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none sm:w-auto"
                 />
+                <select
+                  value={barcodeFilter}
+                  onChange={(e) => setBarcodeFilter(e.target.value as 'all' | 'with' | 'without')}
+                  className="min-h-10 w-28 rounded border px-1.5 py-1 sm:min-h-0 sm:w-auto"
+                  title="Filtra per barcode"
+                >
+                  <option value="all">🏷️ Tutti</option>
+                  <option value="with">🏷️ Con barcode</option>
+                  <option value="without">🏷️ Senza barcode</option>
+                </select>
                 <button
                   onClick={() => {
                     setFilterText('');
+                    setBarcodeFilter('all');
                     window.history.replaceState(null, '', location.pathname);
                   }}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded"
+                  className="min-h-10 min-w-10 rounded bg-gray-300 px-2 py-1 text-gray-700 dark:bg-gray-700 dark:text-gray-300 sm:min-w-0 sm:px-4 sm:py-2"
                 >
                   <span className="inline sm:hidden">❌</span>
                   <span className="hidden sm:inline">Cancella filtro</span>
                 </button>
               </div>
             </div>
-            {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
-              <div className="flex items-center gap-2 mb-4">
-                <label className="text-sm font-medium whitespace-nowrap">Template filtro:</label>
+            {(isInventory || isChecklist) && canEdit && (
+              <div className="flex w-full items-center gap-1.5 sm:w-auto sm:gap-2">
+                <label className="hidden sm:inline text-sm font-medium whitespace-nowrap">Template filtro:</label>
                 <select
                   value={selectedTemplateId}
                   onChange={async (e) => {
@@ -924,9 +1124,9 @@ useEffect(() => {
                     setSelectedTemplateId(templateId);
                     await applyTemplateToList(templateId);
                   }}
-                  className="border rounded p-1 min-w-[220px]"
+                  className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none sm:min-w-[220px]"
                 >
-                  <option value="">Nessun template</option>
+                  <option value="">Template filtro: nessuno</option>
                   {filterTemplates.map((template) => (
                     <option key={template.id} value={template.id}>{template.name}</option>
                   ))}
@@ -934,16 +1134,16 @@ useEffect(() => {
               </div>
             )}
             {isEditMode && (
-                <div className="mb-2 ml-auto flex gap-2">
+                <div className="mb-1 grid w-full grid-cols-2 gap-2 sm:ml-auto sm:w-auto">
                 <button
                     onClick={() => setSelectedItems(sortedItems.map(item => item.id))}
-                    className="px-2 py-1 text-sm bg-blue-500 text-white rounded"
+                    className="min-h-10 w-full rounded bg-blue-500 px-2 py-1 text-sm text-white"
                 >
                     Seleziona tutti
                 </button>
                 <button
                     onClick={() => setSelectedItems([])}
-                    className="px-2 py-1 text-sm bg-gray-500 text-white rounded"
+                    className="min-h-10 w-full rounded bg-gray-500 px-2 py-1 text-sm text-white"
                 >
                     Deseleziona tutti
                 </button>
@@ -979,13 +1179,13 @@ useEffect(() => {
                 selectedItems={selectedItems}
                 setSelectedItems={setSelectedItems}
                 setItemBeingEdited={setItemBeingEdited}
-                updateItem={async (id, itemArg) =>
+                updateItem={async (id, itemArg, onInsufficient) =>
                   await updateItem(id, {
                     name: itemArg.name ?? "",
                     description: itemArg.description,
                     quantity: itemArg.quantity ?? 0,
                     inventory_id: itemArg.inventory_id ?? inventory?.id ?? 0,
-                  })
+                  }, onInsufficient)
                 }
                 deleteItem={deleteItem}
                 setItems={setItems}
@@ -998,13 +1198,10 @@ useEffect(() => {
         <p>Caricamento {isChecklist ? "checklist" : "inventaro"}...</p>
       )}
 
-      <div
-        className={`z-40 gap-2 flex ${
-          isMobile
-            ? 'fixed bottom-2 right-2 flex-col'
-            : 'fixed top-4 right-4 flex-row'
-        }`}
-      >
+      {!isMobile && <div className="fixed right-4 top-4 z-40 flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={() => detailTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-700 px-3 py-2 text-white shadow-lg hover:bg-gray-800" title="Torna in cima alla lista">
+          ↑ In cima
+        </button>
         {isEditMode && selectedItems.length > 0 && (
           <button
             onClick={async () => {
@@ -1018,22 +1215,33 @@ useEffect(() => {
               const refreshed = inventory && await getItems(inventory.id);
               if (refreshed) setItems(refreshed);
             }}
-            className="py-2 px-4 bg-red-600 text-white rounded-full shadow-lg hover:bg-red-700"
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-red-600 px-3 py-2 text-white shadow-lg hover:bg-red-700"
           >
             <span className="inline md:hidden">🗑️ {( selectedItems.length )}</span>
             <span className="hidden md:inline">Elimina {( selectedItems.length )}</span>
           </button>
         )}
-        {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
+        {isChecklist && canEdit && (
+          <button
+            onClick={() => setIsAddFromInventoryOpen(true)}
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-white shadow-lg hover:bg-emerald-700"
+            title="Aggiungi da inventario"
+          >
+            <span className="inline md:hidden">📥</span>
+            <span className="hidden md:inline">📥 Da inventario</span>
+          </button>
+        )}
+        {(isInventory || isChecklist) && canEdit && (
           <MetadataFilterManager
             inventoryId={inventory?.id ?? Number(id)}
             currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
             definitions={metadataDefinitions}
             allDefinitions={allMetadataDefinitions}
             onTemplatesChanged={setFilterTemplates}
+            triggerClassName="!flex !h-10 !min-h-10 !min-w-12 !items-center !justify-center !rounded-xl !px-3 !py-2"
           />
         )}
-        {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
+        {(isInventory || isChecklist) && canEdit && (
           <button
             onClick={() => {
               const now = new Date();
@@ -1047,29 +1255,29 @@ useEffect(() => {
               //window.location.href = `https://wa.me/?text=${text}`;
               window.open(`https://wa.me/?text=${text}`, '_blank');
             }}
-            className="py-2 px-4 bg-green-700 text-white rounded-full shadow-lg hover:bg-green-800"
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-green-700 px-3 py-2 text-white shadow-lg hover:bg-green-800"
           >
             <span className="inline md:hidden">📲</span>
             <span className="hidden md:inline">📲 WhatsApp</span>
           </button>
         )}
-        {(isInventory || isChecklist) && user?.role.name === 'admin' && (
+        {(isInventory || isChecklist) && isAdmin && (
           <button
             onClick={() => setIsShareModalOpen(true)}
-            className="py-2 px-4 bg-green-600 text-white rounded-full shadow-lg hover:bg-green-700"
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-green-600 px-3 py-2 text-white shadow-lg hover:bg-green-700"
           >
             <span className="inline md:hidden">📤</span>
             <span className="hidden md:inline">Import/Export</span>
           </button>
         )}
-        {(isInventory || isChecklist) && user?.role.name !== 'viewer' && (
+        {(isInventory || isChecklist) && canEdit && (
           <>
             <button
               onClick={() => {
                 setIsEditMode((prev) => !prev);
                 setSelectedItems([]);
               }}
-              className={`py-2 px-4 rounded-full shadow-lg text-white ${
+              className={`flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg ${
                 isEditMode ? "bg-yellow-700" : "bg-yellow-500 hover:bg-yellow-600"
               }`}
             >
@@ -1078,20 +1286,122 @@ useEffect(() => {
             </button>
             <button
               onClick={() => setisInsertMode(true)}
-              className="py-2 px-4 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600"
+              className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-white shadow-lg hover:bg-blue-600"
             >
               <span className="inline md:hidden">➕</span>
               <span className="hidden md:inline">Nuovo</span>
             </button>
           </>
         )}
-      </div>
+      </div>}
+
+      {isMobile && canEdit && (isInventory || isChecklist) && (
+        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center">
+          {isMoreActionsOpen && (
+            <>
+              <div className="relative z-40 mb-2 flex w-56 flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800">
+                {isEditMode && selectedItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!window.confirm('Sei sicuro di voler eliminare gli oggetti selezionati?')) return;
+                      for (const selectedId of selectedItems) await deleteItem(selectedId);
+                      setSelectedItems([]);
+                      setIsEditMode(false);
+                      const getItems = isInventory ? getInventoryItems : getChecklistItems;
+                      const refreshed = inventory && await getItems(inventory.id);
+                      if (refreshed) setItems(refreshed);
+                      setIsMoreActionsOpen(false);
+                    }}
+                    className="min-h-11 w-full rounded-xl bg-red-600 px-3 text-left text-sm font-medium text-white"
+                  >🗑️ Elimina selezionati ({selectedItems.length})</button>
+                )}
+                {isChecklist && (
+                  <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsAddFromInventoryOpen(true); }} className="min-h-11 w-full rounded-xl bg-emerald-600 px-3 text-left text-sm font-medium text-white">
+                    📥 Aggiungi da inventario
+                  </button>
+                )}
+                <MetadataFilterManager
+                  inventoryId={inventory?.id ?? Number(id)}
+                  currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
+                  definitions={metadataDefinitions}
+                  allDefinitions={allMetadataDefinitions}
+                  onTemplatesChanged={setFilterTemplates}
+                  triggerLabel="🧩 Filtri metadati"
+                  triggerClassName="!min-h-11 !w-full !rounded-xl !px-3 !py-2 !text-left !text-sm !font-medium !shadow-none"
+                  onDialogClose={() => setIsMoreActionsOpen(false)}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMoreActionsOpen(false);
+                    const now = new Date();
+                    const header = `${inventory?.name} (${now.toLocaleString()})`;
+                    const withQty = items.filter((item) => item.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
+                    const zeroQty = items.filter((item) => item.quantity === 0).sort((a, b) => a.name.localeCompare(b.name));
+                    const lines = [...withQty, ...zeroQty].map((item) => `- ${item.quantity}x ${item.name}${item.description ? ` (${item.description})` : ''}`);
+                    window.open(`https://wa.me/?text=${encodeURIComponent([header, ...lines].join('\n'))}`, '_blank');
+                  }}
+                  className="min-h-11 w-full rounded-xl bg-green-700 px-3 text-left text-sm font-medium text-white"
+                >📲 Condividi su WhatsApp</button>
+                {isAdmin && (
+                  <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsShareModalOpen(true); }} className="min-h-11 w-full rounded-xl bg-green-600 px-3 text-left text-sm font-medium text-white">
+                    📤 Importa / esporta
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+          <div className="relative z-40 flex gap-1 rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90">
+            <button
+              type="button"
+              onClick={() => setisInsertMode(true)}
+              aria-label="Aggiungi item"
+              title="Aggiungi item"
+              className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-lg text-white shadow-lg hover:bg-blue-600"
+            >➕</button>
+            <button
+              type="button"
+              onClick={() => { setIsEditMode((current) => !current); setSelectedItems([]); }}
+              aria-label={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
+              title={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
+              className={`flex h-10 w-12 items-center justify-center rounded-xl text-lg text-white shadow-lg ${isEditMode ? 'bg-yellow-700' : 'bg-yellow-500'}`}
+            >{isEditMode ? '✖️' : '✏️'}</button>
+            <button
+              type="button"
+              onClick={() => detailTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              aria-label="Torna in cima alla lista"
+              title="Torna in cima alla lista"
+              className="flex h-10 w-12 items-center justify-center rounded-xl bg-gray-600 text-lg text-white shadow-lg"
+            >↑</button>
+            <button
+              type="button"
+              onClick={() => setIsMoreActionsOpen((open) => !open)}
+              aria-label={isMoreActionsOpen ? 'Chiudi altre azioni' : 'Altre azioni'}
+              aria-expanded={isMoreActionsOpen}
+              title="Altre azioni"
+              className="flex h-10 w-12 items-center justify-center rounded-xl bg-gray-700 text-lg text-white shadow-lg dark:bg-gray-600"
+            >⋯</button>
+          </div>
+        </div>
+      )}
+
+      {isMobile && isMoreActionsOpen && createPortal(
+        <button type="button" aria-label="Chiudi altre azioni" onClick={() => setIsMoreActionsOpen(false)} className="fixed inset-0 z-[39]" />,
+        document.body,
+      )}
 
       <Dialog open={isInsertMode} onClose={() => setisInsertMode(false)} className="relative z-50">
-        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white dark:bg-gray-900 dark:text-white p-6 rounded w-full max-w-2xl">
-            <Dialog.Title className="text-lg font-semibold mb-4">Nuovo oggetto</Dialog.Title>
+        <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
+        <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+          <Dialog.Panel
+            style={{ transform: `translateY(${addItemSheetDrag.offset}px)`, transition: addItemSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }}
+            className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] shadow-2xl dark:bg-gray-900 dark:text-white sm:rounded-2xl sm:p-6"
+          >
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...addItemSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden">
+              <span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
+            </button>
+            <Dialog.Title className="mb-4 text-lg font-semibold">Nuovo oggetto</Dialog.Title>
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -1103,6 +1413,13 @@ useEffect(() => {
                   inventory_id: inventory.id
                 });
                 if (newItem) {
+                  if (isChecklist && newItemLink) {
+                    try {
+                      await createAssignment(newItem.id, newItemLink.item.id, newItemLink.qty);
+                    } catch (err) {
+                      window.alert(err instanceof Error ? err.message : "Collegamento non riuscito");
+                    }
+                  }
                   const metadataValues = metadataDefinitions
                     .map((definition) => normalizeMetadataDraft(definition, newItemMetadataDrafts[definition.id]))
                     .filter((value): value is ItemMetadataValueUpsert => value !== null);
@@ -1121,40 +1438,53 @@ useEffect(() => {
                   setNewItemDescription("");
                   setNewItemQuantity(isChecklist ? 0 : 1);
                   setNewItemMetadataDrafts({});
+                  setNewItemLink(null);
                   setisInsertMode(false);
                 }
               }}
             >
               <div className="mb-2">
                 <label className="block text-sm font-medium">Nome</label>
-                <input type="text" className="w-full border rounded p-1" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} />
+                <input type="text" className="min-h-12 w-full border rounded p-3" value={newItemName} onChange={(e) => setNewItemName(e.target.value)} />
               </div>
               <div className="mb-2">
                 <label className="block text-sm font-medium">Descrizione</label>
-                <input type="text" className="w-full border rounded p-1" value={newItemDescription} onChange={(e) => setNewItemDescription(e.target.value)} />
+                <input type="text" className="min-h-12 w-full border rounded p-3" value={newItemDescription} onChange={(e) => setNewItemDescription(e.target.value)} />
               </div>
+              {isChecklist && canEdit && (
+                <ListLinkField
+                  current={newItemLink ? { name: newItemLink.item.name, qty: newItemLink.qty } : null}
+                  onPick={async (picked, qty) => {
+                    setNewItemLink({ item: picked, qty });
+                    if (!newItemName.trim()) setNewItemName(picked.name);
+                  }}
+                  onClear={() => setNewItemLink(null)}
+                />
+              )}
               {isInventory && (
                 <div className="mb-4">
                   <label className="block text-sm font-medium">Quantità</label>
-                  <div className="flex items-center gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setNewItemQuantity((prev) => Math.max(0, prev - 1))}
-                      className="px-3 py-2 bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
+                      aria-label="Diminuisci quantità"
+                      className="min-h-12 w-full bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
                     >
                       −
                     </button>
                     <input
                       type="number"
                       min="0"
-                      className="w-16 border rounded p-2 text-center"
+                      className="min-h-12 w-full border rounded p-2 text-center"
                       value={newItemQuantity}
                       onChange={(e) => setNewItemQuantity(Math.max(0, Number(e.target.value)))}
                     />
                     <button
                       type="button"
                       onClick={() => setNewItemQuantity((prev) => prev + 1)}
-                      className="px-3 py-2 bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
+                      aria-label="Aumenta quantità"
+                      className="min-h-12 w-full bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
                     >
                       +
                     </button>
@@ -1198,18 +1528,18 @@ useEffect(() => {
                   });
                 }}
               />
-              <div className="flex justify-end gap-2">
+              <div className="grid w-full grid-cols-2 gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setisInsertMode(false);
                     setNewItemMetadataDrafts({});
                   }}
-                  className="px-3 py-1 bg-gray-400 rounded hover:bg-gray-600"
+                  className="min-h-12 w-full rounded-xl bg-gray-400 px-4 font-medium hover:bg-gray-600"
                 >
                   Chiudi
                 </button>
-                <button type="submit" className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">
+                <button type="submit" className="min-h-12 w-full rounded-xl bg-blue-500 px-4 font-medium text-white hover:bg-blue-600">
                   Aggiungi
                 </button>
               </div>
@@ -1219,10 +1549,16 @@ useEffect(() => {
       </Dialog>
 
       <Dialog open={!!itemBeingEdited} onClose={() => setItemBeingEdited(null)} className="relative z-50">
-        <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white dark:bg-gray-900 dark:text-white p-6 rounded w-full max-w-2xl">
-            <Dialog.Title className="text-lg font-semibold mb-4">Modifica oggetto</Dialog.Title>
+        <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
+        <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+          <Dialog.Panel
+            style={{ transform: `translateY(${editItemSheetDrag.offset}px)`, transition: editItemSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }}
+            className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] shadow-2xl dark:bg-gray-900 dark:text-white sm:rounded-2xl sm:p-6"
+          >
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...editItemSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden">
+              <span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
+            </button>
+            <Dialog.Title className="mb-4 text-lg font-semibold">{isCloning ? "Clona oggetto" : "Modifica oggetto"}</Dialog.Title>
             {itemBeingEdited && (
               <form
               onSubmit={async (e) => {
@@ -1298,7 +1634,7 @@ useEffect(() => {
                   <label className="block text-sm font-medium">Nome</label>
                   <input
                     type="text"
-                    className="w-full border rounded p-1"
+                    className="min-h-12 w-full border rounded p-3"
                     value={itemBeingEdited.name}
                     onChange={(e) =>
                       setItemBeingEdited({ ...itemBeingEdited, name: e.target.value })
@@ -1309,7 +1645,7 @@ useEffect(() => {
                   <label className="block text-sm font-medium">Descrizione</label>
                   <input
                     type="text"
-                    className="w-full border rounded p-1"
+                    className="min-h-12 w-full border rounded p-3"
                     value={itemBeingEdited.description || ""}
                     onChange={(e) =>
                       setItemBeingEdited({ ...itemBeingEdited, description: e.target.value })
@@ -1319,7 +1655,7 @@ useEffect(() => {
                 {isInventory && (
                   <div className="mb-4">
                     <label className="block text-sm font-medium">Quantità</label>
-                    <div className="flex items-center gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
                         onClick={() =>
@@ -1327,14 +1663,15 @@ useEffect(() => {
                             prev ? { ...prev, quantity: Math.max(0, prev.quantity - 1) } : prev
                           )
                         }
-                        className="px-3 py-2 bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
+                        aria-label="Diminuisci quantità"
+                        className="min-h-12 w-full bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
                       >
                         −
                       </button>
                       <input
                         type="number"
                         min="0"
-                        className="w-16 border rounded p-2 text-center"
+                        className="min-h-12 w-full border rounded p-2 text-center"
                         value={itemBeingEdited.quantity}
                         onChange={(e) =>
                           setItemBeingEdited({
@@ -1350,7 +1687,8 @@ useEffect(() => {
                             prev ? { ...prev, quantity: prev.quantity + 1 } : prev
                           )
                         }
-                        className="px-3 py-2 bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
+                        aria-label="Aumenta quantità"
+                        className="min-h-12 w-full bg-gray-400 rounded hover:bg-gray-600 text-xl leading-none"
                       >
                         +
                       </button>
@@ -1374,36 +1712,110 @@ useEffect(() => {
                     </label>
                   </div>
                 )}
-                {metadataLoading ? (
-                  <div className="mt-4 text-sm text-gray-500 dark:text-gray-300">Caricamento metadati...</div>
-                ) : (
-                  <MetadataFieldsSection
-                    definitions={metadataDefinitions.filter((definition) => definition.is_active)}
-                    drafts={editingMetadataDrafts}
-                    onChange={(definition, value) => {
-                      setEditingMetadataDrafts((current) => {
-                        const nextDraft = createEmptyMetadataDraft(definition.field_type);
-                        nextDraft.definition_id = definition.id;
-
-                        if (definition.field_type === 'TEXT' || definition.field_type === 'LIST') {
-                          nextDraft.value_text = value || null;
-                        } else if (definition.field_type === 'NUMBER') {
-                          nextDraft.value_number = value === '' ? null : value;
-                        } else if (definition.field_type === 'BOOLEAN') {
-                          nextDraft.value_boolean = value === '' ? null : value === 'true';
-                        } else {
-                          nextDraft.value_date = value || null;
-                        }
-
-                        return {
-                          ...current,
-                          [definition.id]: nextDraft,
-                        };
-                      });
+                {isChecklist && !isCloning && canEdit && (
+                  <ListLinkField
+                    current={itemBeingEdited.assignment
+                      ? { name: itemBeingEdited.assignment.source_name ?? "", inventoryName: itemBeingEdited.assignment.source_inventory_name, qty: itemBeingEdited.assignment.qty }
+                      : null}
+                    onPick={async (picked, qty) => {
+                      const created = await createAssignment(itemBeingEdited.id, picked.id, qty);
+                      setItemBeingEdited((prev) => (prev ? { ...prev, assignment: created } : prev));
+                      setItems((current) => current.map((it) => (it.id === itemBeingEdited.id ? { ...it, assignment: created } : it)));
+                    }}
+                    onClear={async () => {
+                      if (!itemBeingEdited.assignment) return;
+                      await deleteAssignment(itemBeingEdited.assignment.id);
+                      setItemBeingEdited((prev) => (prev ? { ...prev, assignment: null } : prev));
+                      setItems((current) => current.map((it) => (it.id === itemBeingEdited.id ? { ...it, assignment: null } : it)));
+                      window.dispatchEvent(new Event(ITEMS_CHANGED_EVENT));
+                    }}
+                    onClearAndDelete={async () => {
+                      await deleteItem(itemBeingEdited.id);
+                      setItems((current) => current.filter((it) => it.id !== itemBeingEdited.id));
+                      setItemBeingEdited(null);
+                      window.dispatchEvent(new Event(ITEMS_CHANGED_EVENT));
                     }}
                   />
                 )}
-                <div className="flex justify-end gap-2">
+                {!isCloning && (
+                  <details className="mb-3 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <span className="min-w-0">
+                        <span className="block font-medium">Codici a barre / QR</span>
+                        <span className="block break-all text-sm text-gray-500 dark:text-gray-400">
+                          {(itemBeingEdited.barcodes?.length ?? 0) === 1
+                            ? '1 codice assegnato'
+                            : `${itemBeingEdited.barcodes?.length ?? 0} codici assegnati`}
+                          {(itemBeingEdited.barcodes?.length ?? 0) > 0 && ` · ${itemBeingEdited.barcodes?.map((barcode) => barcode.code).join(', ')}`}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-gray-500" aria-hidden="true">⌄</span>
+                    </summary>
+                    <div className="border-t border-gray-200 px-4 pt-3 dark:border-gray-700">
+                      <ItemBarcodesEditor
+                        itemId={itemBeingEdited.id}
+                        barcodes={itemBeingEdited.barcodes ?? []}
+                        onChange={(barcodes) => {
+                          setItemBeingEdited((prev) => (prev ? { ...prev, barcodes } : prev));
+                          setItems((current) =>
+                            current.map((item) => (item.id === itemBeingEdited.id ? { ...item, barcodes } : item)),
+                          );
+                        }}
+                      />
+                    </div>
+                  </details>
+                )}
+                {metadataDefinitions.some((definition) => definition.is_active) && (
+                  <details className="mb-4 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <span className="min-w-0">
+                        <span className="block font-medium">Metadati</span>
+                        {metadataLoading ? (
+                          <span className="block text-sm text-gray-500 dark:text-gray-400">Caricamento valori…</span>
+                        ) : editingMetadataRecap.length > 0 ? (
+                          <span className="block text-sm text-gray-600 dark:text-gray-300">
+                            {editingMetadataRecap.map((metadata) => `${metadata.label}: ${metadata.value}`).join(' · ')}
+                          </span>
+                        ) : (
+                          <span className="block text-sm text-gray-500 dark:text-gray-400">Nessun metadato valorizzato</span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-gray-500" aria-hidden="true">⌄</span>
+                    </summary>
+                    <div className="border-t border-gray-200 px-4 pt-1 dark:border-gray-700">
+                      {metadataLoading ? (
+                        <div className="py-3 text-sm text-gray-500 dark:text-gray-300">Caricamento metadati…</div>
+                      ) : (
+                        <MetadataFieldsSection
+                          definitions={metadataDefinitions.filter((definition) => definition.is_active)}
+                          drafts={editingMetadataDrafts}
+                          onChange={(definition, value) => {
+                            setEditingMetadataDrafts((current) => {
+                              const nextDraft = createEmptyMetadataDraft(definition.field_type);
+                              nextDraft.definition_id = definition.id;
+
+                              if (definition.field_type === 'TEXT' || definition.field_type === 'LIST') {
+                                nextDraft.value_text = value || null;
+                              } else if (definition.field_type === 'NUMBER') {
+                                nextDraft.value_number = value === '' ? null : value;
+                              } else if (definition.field_type === 'BOOLEAN') {
+                                nextDraft.value_boolean = value === '' ? null : value === 'true';
+                              } else {
+                                nextDraft.value_date = value || null;
+                              }
+
+                              return {
+                                ...current,
+                                [definition.id]: nextDraft,
+                              };
+                            });
+                          }}
+                        />
+                      )}
+                    </div>
+                  </details>
+                )}
+                <div className="grid w-full grid-cols-2 gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -1412,13 +1824,13 @@ useEffect(() => {
                       setEditingMetadataDrafts({});
                       setEditingMetadataValues([]);
                     }}
-                    className="px-3 py-1 bg-gray-400 rounded hover:bg-gray-600"
+                    className="min-h-12 w-full rounded-xl bg-gray-400 px-4 font-medium hover:bg-gray-600"
                   >
                     Chiudi
                   </button>
                   <button
                     type="submit"
-                    className={`px-3 py-1 text-white rounded hover:opacity-90 ${isCloning ? "bg-yellow-500 hover:bg-yellow-600" : "bg-green-600 hover:bg-green-700"}`}
+                    className={`min-h-12 w-full rounded-xl px-4 font-medium text-white hover:opacity-90 ${isCloning ? "bg-yellow-500 hover:bg-yellow-600" : "bg-green-600 hover:bg-green-700"}`}
                   >
                     {isCloning ? "Clona" : "Salva modifiche"}
                   </button>
@@ -1430,8 +1842,14 @@ useEffect(() => {
       </Dialog>
       <Dialog open={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} className="relative z-50">
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white dark:bg-gray-900 dark:text-white p-6 rounded w-full max-w-lg space-y-4">
+        <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+          <Dialog.Panel
+            style={{ transform: `translateY(${importExportSheetDrag.offset}px)`, transition: importExportSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }}
+            className="max-h-[92dvh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-white sm:max-w-lg sm:rounded-xl sm:p-6 sm:pb-6"
+          >
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...importExportSheetDrag.gripProps} className="mx-auto mb-2 flex h-8 w-16 touch-none items-center justify-center sm:hidden">
+              <span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
+            </button>
             <Dialog.Title className="text-lg font-semibold mb-2">Importa / Esporta CSV</Dialog.Title>
             <button
               onClick={() => {
@@ -1526,6 +1944,9 @@ useEffect(() => {
         entityId={inventory?.id || 0}
         entityName={inventory?.name || ""}
       />
+      {isAddFromInventoryOpen && inventory && (
+        <AddFromInventoryDialog listId={inventory.id} onClose={() => setIsAddFromInventoryOpen(false)} />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { getUsers, getRoles, updateUser, createUser, deleteUser } from "../../api"; // Assicurati che esista o crealo
 import { Dialog } from "@headlessui/react";
 import { User, Role } from "../../types";
+import { useBottomSheetDrag } from "../../components/useBottomSheetDrag";
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -77,6 +78,9 @@ export default function UserManagementPage() {
     return () => clearTimeout(timeout);
   };
 
+  const editSheetDrag = useBottomSheetDrag(closeModal);
+  const createSheetDrag = useBottomSheetDrag(() => setIsCreateModalOpen(false));
+
   const saveChanges = () => {
     if (password && password !== confirmPassword) {
       showMessage("Le password non coincidono", "error");
@@ -127,7 +131,7 @@ export default function UserManagementPage() {
   };
 
   const filteredUsers = users.filter(user =>
-    (roleFilter === "all" || user.role.name === roleFilter) &&
+    (roleFilter === "all" || user.role?.name === roleFilter) &&
     (statusFilter === "all" || (statusFilter === "active" ? !user.is_blocked : user.is_blocked))
   );
 
@@ -143,7 +147,7 @@ export default function UserManagementPage() {
             className="w-full border rounded p-1"
           >
             <option value="all">Tutti i ruoli</option>
-            {[...new Set(users.map(u => u.role.name))].map(role => (
+            {[...new Set(users.map(u => u.role?.name).filter(Boolean))].map(role => (
               <option key={role} value={role}>{role}</option>
             ))}
           </select>
@@ -178,7 +182,7 @@ export default function UserManagementPage() {
               <tr key={user.id}>
                 <td className="p-2 border">{user.username}</td>
                 <td className="p-2 border">{user.email}</td>
-                <td className="p-2 border">{user.role.name}</td>
+                <td className="p-2 border">{user.role?.name ?? "-"}</td>
                 <td className="p-2 border text-center">{user.is_blocked ? "🔴 Bloccato" : "🟢 Attivo"}</td>
                 <td className="p-2 border">{new Date(user.data_ins).toLocaleString()}</td>
                 <td className="p-2 border">{new Date(user.data_mod).toLocaleString()}</td>
@@ -220,8 +224,9 @@ export default function UserManagementPage() {
 
       <Dialog open={isModalOpen} onClose={closeModal} className="relative z-50">
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white dark:bg-gray-900 dark:text-white p-6 rounded w-full max-w-md space-y-4">
+        <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+          <Dialog.Panel style={{ transform: `translateY(${editSheetDrag.offset}px)`, transition: editSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-white sm:max-w-md sm:rounded-xl sm:p-6 sm:pb-6">
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...editSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
             <Dialog.Title className="text-lg font-semibold mb-4">
               Modifica utente
             </Dialog.Title>
@@ -299,8 +304,9 @@ export default function UserManagementPage() {
 
       <Dialog open={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} className="relative z-50">
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-center justify-center p-4">
-          <Dialog.Panel className="bg-white dark:bg-gray-900 dark:text-white p-6 rounded w-full max-w-md space-y-4">
+        <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+          <Dialog.Panel style={{ transform: `translateY(${createSheetDrag.offset}px)`, transition: createSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-white sm:max-w-md sm:rounded-xl sm:p-6 sm:pb-6">
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...createSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
             <Dialog.Title className="text-lg font-semibold mb-4">
               Crea utente
             </Dialog.Title>

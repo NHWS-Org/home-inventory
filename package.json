@@ -7,9 +7,14 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "build": "node -c telemetry-worker/src/index.js"
+    "build": "node scripts/inject-d1-id.js && node -c telemetry-worker/src/index.js"
   },
   "devDependencies": {
     "wrangler": "^4.153.0"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true,
+    "esbuild@0.28.2": true,
+    "workerd@1.20261023.1": true
   }
 }

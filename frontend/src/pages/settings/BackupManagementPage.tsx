@@ -13,6 +13,7 @@ import {
   getSetting
 } from "../../api";
 import BackupScheduleManager from "./BackupScheduleManager";
+import { useBottomSheetDrag } from "../../components/useBottomSheetDrag";
 
 export default function BackupManagementPage() {
   const [backups, setBackups] = useState<{
@@ -70,7 +71,7 @@ export default function BackupManagementPage() {
   } | null>(null);
 
   const [filterText, setFilterText] = useState("");
-  const [backupTypeFilter, setBackupTypeFilter] = useState<"all" | "manual" | "auto">("all");
+  const [backupTypeFilter, setBackupTypeFilter] = useState<"all" | "manual" | "auto" | "uploaded">("all");
   const [sortField, setSortField] = useState<"filename" | "modified" | "size">("modified");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedBackupNames, setSelectedBackupNames] = useState<string[]>([]);
@@ -92,6 +93,8 @@ export default function BackupManagementPage() {
       reason?: string;
     };
   } | null>(null);
+  const scheduleSheetDrag = useBottomSheetDrag(() => setShowScheduleModal(false));
+  const restoreSheetDrag = useBottomSheetDrag(() => setRestoreTarget(null));
 
   const revisionDisplay = (revision?: string | null): string => {
     if (!revision) return "n/d";
@@ -201,10 +204,12 @@ export default function BackupManagementPage() {
       .filter((b) => {
         const matchText = b.filename.toLowerCase().includes(filterText.toLowerCase());
         const isAuto = b.filename.startsWith("auto_");
+        const isUploaded = b.filename.startsWith("uploaded_");
         const matchType =
           backupTypeFilter === "all" ||
-          (backupTypeFilter === "manual" && !isAuto) ||
-          (backupTypeFilter === "auto" && isAuto);
+          (backupTypeFilter === "manual" && !isAuto && !isUploaded) ||
+          (backupTypeFilter === "auto" && isAuto) ||
+          (backupTypeFilter === "uploaded" && isUploaded);
         return matchText && matchType;
       })
       .sort((a, b) => {
@@ -406,7 +411,7 @@ export default function BackupManagementPage() {
   const giorniSettimana = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden p-4">
       <h2 className="text-lg font-semibold">Gestione Backup</h2>
       <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center">
@@ -441,12 +446,12 @@ export default function BackupManagementPage() {
           type="file"
           accept=".sql"
           onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
-          className="border rounded p-1"
+          className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1"
         />
         <button
           onClick={uploadBackupLocal}
           disabled={loading || !selectedFile}
-          className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700"
+          className="px-3 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
         >
           Carica Backup
           {loading && <span className="ml-2 animate-spin">⏳</span>}
@@ -455,13 +460,13 @@ export default function BackupManagementPage() {
       <button
         onClick={createBackupLocal}
         disabled={loading}
-        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+        className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
       >
         Crea Backup
         {loading && <span className="ml-2 animate-spin">⏳</span>}
       </button>
 
-      <details className="border rounded p-3 bg-gray-50 dark:bg-gray-800" open={false}>
+      <details className="border border-gray-200 dark:border-gray-700 rounded p-3 bg-gray-50 dark:bg-gray-800" open={false}>
         <summary className="cursor-pointer font-medium select-none">
           Mappa compatibilita versioni DB
         </summary>
@@ -545,19 +550,20 @@ export default function BackupManagementPage() {
             onKeyDown={(e) => {
               if (e.key === "Escape") setFilterText("");
             }}
-            className="border rounded p-1 w-full sm:w-64"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1 w-full sm:w-64"
           />
         </div>
         <div>
           <label className="block text-sm font-medium">Visualizza:</label>
           <select
             value={backupTypeFilter}
-            onChange={(e) => setBackupTypeFilter(e.target.value as "all" | "manual" | "auto")}
-            className="border rounded px-2 py-1"
+            onChange={(e) => setBackupTypeFilter(e.target.value as "all" | "manual" | "auto" | "uploaded")}
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded px-2 py-1"
           >
             <option value="all">Tutti</option>
             <option value="manual">Manuali</option>
             <option value="auto">Automatici</option>
+            <option value="uploaded">Caricati</option>
           </select>
         </div>
         <div>
@@ -565,7 +571,7 @@ export default function BackupManagementPage() {
           <select
             value={sortField}
             onChange={(e) => setSortField(e.target.value as "filename" | "modified" | "size")}
-            className="border rounded px-2 py-1"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded px-2 py-1"
           >
             <option value="modified">Data</option>
             <option value="filename">Nome</option>
@@ -573,7 +579,7 @@ export default function BackupManagementPage() {
           </select>
           <button
             onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
-            className="ml-2 px-2 py-1 border rounded"
+            className="ml-2 px-2 py-1 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded"
           >
             {sortDirection === "asc" ? "↑" : "↓"}
           </button>
@@ -612,12 +618,17 @@ export default function BackupManagementPage() {
       <ul className="space-y-2">
         {displayedBackups.map((backup) => {
             const isAuto = backup.filename.startsWith("auto_");
+            const isUploaded = backup.filename.startsWith("uploaded_");
             return (
               <li
                 key={backup.filename}
-                className={`flex flex-col sm:flex-row sm:justify-between sm:items-center border p-2 rounded ${isAuto ? "bg-yellow-50 border-yellow-400 dark:bg-yellow-500 dark:border-yellow-700 dark:text-black" : ""}`}
+                className={`flex min-w-0 flex-col overflow-hidden border p-2 rounded sm:flex-row sm:justify-between sm:items-center ${
+                  isAuto
+                    ? "bg-yellow-50 border-yellow-400 dark:bg-amber-950/30 dark:border-amber-700/60 dark:text-gray-100"
+                    : "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-100"
+                }`}
               >
-                <div className="flex items-start gap-3 flex-1">
+                <div className="flex min-w-0 w-full items-start gap-3 sm:flex-1">
                   <input
                     type="checkbox"
                     checked={selectedBackupNames.includes(backup.filename)}
@@ -625,14 +636,15 @@ export default function BackupManagementPage() {
                     className="mt-1 w-4 h-4"
                     title={`Seleziona ${backup.filename}`}
                   />
-                  <div className="flex-1">
-                  <div className="break-words">{backup.filename}
-                    {isAuto && <span className="inline-block text-xs font-semibold text-yellow-700 bg-yellow-200 rounded px-2 py-0.5 ml-2">Automatico</span>}
+                  <div className="min-w-0 flex-1">
+                  <div className="break-all font-medium">{backup.filename}
+                    {isAuto && <span className="inline-block text-xs font-semibold text-yellow-800 bg-yellow-200 dark:bg-amber-900/50 dark:text-amber-200 rounded px-2 py-0.5 ml-2">Automatico</span>}
+                    {isUploaded && <span className="inline-block text-xs font-semibold text-blue-800 bg-blue-100 dark:bg-blue-900/50 dark:text-blue-200 rounded px-2 py-0.5 ml-2">Caricato</span>}
                   </div>
-                  <div className="text-sm text-gray-600">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
                     {(backup.size / 1024).toFixed(2)} KB - {new Date(backup.modified).toLocaleString()}
                   </div>
-                  <div className="text-xs text-gray-600 dark:text-gray-300 mt-1 space-y-1">
+                  <div className="mt-1 space-y-1 break-words text-xs text-gray-600 dark:text-gray-300">
                     <div>
                       <span className="font-semibold">Formato:</span>{" "}
                       {backup.metadata?.format || (backup.has_metadata ? "n/d" : "legacy/no-metadata")}
@@ -710,8 +722,9 @@ export default function BackupManagementPage() {
           })}
       </ul>
       {showScheduleModal && (
-        <div className="fixed inset-0 z-50 bg-black/30 bg-opacity-30 flex items-center justify-center">
-          <div className="bg-white dark:bg-gray-900 p-4 rounded shadow w-full max-w-lg">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4">
+          <div style={{ transform: `translateY(${scheduleSheetDrag.offset}px)`, transition: scheduleSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-lg sm:rounded-xl sm:p-4 sm:pb-4">
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...scheduleSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
             <BackupScheduleManager
               currentConfig={scheduleConfig}
               onSaved={() => {
@@ -732,8 +745,9 @@ export default function BackupManagementPage() {
       )}
 
       {restoreTarget && (
-        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-900 p-4 rounded shadow w-full max-w-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 sm:items-center sm:p-4">
+          <div style={{ transform: `translateY(${restoreSheetDrag.offset}px)`, transition: restoreSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[92dvh] w-full space-y-4 overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-xl sm:rounded-xl sm:p-4 sm:pb-4">
+            <button type="button" aria-label="Chiudi o trascina verso il basso" {...restoreSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
             <h3 className="text-lg font-semibold">Ripristino backup</h3>
             <p className="text-sm break-all">
               <span className="font-semibold">File:</span> {restoreTarget.filename}

@@ -8,6 +8,7 @@ from crud import get_setting, set_setting
 import logging
 import traceback
 from models import ItemVersion, InventoryVersion, Item, Inventory
+from telemetry_service import send_telemetry, telemetry_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,32 @@ def scheduled_backup():
         db.close()
     logger.info("Backup automatico completato.")
 
+def scheduled_telemetry():
+    db = SessionLocal()
+    try:
+        send_telemetry(db)
+    except Exception:
+        logger.error(f"Errore nella telemetria: {traceback.format_exc()}")
+    finally:
+        db.close()
+
+def _schedule_telemetry():
+    if not telemetry_enabled():
+        return
+    # Primo invio poco dopo l'avvio, poi una volta al giorno
+    scheduler.add_job(
+        scheduled_telemetry,
+        trigger=IntervalTrigger(hours=24),
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+        id="telemetry_job",
+        replace_existing=True,
+    )
+    logger.info("Telemetria anonima attiva (opt-in): invio giornaliero.")
+
+def _ensure_scheduler_started():
+    if scheduler.get_jobs() and not scheduler.running:
+        scheduler.start()
+
 def start_scheduler():
     db = SessionLocal()
     try:
@@ -96,9 +123,11 @@ def start_scheduler():
         interval_minutes = _setting_int(db, "BACKUP_INTERVAL_MINUTES", 0)
 
         scheduler.remove_all_jobs()
+        _schedule_telemetry()
 
         if frequency == "none":
             logger.info("Backup automatico disabilitato.")
+            _ensure_scheduler_started()
             return
 
         if frequency == "hourly":
@@ -133,6 +162,7 @@ def start_scheduler():
             logger.info(f"Scheduler avviato. Backup settimanale il giorno {interval_days} alle {interval_hours:02}:{interval_minutes:02}.")
         else:
             logger.warning(f"Frequenza di backup non riconosciuta: {frequency}")
+            _ensure_scheduler_started()
             return
 
         if not scheduler.running:

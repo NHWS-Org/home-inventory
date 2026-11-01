@@ -132,7 +132,7 @@ class ItemBase(BaseModel):
     inventory_id: int
 
 class ItemCreate(ItemBase):
-    pass
+    barcodes: List['ItemBarcodeCreate'] = []
 
 class ItemUpdate(BaseModel):
     name: Optional[str]
@@ -143,8 +143,80 @@ class ItemUpdate(BaseModel):
 class ItemDelete(BaseModel):
     confirm: bool
 
+class ItemBarcodeResponse(BaseModel):
+    id: int
+    code: str
+    format: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class ItemBarcodeCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=256)
+    format: Optional[str] = Field(default=None, max_length=32)
+
+class BarcodeMatch(BaseModel):
+    item_id: int
+    name: str
+    quantity: Optional[int] = None
+    inventory_id: int
+    inventory_name: Optional[str] = None
+    inventory_type: Optional[str] = None
+
+class BarcodeProduct(BaseModel):
+    name: Optional[str] = None
+    brand: Optional[str] = None
+    quantity_label: Optional[str] = None
+    image_url: Optional[str] = None
+    source: Optional[str] = None
+
+class BarcodeLookupResponse(BaseModel):
+    code: str
+    matches: List[BarcodeMatch] = []
+    product: Optional[BarcodeProduct] = None
+
+class AssignmentCreate(BaseModel):
+    list_item_id: int
+    source_item_id: int
+    qty: int = Field(default=1, ge=1)
+
+class AssignmentUpdate(BaseModel):
+    qty: int = Field(ge=1)
+
+class AssignmentResponse(BaseModel):
+    id: int
+    list_item_id: int
+    list_item_name: Optional[str] = None
+    list_id: Optional[int] = None
+    list_name: Optional[str] = None
+    list_checked: bool = False
+    source_item_id: int
+    source_name: Optional[str] = None
+    source_inventory_id: Optional[int] = None
+    source_inventory_name: Optional[str] = None
+    source_stock: Optional[int] = None
+    source_net_qty: Optional[int] = None
+    qty: int
+
+class ItemAssignmentSummary(BaseModel):
+    """Presente sulle righe di lista collegate a un item di inventario."""
+    id: int
+    list_checked: bool = False
+    source_item_id: int
+    source_name: Optional[str] = None
+    source_inventory_id: Optional[int] = None
+    source_inventory_name: Optional[str] = None
+    source_stock: Optional[int] = None
+    source_net_qty: Optional[int] = None
+    qty: int
+
 class ItemResponse(ItemBase, LoggingResponse):
     id: int
+    barcodes: List[ItemBarcodeResponse] = []
+    assignment: Optional[ItemAssignmentSummary] = None
+    assignment_count: int = 0
+    assigned_qty: int = 0
+    net_qty: Optional[int] = None
     username_ins: Optional[str] = None
     username_mod: Optional[str] = None
     metadata_values: List['ItemMetadataValueResponse'] = []

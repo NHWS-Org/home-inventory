@@ -11,6 +11,7 @@ import threading
 import logging
 import json
 import re
+import uuid
 from functools import lru_cache
 from dependencies import get_db, role_required
 from models import RoleEnum
@@ -67,6 +68,8 @@ CORE_RESTORE_TABLES = {
     "metadata_definitions",
     "filter_templates",
     "items",
+    "item_barcodes",
+    "list_assignments",
     "inventories",
     "user_group_association",
     "groups",
@@ -685,6 +688,8 @@ def restore_backup(filename: str, payload: RestoreRequest = Body(...)):
                     "filter_templates",
                     "item_versions",
                     "inventory_versions",
+                    "item_barcodes",
+                    "list_assignments",
                     "items",
                     "metadata_definitions",
                     "user_group_association",
@@ -744,8 +749,17 @@ def restore_backup(filename: str, payload: RestoreRequest = Body(...)):
 def upload_backup(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="Nome file non fornito.")
-
-    file_path = _safe_backup_path(file.filename)
+    # Gli upload sono importazioni, anche quando il file proviene da un backup
+    # automatico. Il prefisso li distingue dai backup creati localmente; il token
+    # evita collisioni anche con upload ripetuti o nomi uguali.
+    original_name = file.filename.replace("\\", "/").rsplit("/", 1)[-1]
+    if not original_name.endswith(".sql"):
+        raise HTTPException(status_code=400, detail="Formato file non valido. Solo file .sql ammessi")
+    original_name = original_name.lstrip(".") or "backup.sql"
+    original_name = original_name[:120]
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"uploaded_{timestamp}_{uuid.uuid4().hex}_{original_name}"
+    file_path = _safe_backup_path(filename)
 
     try:
         with open(file_path, "wb") as buffer:

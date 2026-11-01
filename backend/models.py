@@ -156,6 +156,65 @@ class Item(Base, LoggingData):
     inventory_id = Column(Integer, ForeignKey("inventories.id"), nullable=False)
     inventory = relationship("Inventory", back_populates="items")
     metadata_values = relationship("ItemMetadataValue", back_populates="item", cascade="all, delete-orphan")
+    barcodes = relationship("ItemBarcode", back_populates="item", cascade="all, delete-orphan", order_by="ItemBarcode.id")
+    # Come riga di lista: assegnazione verso un item di inventario (max una)
+    list_assignment = relationship(
+        "ListAssignment", foreign_keys="ListAssignment.list_item_id", back_populates="list_item",
+        cascade="all, delete-orphan", uselist=False,
+    )
+    # Come item di inventario: assegnazioni che lo prelevano da liste
+    source_assignments = relationship(
+        "ListAssignment", foreign_keys="ListAssignment.source_item_id", back_populates="source_item",
+        cascade="all, delete-orphan",
+    )
+
+################################################
+# Assegnazione: collega una riga di lista a un item di inventario da cui prelevare
+class ListAssignment(Base, LoggingData):
+    __tablename__ = "list_assignments"
+    __table_args__ = (
+        CheckConstraint("qty >= 1", name="ck_list_assignments_qty_positive"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    list_item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, unique=True)
+    source_item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    qty = Column(Integer, nullable=False, default=1)
+    # Ultimo scarico effettuato alla spunta (serve per l'annullamento entro la finestra)
+    applied_at = Column(DateTime, nullable=True)
+    applied_qty = Column(Integer, nullable=True)
+
+    list_item = relationship("Item", foreign_keys=[list_item_id], back_populates="list_assignment")
+    source_item = relationship("Item", foreign_keys=[source_item_id], back_populates="source_assignments")
+
+################################################
+# Codici a barre / QR associati a un item (N per item)
+class ItemBarcode(Base, LoggingData):
+    __tablename__ = "item_barcodes"
+    __table_args__ = (
+        UniqueConstraint("item_id", "code", name="uq_item_barcodes_item_code"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    code = Column(String, nullable=False, index=True)
+    format = Column(String, nullable=True)  # es. ean_13, qr_code, code_128
+
+    item = relationship("Item", back_populates="barcodes")
+
+################################################
+# Cache anagrafica prodotti da fonte esterna (Open * Facts)
+class BarcodeProductCache(Base):
+    __tablename__ = "barcode_product_cache"
+
+    code = Column(String, primary_key=True)
+    found = Column(Boolean, nullable=False, default=False)
+    name = Column(String, nullable=True)
+    brand = Column(String, nullable=True)
+    quantity_label = Column(String, nullable=True)
+    image_url = Column(String, nullable=True)
+    source = Column(String, nullable=True)
+    fetched_at = Column(DateTime, nullable=False)
 
 ################################################
 class MetadataDefinition(Base, LoggingData):

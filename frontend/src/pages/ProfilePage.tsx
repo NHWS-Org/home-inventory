@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { getUserInfo, updateMe } from "../api";
+import { Link, useLocation } from "react-router-dom";
 
 const ProfilePage = () => {
+  const location = useLocation();
+  const previousPath = (location.state as { from?: string } | null)?.from;
+  const returnPath = previousPath?.startsWith("/") && !previousPath.startsWith("/profile") ? previousPath : "/";
   const [email, setEmail] = useState("");
   const [initialEmail, setInitialEmail] = useState("");
   const [maskedEmail, setMaskedEmail] = useState("");
@@ -162,6 +166,9 @@ const ProfilePage = () => {
 
   return (
     <div className="max-w-md mx-auto mt-8 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-8">
+      <Link to={returnPath} className="inline-flex min-h-11 items-center rounded-xl bg-gray-100 px-4 font-medium text-blue-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-gray-700">
+        ← Torna indietro
+      </Link>
       <div>
         <h2 className="text-xl font-bold mb-4">Dati Anagrafici</h2>
         <form onSubmit={handleProfileSubmit} className="space-y-4">

@@ -9,6 +9,9 @@ import {
   ChecklistItem,
   ChecklistWithMatches,
   ItemVersion,
+  ItemBarcode,
+  Assignment,
+  BarcodeLookupResult,
   InventoryVersion,
   MetadataDefinition,
   MetadataDefinitionCreate,
@@ -34,28 +37,43 @@ import {
   FilterTemplateScopePreview,
 } from "./types";
 
-let api: ReturnType<typeof axios.create>;
-
 function getApiBaseUrl() {
-  //console.error("VITE_BACKEND_BASE_URL:", window.APP_CONFIG?.VITE_BACKEND_BASE_URL);
-  //return window.APP_CONFIG?.VITE_BACKEND_BASE_URL ?? 'http://localhost:8001';
   return '/api';
 }
 
-export function createApiInstance() {
-  api = axios.create({
-    baseURL: getApiBaseUrl(),
-    withCredentials: false,
-  });
+const api = axios.create({
+  baseURL: getApiBaseUrl(),
+  withCredentials: false,
+});
 
-  api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem('access_token');
+      if (
+        typeof window !== 'undefined' &&
+        window.location.pathname !== '/login' &&
+        window.location.pathname !== '/register'
+      ) {
+        window.location.href = '/login';
+      }
     }
-    return config;
-  });
+    return Promise.reject(error);
+  }
+);
+
+export function createApiInstance() {
+  api.defaults.baseURL = getApiBaseUrl();
 }
 
 export { api };
@@ -98,6 +116,21 @@ export async function getUsers(): Promise<User[]> {
 /* RECUPERO VERSIONE API */
 export async function getApiVersion(): Promise<{ version: string }> {
   const response = await api.get<{ version: string }>("/system/version");
+  return response.data;
+}
+
+export interface AboutStats {
+  available: boolean;
+  active_installations: number | null;
+  active_window_days: number | null;
+  countries: { country: string; n: number }[];
+  versions: { version: string; n: number }[];
+  channels: { channel: string; n: number }[];
+}
+
+/* STATISTICHE AGGREGATE DELLA COMMUNITY (TAB ABOUT) */
+export async function getAboutStats(): Promise<AboutStats> {
+  const response = await api.get<AboutStats>("/system/about-stats");
   return response.data;
 }
 
@@ -150,7 +183,7 @@ export const updateUser = async (
     password?: string;
     is_blocked: boolean;
     role_id: number;
-}) => {
+  }) => {
   const response = await api.put(`/user/users/${id}`, data);
   return response.data;
 };
@@ -280,9 +313,90 @@ export async function createItem(data: {
   description?: string;
   quantity: number;
   inventory_id: number;
+  barcodes?: { code: string; format?: string | null }[];
 }): Promise<InventoryItem> {
   const response = await api.post('/item/', data);
   return response.data as InventoryItem;
+}
+
+/* BARCODE */
+export async function lookupBarcode(code: string, external = true): Promise<BarcodeLookupResult> {
+  const response = await api.get('/barcode/lookup', { params: { code, external } });
+  return response.data as BarcodeLookupResult;
+}
+
+export interface AdminBarcodeRecord {
+  id: number;
+  code: string;
+  format: string | null;
+  item_id: number;
+  item_name: string;
+  inventory_id: number;
+  inventory_name: string;
+  data_mod: string;
+}
+
+export interface AdminBarcodeCacheEntry {
+  code: string;
+  found: boolean;
+  name: string | null;
+  brand: string | null;
+  quantity_label: string | null;
+  image_url: string | null;
+  source: string | null;
+  fetched_at: string;
+}
+
+export interface AdminBarcodeDebugResult {
+  raw_code: string;
+  normalized_code: string;
+  format: string | null;
+  is_valid_gtin: boolean;
+  is_isbn: boolean;
+  lookup_enabled: boolean;
+  source_checks: { source: string; outcome: 'found' | 'missing' | 'error' | 'pending'; detail?: string }[];
+  force_refresh: boolean;
+  matches: { barcode_id: number; item_id: number; item_name: string; inventory_id: number; inventory_name: string }[];
+  product: { name: string | null; brand: string | null; quantity_label: string | null; image_url: string | null; source: string | null } | null;
+  cache: { found: boolean; name: string | null; brand: string | null; source: string | null; fetched_at: string } | null;
+  checked_at: string;
+}
+
+export async function getAdminBarcodes(query = ''): Promise<AdminBarcodeRecord[]> {
+  const response = await api.get('/barcode/admin/codes', { params: { query } });
+  return response.data as AdminBarcodeRecord[];
+}
+
+export async function getAdminBarcodeCache(query = ''): Promise<AdminBarcodeCacheEntry[]> {
+  const response = await api.get('/barcode/admin/cache', { params: { query } });
+  return response.data as AdminBarcodeCacheEntry[];
+}
+
+export async function debugAdminBarcode(code: string, format: string | null, forceRefresh = false): Promise<AdminBarcodeDebugResult> {
+  const response = await api.post('/barcode/admin/debug', { code, format, force_refresh: forceRefresh });
+  return response.data as AdminBarcodeDebugResult;
+}
+
+export async function correctAdminBarcode(barcodeId: number, code: string, format: string | null): Promise<void> {
+  await api.put(`/barcode/admin/codes/${barcodeId}`, { code, format });
+}
+
+export async function deleteAdminBarcodeCache(code: string): Promise<void> {
+  await api.delete(`/barcode/admin/cache/${encodeURIComponent(code)}`);
+}
+
+export async function clearAdminBarcodeCache(): Promise<number> {
+  const response = await api.delete('/barcode/admin/cache');
+  return response.data.deleted as number;
+}
+
+export async function addItemBarcode(itemId: number, code: string, format?: string | null): Promise<ItemBarcode> {
+  const response = await api.post(`/item/${itemId}/barcodes`, { code, format: format ?? null });
+  return response.data as ItemBarcode;
+}
+
+export async function deleteItemBarcode(itemId: number, barcodeId: number): Promise<void> {
+  await api.delete(`/item/${itemId}/barcodes/${barcodeId}`);
 }
 
 /* MODIFICA ITEM */
@@ -291,9 +405,31 @@ export async function updateItem(itemId: number, data: {
   description?: string;
   quantity: number;
   inventory_id: number;
-}): Promise<InventoryItem> {
-  const response = await api.patch(`/item/${itemId}`, data);
+}, onInsufficient?: 'zero'): Promise<InventoryItem> {
+  const response = await api.patch(`/item/${itemId}`, data, {
+    params: onInsufficient ? { on_insufficient: onInsufficient } : undefined,
+  });
   return response.data as InventoryItem;
+}
+
+/* ASSEGNAZIONI lista -> inventario */
+export async function createAssignment(listItemId: number, sourceItemId: number, qty: number): Promise<Assignment> {
+  const response = await api.post('/assignment/', { list_item_id: listItemId, source_item_id: sourceItemId, qty });
+  return response.data as Assignment;
+}
+
+export async function updateAssignment(id: number, qty: number): Promise<Assignment> {
+  const response = await api.patch(`/assignment/${id}`, { qty });
+  return response.data as Assignment;
+}
+
+export async function deleteAssignment(id: number): Promise<void> {
+  await api.delete(`/assignment/${id}`);
+}
+
+export async function getAssignmentsBySource(itemId: number): Promise<Assignment[]> {
+  const response = await api.get(`/assignment/by-source/${itemId}`);
+  return response.data as Assignment[];
 }
 
 /* CANCELLAZIONE ITEM */
@@ -475,7 +611,7 @@ export async function downloadBackup(filename: string): Promise<void> {
   const response = await api.get(`/backup/download/${encodeURIComponent(filename)}`, {
     responseType: 'blob'
   });
-  
+
   const blob = new Blob([response.data as Blob]);
   const url = window.URL.createObjectURL(blob);
 
@@ -485,7 +621,7 @@ export async function downloadBackup(filename: string): Promise<void> {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  
+
   window.URL.revokeObjectURL(url);
 }
 
@@ -696,6 +832,7 @@ export async function getItemAuditLogs(
 }
 
 export async function getInventoryAuditLogs(
+  inventoryId?: number,
   userId?: number,
   userScope?: "active" | "none" | "deleted",
   operation?: string,
@@ -705,6 +842,7 @@ export async function getInventoryAuditLogs(
 ): Promise<InventoryVersion[]> {
   const response = await api.get('/audit/logs/inventories', {
     params: {
+      ...(inventoryId && { inventory_id: inventoryId }),
       ...(userId && { user_id: userId }),
       ...(userScope && { user_scope: userScope }),
       ...(operation && { operation }),

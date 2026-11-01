@@ -89,6 +89,7 @@ jobs:
           push: true
           build-args: |
             BACKEND_VERSION=${{ steps.meta.outputs.backend_tag }}
+            IMAGE_CHANNEL=${{ steps.meta.outputs.channel == 'dev' && 'dev' || 'release' }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
           tags: |

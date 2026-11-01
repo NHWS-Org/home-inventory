@@ -25,6 +25,7 @@ function LoginPage() {
       }
       navigate('/')
     } catch (err: unknown) {
+      localStorage.removeItem('access_token');
       console.error('Login error:', err)
   
       if (

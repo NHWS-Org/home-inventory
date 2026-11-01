@@ -29,6 +29,11 @@ services:
       POSTGRES_PASSWORD: admin
       POSTGRES_DB: inventory
       FASTAPI_ROOT_PATH: /api
+      GOOGLE_BOOKS_API_KEY: your_api_key_here
+      # Dibilita la ricerca di codici a barre tramite API esterne
+      # BARCODE_LOOKUP_ENABLED: "false"
+      # Telemetria anonima opt-in (vedi README): decommenta per attivarla
+      # TELEMETRY_ENABLED: "true"
     #ports:
     #  - "8001:8000"
     depends_on:
@@ -46,6 +51,7 @@ services:
     environment:
       TZ: Europe/Rome
       BACKEND_BASE_URL: http://backend:8000
+      APP_ENV_LABEL: LOCAL
     ports:
       - "3000:80"
     depends_on:

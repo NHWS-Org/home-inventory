@@ -9,6 +9,9 @@ type AuthProviderProps = {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    return Boolean(typeof window !== "undefined" && localStorage.getItem("access_token"));
+  });
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -25,9 +28,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           // Token non valido o scaduto
           localStorage.removeItem("access_token");
           setUser(null);
+        } finally {
+          setIsLoading(false);
         }
       };
       fetchUser();
+    } else {
+      setIsLoading(false);
     }
   }, []);
 
@@ -37,7 +44,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, logout }}>
+    <AuthContext.Provider value={{ user, setUser, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

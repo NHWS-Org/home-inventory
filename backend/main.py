@@ -10,6 +10,8 @@ from routes.user import router as user_router
 from routes.admin import router as admin_router
 from routes.inventory import inventory_router, checklist_router, list_inventories_base
 from routes.item import router as item_router
+from routes.barcode import admin_router as barcode_admin_router, router as barcode_router
+from routes.assignment import router as assignment_router
 from routes.system import router as system_router
 from routes.settings import router as settings_router
 from routes.backup import router as backup_router
@@ -64,6 +66,9 @@ app.include_router(admin_router, prefix="/admin", tags=["Admin"])
 app.include_router(inventory_router, prefix="/inventory", tags=["Inventory"])
 app.include_router(checklist_router, prefix="/checklist", tags=["Checklist"])
 app.include_router(item_router, prefix="/item", tags=["Item"])
+app.include_router(barcode_router, prefix="/barcode", tags=["Barcode"])
+app.include_router(barcode_admin_router, prefix="/barcode/admin", tags=["Barcode Admin"])
+app.include_router(assignment_router, prefix="/assignment", tags=["Assignment"])
 app.include_router(system_router, prefix="/system", tags=["System"])
 app.include_router(settings_router, prefix="/settings", tags=["Settings"])
 app.include_router(backup_router, prefix="/backup", tags=["Backups"])

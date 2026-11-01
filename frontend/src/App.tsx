@@ -1,16 +1,20 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import ProtectedRoute    from "./pages/ProtectedRoute"
 import SidebarLayout     from './pages/SidebarLayout'
-import WelcomePage       from './pages/WelcomePage'
-import LoginPage         from './pages/LoginPage'
-import RegisterPage      from './pages/RegisterPage'
-import ProfilePage       from './pages/ProfilePage'
-import SettingsPage      from './pages/SettingsPage'
-import GenericListPage   from './pages/GenericListPage'
-import GenericDetailPage from './pages/GenericDetailPage'
+import Spinner           from './components/Spinner'
+import EnvBadge          from './components/EnvBadge'
 import { getApiVersion } from "./api";
 import { version as frontendVersion } from '../package.json';
+
+const WelcomePage       = lazy(() => import('./pages/WelcomePage'))
+const LoginPage         = lazy(() => import('./pages/LoginPage'))
+const RegisterPage      = lazy(() => import('./pages/RegisterPage'))
+const ProfilePage       = lazy(() => import('./pages/ProfilePage'))
+const SettingsPage      = lazy(() => import('./pages/SettingsPage'))
+const AboutPage         = lazy(() => import('./pages/AboutPage'))
+const GenericListPage   = lazy(() => import('./pages/GenericListPage'))
+const GenericDetailPage = lazy(() => import('./pages/GenericDetailPage'))
 
 function getFrontendVersion(): string {
   // Usa la versione dal package.json (iniettata in build) oppure fallback
@@ -51,9 +55,11 @@ function App() {
 
   return (
     <Router>
+      <EnvBadge />
       <Routes>
-        <Route element={<SidebarLayout><Outlet /></SidebarLayout>}>
+        <Route element={<SidebarLayout><Suspense fallback={<Spinner />}><Outlet /></Suspense></SidebarLayout>}>
           <Route path="/" element={<WelcomePage />} />
+          <Route path="/about" element={<AboutPage />} />
           <Route path="/inventories" element={
             <ProtectedRoute>
               <GenericListPage />{/* <InventoryListPage /> */}

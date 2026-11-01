@@ -31,6 +31,9 @@ import {
 import { AuthContext } from '../auth-context'
 import { Dialog } from '@headlessui/react'
 import { InventoryWithMatches, ChecklistWithMatches } from "../types"
+import InventoryQrDialog from '../components/InventoryQrDialog'
+import { useBottomSheetDrag } from '../components/useBottomSheetDrag'
+import { FiGrid } from 'react-icons/fi'
 
 function NewItemModal({ isOpen, onClose, onCreate, isInventory }: {
   isOpen: boolean
@@ -39,6 +42,7 @@ function NewItemModal({ isOpen, onClose, onCreate, isInventory }: {
   isInventory: boolean
 }) {
   const [name, setName] = useState('')
+  const sheetDrag = useBottomSheetDrag(onClose)
   const inputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
@@ -58,8 +62,9 @@ function NewItemModal({ isOpen, onClose, onCreate, isInventory }: {
   return (
     <Dialog open={isOpen} onClose={onClose} className="relative z-50">
       <div className="fixed inset-0 bg-black/30 " aria-hidden="true" />
-      <div className="fixed inset-0 flex items-center justify-center p-4">
-        <Dialog.Panel className="bg-white dark:bg-gray-900 rounded p-6 w-full max-w-md">
+      <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+        <Dialog.Panel style={{ transform: `translateY(${sheetDrag.offset}px)`, transition: sheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-md sm:rounded-xl sm:p-6 sm:pb-6">
+          <button type="button" aria-label="Chiudi o trascina verso il basso" {...sheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
           <Dialog.Title className="text-lg font-bold mb-4 dark:text-white">
             {isInventory ? 'Nuovo Inventario' : 'Nuova lista'}
           </Dialog.Title>
@@ -96,11 +101,13 @@ function EditNameModal({ isOpen, onClose, onSave, name, onNameChange }: {
   name: string;
   onNameChange: (value: string) => void;
 }) {
+  const sheetDrag = useBottomSheetDrag(onClose)
   return (
     <Dialog open={isOpen} onClose={onClose} className="relative z-50">
       <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-      <div className="fixed inset-0 flex items-center justify-center p-4">
-        <Dialog.Panel className="bg-white dark:bg-gray-900 rounded p-6 w-full max-w-md">
+      <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+        <Dialog.Panel style={{ transform: `translateY(${sheetDrag.offset}px)`, transition: sheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[90dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-md sm:rounded-xl sm:p-6 sm:pb-6">
+          <button type="button" aria-label="Chiudi o trascina verso il basso" {...sheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
           <Dialog.Title className="text-lg font-semibold mb-4 dark:text-white">Modifica nome</Dialog.Title>
           <form onSubmit={e => { e.preventDefault(); onSave(name); }}>
             <input
@@ -120,6 +127,26 @@ function EditNameModal({ isOpen, onClose, onSave, name, onNameChange }: {
   );
 }
 
+function renderHighlightedText(text: string): React.ReactNode {
+  if (!text) return null;
+  const parts = text.split(/\*\*(.*?)\*\*/g);
+  if (parts.length === 1) return text;
+  return parts.map((part, index) => {
+    if (!part) return null;
+    if (index % 2 === 1) {
+      return (
+        <span
+          key={index}
+          style={{ backgroundColor: '#cce5ff', padding: '0 2px', borderRadius: '2px' }}
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
 export default function GenericListPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -127,6 +154,10 @@ export default function GenericListPage() {
   const initialFilter = searchParams.get('filtro') || '';
   const authContext = useContext(AuthContext);
   const user = authContext?.user;
+  const isAdmin = user?.role?.name === 'admin';
+  const isModerator = user?.role?.name === 'moderator';
+  const canEdit = Boolean(user?.role?.name && user.role.name !== 'viewer');
+  const canManage = Boolean(isAdmin || isModerator);
   const basePath = location.pathname.split("/")[1] as 'inventories' | 'checklists';
   const isInventory = basePath === 'inventories';
   //const isChecklist = basePath === 'checklists';
@@ -166,8 +197,11 @@ export default function GenericListPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [accessUsers, setAccessUsers] = useState<{ username: string; role?: { name: string } }[]>([]);
   const [accessGroups, setAccessGroups] = useState<{ name: string; role?: { name: string } }[]>([]);
+  const [qrTarget, setQrTarget] = useState<{ name: string; path: string } | null>(null);
+  const permissionsSheetDrag = useBottomSheetDrag(() => setPermissionsTarget(null));
 
   useEffect(() => {
+    let isCurrentRequest = true;
     //setLoading(true);
     const fetchData = async () => {
       try {
@@ -175,14 +209,19 @@ export default function GenericListPage() {
         const res = isInventory
           ? await getInventories(query.length > 0 ? query : undefined)
           : await getChecklists(query.length > 0 ? query : undefined);
-        setItems(res);
+        if (isCurrentRequest) setItems(res);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Errore sconosciuto');
+        if (isCurrentRequest) {
+          setError(err instanceof Error ? err.message : 'Errore sconosciuto');
+        }
       } finally {
-        setLoading(false);
+        if (isCurrentRequest) setLoading(false);
       }
     };
     fetchData();
+    return () => {
+      isCurrentRequest = false;
+    };
   }, [searchQuery, isInventory]);
 
   const handleClick = (id: number) => {
@@ -234,7 +273,7 @@ export default function GenericListPage() {
       const allUsersList = await getInventorySharableUsers(item.id);
       const allGroupsList = await getAllInventoryGroups();
       setAllUsers((allUsersList as { username: string; role?: { name: string } }[])
-        .filter(u => u.role && u.role.name !== 'admin')
+        .filter(u => u.role?.name !== 'admin')
         .map(u => u.username));
       setAllGroups((allGroupsList as { id: number, name: string }[]).map(g => ({ id: g.id, name: g.name })));
       setPermissionsTarget(item);
@@ -252,7 +291,7 @@ export default function GenericListPage() {
       const allUsersList = await getChecklistSharableUsers(item.id);
       const allGroupsList = await getAllChecklistGroups();
       setAllUsers((allUsersList as { username: string; role?: { name: string } }[])
-        .filter(u => u.role && u.role.name !== 'admin')
+        .filter(u => u.role?.name !== 'admin')
         .map(u => u.username));
       setAllGroups((allGroupsList as { id: number, name: string }[]).map(g => ({ id: g.id, name: g.name })));
       setPermissionsTarget(item);
@@ -300,7 +339,7 @@ export default function GenericListPage() {
   return (
     <div className="p-4">
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">{isInventory ? 'Inventari' : 'Liste'}</h1>
+        <h1 className="hidden text-2xl font-bold md:block">{isInventory ? 'Inventari' : 'Liste'}</h1>
       </div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 mb-4">
         <div className="flex items-center gap-2">
@@ -374,7 +413,7 @@ export default function GenericListPage() {
           </div>
         )}
       </div>
-      {user && user.role.name !== 'viewer' && (
+      {canEdit && (
         <>
           <NewItemModal
             isOpen={isModalOpen}
@@ -406,7 +445,7 @@ export default function GenericListPage() {
           {getSortedItems().map((inv) => (
             <li
               key={inv.id}
-              className={`p-4 border rounded shadow cursor-pointer flex justify-between items-center text-black dark:text-white ${
+              className={`relative p-4 pb-16 sm:pb-4 border rounded shadow cursor-pointer flex justify-between items-center text-black dark:text-white ${
                 selectedItems.includes(inv.id)
                   ? "bg-yellow-100"
                   : "hover:bg-gray-100 dark:hover:bg-gray-600"
@@ -435,7 +474,7 @@ export default function GenericListPage() {
                     <p className="text-sm text-gray-500 dark:ext-gray-300 sm:ml-4 text-right sm:text-right w-full sm:w-auto">
                       Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
                     </p>
-                    {(user?.role.name === 'admin' || user?.role.name === 'moderator') && (
+                    {canManage && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -470,6 +509,19 @@ export default function GenericListPage() {
                   <p className="text-sm text-gray-500 sm:ml-4">
                     Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
                   </p>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setQrTarget({ name: inv.name, path: `/${basePath}/${inv.id}` });
+                    }}
+                    className="absolute bottom-4 right-4 grid h-11 w-11 place-items-center rounded-xl bg-indigo-600 text-xl text-white hover:bg-indigo-700 sm:static sm:flex sm:h-10 sm:w-auto sm:items-center sm:justify-center sm:rounded-xl sm:px-3 sm:text-sm"
+                    aria-label={`Mostra QR code per ${inv.name}`}
+                    title={`Mostra QR code per ${inv.name}`}
+                  >
+                    <FiGrid className="sm:hidden" aria-hidden="true" />
+                    <span className="hidden sm:inline">QR code</span>
+                  </button>
                   {inv.matching_items && inv.matching_items.length > 0 && (
                     <div className="mt-2 p-2 border rounded bg-yellow-50">
                       <p className="text-xs font-medium text-gray-700">Corrispondenze trovate:</p>
@@ -491,40 +543,24 @@ export default function GenericListPage() {
                           };
                         }) => (
                           <li key={item.id}>
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: `${item.quantity}x ${(item.highlighted?.name || item.name)}`.replace(
-                                  /\*\*(.*?)\*\*/g,
-                                  "<span style='background-color: #cce5ff; padding: 0 2px; border-radius: 2px;'>$1</span>"
-                                )
-                              }}
-                            />
+                            <span>
+                              {item.quantity}x {renderHighlightedText(item.highlighted?.name || item.name)}
+                            </span>
                             {item.highlighted?.description && item.highlighted.description.trim() && (
                               <>
                                 {' – '}
-                                <span
-                                  className="text-gray-500"
-                                  dangerouslySetInnerHTML={{
-                                    __html: item.highlighted.description.replace(
-                                      /\*\*(.*?)\*\*/g,
-                                      "<span style='background-color: #cce5ff; padding: 0 2px; border-radius: 2px;'>$1</span>"
-                                    )
-                                  }}
-                                />
+                                <span className="text-gray-500">
+                                  {renderHighlightedText(item.highlighted.description)}
+                                </span>
                               </>
                             )}
                             {item.highlighted?.metadata_text && item.highlighted.metadata_text.length > 0 && (
                               <ul className="ml-4 mt-1 list-disc text-xs text-gray-600 dark:text-gray-700">
                                 {item.highlighted.metadata_text.map((metadata, index) => (
                                   <li key={`${item.id}-meta-${index}`}>
-                                    <span
-                                      dangerouslySetInnerHTML={{
-                                        __html: `${metadata.definition_label}: ${metadata.value_text}`.replace(
-                                          /\*\*(.*?)\*\*/g,
-                                          "<span style='background-color: #cce5ff; padding: 0 2px; border-radius: 2px;'>$1</span>"
-                                        ),
-                                      }}
-                                    />
+                                    <span>
+                                      {metadata.definition_label}: {renderHighlightedText(metadata.value_text)}
+                                    </span>
                                   </li>
                                 ))}
                               </ul>
@@ -544,7 +580,7 @@ export default function GenericListPage() {
         className={`z-40 gap-2 flex ${
           window.innerWidth >= 768
             ? 'fixed top-4 right-4 flex-row'
-            : 'fixed bottom-2 right-2 flex-col'
+            : 'fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 -translate-x-1/2 flex-row rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90'
         }`}
       >
         {editMode && selectedItems.length > 0 && (
@@ -570,27 +606,27 @@ export default function GenericListPage() {
                 showMessage('Eliminazione completata.', 'success');
               }
             }}
-            className="py-2 px-4 bg-red-600 text-white rounded-full shadow-lg hover:bg-red-700"
+            className="flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg bg-red-600 hover:bg-red-700"
           >
             <span className="inline md:hidden">🗑️ </span>
             <span className="hidden md:inline">Elimina </span>
           </button>
         )}
-        {user?.role.name !== 'viewer' && (
+        {canEdit && (
           <>
             <button
-              onClick={() => { setEditMode((prev) => !prev); setSelectedItems([]); }}
-              className={`py-2 px-4 rounded-full shadow-lg text-white ${editMode ? 'bg-yellow-700' : 'bg-yellow-500 hover:bg-yellow-600'}`}
-            >
-              <span className="inline md:hidden">{editMode ? '✖️' : '✏️'}</span>
-              <span className="hidden md:inline">{editMode ? 'Chiudi' : 'Modifica'}</span>
-            </button>
-            <button
               onClick={() => setIsModalOpen(true)}
-              className="py-2 px-4 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600"
+              className="flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg bg-blue-500 hover:bg-blue-600"
             >
               <span className="inline md:hidden">➕</span>
               <span className="hidden md:inline">Nuovo</span>
+            </button>
+            <button
+              onClick={() => { setEditMode((prev) => !prev); setSelectedItems([]); }}
+              className={`flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg ${editMode ? 'bg-yellow-700' : 'bg-yellow-500 hover:bg-yellow-600'}`}
+            >
+              <span className="inline md:hidden">{editMode ? '✖️' : '✏️'}</span>
+              <span className="hidden md:inline">{editMode ? 'Chiudi' : 'Modifica'}</span>
             </button>
           </>
         )}
@@ -608,12 +644,14 @@ export default function GenericListPage() {
           {message}
         </div>
       )}
+      {qrTarget && <InventoryQrDialog name={qrTarget.name} path={qrTarget.path} onClose={() => setQrTarget(null)} />}
       {/* Dialog per la gestione accessi */}
       {permissionsTarget && (
         <Dialog open={!!permissionsTarget} onClose={() => setPermissionsTarget(null)} className="relative z-50">
           <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-          <div className="fixed inset-0 flex items-center justify-center p-4">
-            <Dialog.Panel className="bg-white dark:bg-gray-900 rounded p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto">
+          <div className="fixed inset-0 flex items-end justify-center sm:items-center sm:p-4">
+            <Dialog.Panel style={{ transform: `translateY(${permissionsSheetDrag.offset}px)`, transition: permissionsSheetDrag.isDragging ? 'none' : 'transform 220ms ease-out' }} className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl dark:bg-gray-900 sm:max-w-xl sm:rounded-xl sm:p-6 sm:pb-6">
+              <button type="button" aria-label="Chiudi o trascina verso il basso" {...permissionsSheetDrag.gripProps} className="mx-auto mb-3 flex h-8 w-16 touch-none items-center justify-center sm:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
               <Dialog.Title className="text-lg font-bold mb-4 dark:text-white">
                 Gestione Accessi – {permissionsTarget?.name}
               </Dialog.Title>
