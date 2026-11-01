@@ -19,6 +19,11 @@ if [ -n "${APP_ENV_LABEL}" ]; then
     /usr/share/nginx/html/index.html
 fi
 
+# Ribbon con l'etichetta d'ambiente sulle icone dell'app (favicon, apple-touch, PWA)
+if [ -n "${APP_ENV_LABEL}" ]; then
+  /apply-env-icons.sh || echo "Impossibile applicare il ribbon alle icone"
+fi
+
 echo "Configuring nginx proxy..."
 # Usa envsubst per sostituire BACKEND_BASE_URL nel file di template
 envsubst '${BACKEND_BASE_URL}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
