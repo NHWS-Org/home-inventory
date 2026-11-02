@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 import {
   listBackups,
   getBackupCompatibilityMap,
@@ -41,6 +42,7 @@ export default function BackupManagementPage() {
   const [message, setMessage] = useState<string>("");
   const [messageType, setMessageType] = useState<"success" | "error" | "">("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedMetadataFile, setSelectedMetadataFile] = useState<File | null>(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleConfig, setScheduleConfig] = useState<{
     frequency: string;
@@ -262,16 +264,27 @@ export default function BackupManagementPage() {
       setMessageType("error");
       return;
     }
+    const legacy = selectedFile.name.endsWith(".sql");
+    if (legacy && selectedMetadataFile?.name !== `${selectedFile.name}.meta.json`) {
+      setMessage("Seleziona il file .sql.meta.json corrispondente al backup SQL.");
+      setMessageType("error");
+      return;
+    }
     setLoading(true);
     try {
-      await uploadBackup(selectedFile);
-      setMessage("Backup caricato con successo!");
+      await uploadBackup(selectedFile, legacy ? selectedMetadataFile ?? undefined : undefined);
+      setMessage(legacy ? "Backup convertito in .hibackup e caricato!" : "Backup caricato con successo!");
       setMessageType("success");
       setSelectedFile(null);
+      setSelectedMetadataFile(null);
       fetchBackups();
     } catch (error) {
       console.error("Errore nel caricamento del backup:", error);
-      setMessage("Errore nel caricamento del backup.");
+      setMessage(
+        isAxiosError<{ detail?: string }>(error) && typeof error.response?.data.detail === "string"
+          ? error.response.data.detail
+          : "Errore nel caricamento del backup."
+      );
       setMessageType("error");
     } finally {
       setLoading(false);
@@ -350,7 +363,7 @@ export default function BackupManagementPage() {
     setLoading(true);
     try {
       await restoreBackup(filename);
-      setMessage("Ripristino base avviato con successo!");
+      setMessage("Ripristino base completato con successo!");
       setMessageType("success");
     } catch (error) {
       console.error("Errore nel ripristino del backup:", error);
@@ -383,7 +396,7 @@ export default function BackupManagementPage() {
         overwrite_settings: overwriteSettings,
         overwrite_admin: overwriteAdmin,
       });
-      setMessage("Ripristino avanzato avviato con successo!");
+      setMessage("Ripristino avanzato completato con successo!");
       setMessageType("success");
     } catch (error) {
       console.error("Errore nel ripristino avanzato:", error);
@@ -444,10 +457,25 @@ export default function BackupManagementPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
         <input
           type="file"
-          accept=".sql"
-          onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+          accept=".hibackup,.sql"
+          aria-label="Backup .hibackup o .sql"
+          onChange={(e) => {
+            setSelectedFile(e.target.files ? e.target.files[0] : null);
+            setSelectedMetadataFile(null);
+          }}
           className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1"
         />
+        {selectedFile?.name.endsWith(".sql") && (
+          <label className="text-sm">
+            Metadati corrispondenti (.sql.meta.json)
+            <input
+              type="file"
+              accept=".json"
+              onChange={(e) => setSelectedMetadataFile(e.target.files?.[0] ?? null)}
+              className="block border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1"
+            />
+          </label>
+        )}
         <button
           onClick={uploadBackupLocal}
           disabled={loading || !selectedFile}
@@ -457,6 +485,10 @@ export default function BackupManagementPage() {
           {loading && <span className="ml-2 animate-spin">⏳</span>}
         </button>
       </div>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        I vecchi backup richiedono entrambi i file .sql e .sql.meta.json: vengono
+        convertiti in .hibackup senza eseguire il SQL. Il ripristino va confermato separatamente.
+      </p>
       <button
         onClick={createBackupLocal}
         disabled={loading}

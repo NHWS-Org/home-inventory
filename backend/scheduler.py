@@ -27,7 +27,7 @@ def _setting_int(db, key: str, default: int) -> int:
         return default
 
 def cleanup_old_backups(retention_count: int):
-    backups = sorted(BACKUP_DIR.glob("auto_*.sql"), key=lambda x: x.stat().st_mtime)
+    backups = sorted(BACKUP_DIR.glob("auto_*.hibackup"), key=lambda x: x.stat().st_mtime)
     if len(backups) > retention_count:
         deleted = 0
         for backup in backups[:-retention_count]:

@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI, Depends
 from contextlib import asynccontextmanager
 import logging
+from logging_filters import HealthCheckAccessFilter
 from database import SessionLocal
 from dependencies import init_roles_and_admin, get_db, initialize_settings, get_current_user
 from sqlalchemy.orm import Session
@@ -24,6 +25,9 @@ from scheduler import start_scheduler
 from fastapi.responses import JSONResponse
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("uvicorn.access").addFilter(
+    HealthCheckAccessFilter(os.getenv("FASTAPI_ROOT_PATH", ""))
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,14 +39,12 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-root_path = os.getenv("FASTAPI_ROOT_PATH", "")
 api_version = os.getenv("API_VERSION", "unknown")
 
 app = FastAPI(
     lifespan=lifespan
    ,title="Home Inventory"
    ,version=api_version
-   ,root_path=root_path  # 👈
    #,openapi_url="/api/openapi.json" # Per usare il reverse proxy
    #,docs_url="/api/docs"            # Per usare il reverse proxy
    #,redoc_url="/api/redoc"          # Per usare il reverse proxy

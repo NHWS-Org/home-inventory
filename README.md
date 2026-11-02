@@ -24,6 +24,45 @@ docker-compose up --build -d
 - Frontend: <http://localhost:3000>
 - Credenziali predefinite: `admin` / `12345`
 
+### Database e backup
+
+Per impostazione predefinita l'app usa SQLite, senza un container database: il file e i backup compressi `.hibackup` sono conservati in `data/` (sul volume montato). I backup includono i metadati Alembic e possono essere ripristinati su un motore diverso. I vecchi backup PostgreSQL v2 vengono convertiti durante il caricamento della coppia `.sql` + `.sql.meta.json`.
+
+Il volume persistente va montato su `/app/data`, non sull'intera directory `/app`: il codice e i file runtime dell'immagine devono restare visibili. L'entrypoint è installato in `/usr/local/bin` così non viene nascosto da bind mount dell'applicazione.
+
+All'avvio il backend mostra il tipo di database e l'URL di destinazione con password mascherata e parametri query esclusi.
+
+Il prefisso proxy `FASTAPI_ROOT_PATH` viene passato a Uvicorn dall'entrypoint Docker. Per un avvio locale dietro proxy usa `uvicorn main:app --reload --root-path /api`; senza proxy ometti `--root-path`.
+
+Gli healthcheck Docker mantengono gli intervalli di controllo esistenti, ma non conservano il corpo delle risposte riuscite. Il frontend usa `/health-check`, verificando che `index.html` sia disponibile; il backend mantiene `/system/health-check` (controllo del processo API, non della connessione DB). I controlli riusciti non producono access log; gli errori e le normali richieste restano visibili. Per applicare queste modifiche occorre ricostruire o aggiornare entrambe le immagini e ricreare i container.
+
+Se nei log compare `ModuleNotFoundError: No module named 'database'`, verifica che lo stack non monti una cartella dati su `/app`. Ad esempio, sostituisci `.../home-inventory-dev:/app` con `.../home-inventory-dev:/app/data` e ricrea il container. Se i backup erano nella sottocartella `backups`, il nuovo mount li espone direttamente in `/app/data/backups`. Non occorre modificare il volume PostgreSQL.
+
+Per lo sviluppo locale, `./backend/setup_venv.sh` prepara `backend/.venv` usando il solo `backend/requirements.txt`, indipendentemente dalla directory da cui viene lanciato. Questo script non viene usato nel container Docker.
+
+Per mantenere o scegliere PostgreSQL, imposta le due variabili e abilita il profilo corrispondente:
+
+```bash
+DATABASE_TYPE=POSTGRES DATABASE_URL='postgresql+psycopg://admin:admin@postgres:5432/inventory' docker compose --profile postgres up -d
+```
+
+Per MySQL o MariaDB usa il profilo `mysql` e un URL PyMySQL:
+
+```bash
+DATABASE_TYPE=MYSQL DATABASE_URL='mysql+pymysql://admin:admin@mysql:3306/inventory' docker compose --profile mysql up -d
+```
+
+`MYSQL` funziona sia con MySQL sia con MariaDB (`MARIADB` è accettato come alias). Sostituisci le credenziali d'esempio con credenziali sicure.
+
+Per alimentare una nuova installazione (ad esempio DEV) con i dati di una vecchia:
+
+1. Crea un backup dalla vecchia installazione e recupera entrambi i file: `nome.sql` e `nome.sql.meta.json`.
+2. Nella pagina **Backup** della nuova installazione seleziona il file `.sql` e, nel campo che appare, il relativo `.sql.meta.json`.
+3. Premi **Carica Backup**: il sistema converte gli INSERT del vecchio formato v2 in un archivio `.hibackup` compresso, con metadati incorporati. Nessun comando SQL del dump viene eseguito e il caricamento non modifica il database.
+4. Crea un backup dei dati di destinazione e conferma separatamente il ripristino del file convertito. Scegli il ripristino avanzato con utenti/ruoli e admin per copiare anche gli accessi; lascia le impostazioni escluse per conservare la configurazione DEV.
+
+La conversione accetta dump data-only generati dalla vecchia applicazione con `--column-inserts`, non dump PostgreSQL arbitrari (ad esempio `COPY`). File non corrispondenti, istruzioni/tabelle/colonne non supportate e revisioni Alembic discordanti vengono rifiutati esplicitamente; il restore mantiene i controlli di compatibilità con la revisione di destinazione. Conserva una copia della sorgente fino alla verifica dei dati migrati. Non serve un tool separato né una connessione dalla nuova installazione al database di produzione.
+
 ### Barcode e QR code
 
 - Ogni articolo può avere più codici (EAN/UPC/QR e altri), gestibili dalla schermata di modifica.
@@ -127,6 +166,45 @@ docker-compose up --build -d
 - Backend API: <http://localhost:3000/api>
 - Frontend: <http://localhost:3000>
 - Default credentials: `admin` / `12345`
+
+### Database and backups
+
+The app uses SQLite by default, with no database container: the database file and compressed `.hibackup` backups are stored in the mounted `data/` volume. Backups include Alembic metadata and can be restored to a different engine. Legacy v2 PostgreSQL backups are converted when uploading the `.sql` + `.sql.meta.json` pair.
+
+Mount persistent storage at `/app/data`, not over the entire `/app` directory: the image's application code and runtime files must remain visible. The entrypoint is installed in `/usr/local/bin` so application bind mounts cannot hide it.
+
+At startup, the backend logs the database type and destination URL with the password masked and query parameters omitted.
+
+The Docker entrypoint passes the `FASTAPI_ROOT_PATH` proxy prefix to Uvicorn. For local startup behind a proxy, use `uvicorn main:app --reload --root-path /api`; without a proxy, omit `--root-path`.
+
+Docker healthchecks keep their existing intervals but discard successful response bodies. The frontend uses `/health-check`, checking that `index.html` is available; the backend keeps `/system/health-check` (API process liveness, not database connectivity). Successful probes do not produce access logs; errors and normal requests remain visible. Rebuild or update both images and recreate the containers to apply these changes.
+
+If logs show `ModuleNotFoundError: No module named 'database'`, check that the stack does not mount a data directory over `/app`. For example, replace `.../home-inventory-dev:/app` with `.../home-inventory-dev:/app/data` and recreate the container. Existing backups in the `backups` subdirectory will then be available at `/app/data/backups`. Leave the PostgreSQL volume unchanged.
+
+For local development, `./backend/setup_venv.sh` prepares `backend/.venv` using only `backend/requirements.txt`, regardless of the directory it is launched from. Docker containers do not use this script.
+
+To keep or select PostgreSQL, set both variables and enable its Compose profile:
+
+```bash
+DATABASE_TYPE=POSTGRES DATABASE_URL='postgresql+psycopg://admin:admin@postgres:5432/inventory' docker compose --profile postgres up -d
+```
+
+For MySQL or MariaDB, use the `mysql` profile and a PyMySQL URL:
+
+```bash
+DATABASE_TYPE=MYSQL DATABASE_URL='mysql+pymysql://admin:admin@mysql:3306/inventory' docker compose --profile mysql up -d
+```
+
+`MYSQL` works with both MySQL and MariaDB (`MARIADB` is accepted as an alias). Replace the example credentials with secure credentials.
+
+To populate a new installation (for example DEV) from an older one:
+
+1. Create a backup in the old installation and obtain both files: `name.sql` and `name.sql.meta.json`.
+2. On the new installation's **Backup** page, select the `.sql` file and its matching `.sql.meta.json` in the additional field.
+3. Click **Carica Backup**: the v2 INSERT data is converted into a compressed `.hibackup` archive with embedded metadata. No SQL commands from the dump are executed, and uploading does not modify the database.
+4. Back up the destination's current data, then separately confirm restoring the converted file. Use advanced restore with users/roles and admin to copy logins; exclude settings to preserve DEV configuration.
+
+Conversion accepts data-only dumps generated by the old application with `--column-inserts`, not arbitrary PostgreSQL dumps (such as `COPY`). Mismatched files, unsupported statements/tables/columns, and conflicting Alembic revisions are explicitly rejected. Restore still checks compatibility with the destination revision. Keep a copy of the source until you verify the migrated data. No standalone tool or connection from the new installation to the production database is required.
 
 ### Barcodes and QR codes
 

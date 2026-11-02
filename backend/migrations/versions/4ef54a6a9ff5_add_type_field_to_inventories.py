@@ -26,16 +26,24 @@ def upgrade() -> None:
     if not inspector.has_table("inventories"):
         return
 
-    inventory_columns = {col["name"] for col in inspector.get_columns("inventories")}
+    inventory_columns = {
+        col["name"]: col for col in inspector.get_columns("inventories")
+    }
     if "type" not in inventory_columns:
-        op.add_column('inventories', sa.Column('type', sa.String(), nullable=True))
+        op.add_column('inventories', sa.Column('type', sa.String(16), nullable=True))
 
     from sqlalchemy.sql import table, column
     from sqlalchemy import String
 
-    inventories = table('inventories', column('type', String))
+    inventories = table('inventories', column('type', String(16)))
     op.execute(inventories.update().where(column('type').is_(None)).values(type="INVENTORY"))
-    op.alter_column('inventories', 'type', nullable=False)
+    if "type" not in inventory_columns or inventory_columns["type"]["nullable"]:
+        with op.batch_alter_table('inventories') as batch_op:
+            batch_op.alter_column(
+                'type',
+                existing_type=sa.String(16),
+                nullable=False,
+            )
 
 def downgrade() -> None:
     """Downgrade schema."""

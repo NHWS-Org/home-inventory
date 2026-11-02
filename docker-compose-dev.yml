@@ -1,44 +1,55 @@
 services:
-  db:
+  postgres:
     image: postgres:18
     container_name: inventory-db
+    profiles: ["postgres"]
     restart: always
-    #ports:
-    #  - "5432:5432"
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: inventory
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+      POSTGRES_DB: ${POSTGRES_DB:-inventory}
       TZ: Europe/Rome
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d inventory"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       retries: 5
+
+  mysql:
+    image: mariadb:11
+    container_name: inventory-mysql
+    profiles: ["mysql"]
+    restart: always
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-admin}
+      MARIADB_USER: ${MYSQL_USER:-admin}
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD:-admin}
+      MARIADB_DATABASE: ${MYSQL_DATABASE:-inventory}
+      TZ: Europe/Rome
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 10
 
   backend:
     build: ./backend
     container_name: inventory-backend
     restart: always
-    environment:  
+    environment:
       TZ: Europe/Rome
-      DATABASE_URL: postgresql://admin:admin@db:5432/inventory
-      POSTGRES_HOST: db
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: inventory
+      DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
+      DATABASE_URL: ${DATABASE_URL:-}
       FASTAPI_ROOT_PATH: /api
       GOOGLE_BOOKS_API_KEY: your_api_key_here
-      # Dibilita la ricerca di codici a barre tramite API esterne
+      # Disabilita la ricerca di codici a barre tramite API esterne
       # BARCODE_LOOKUP_ENABLED: "false"
       # Telemetria anonima opt-in (vedi README): decommenta per attivarla
       # TELEMETRY_ENABLED: "true"
     #ports:
     #  - "8001:8000"
-    depends_on:
-      db:
-        condition: service_healthy
     env_file:
       - backend/.env
     volumes:
@@ -59,3 +70,4 @@ services:
 
 volumes:
   pgdata:
+  mysqldata:

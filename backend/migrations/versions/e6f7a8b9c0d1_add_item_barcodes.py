@@ -25,8 +25,8 @@ def upgrade() -> None:
             'item_barcodes',
             sa.Column('id', sa.Integer(), primary_key=True),
             sa.Column('item_id', sa.Integer(), sa.ForeignKey('items.id', ondelete='CASCADE'), nullable=False),
-            sa.Column('code', sa.String(), nullable=False),
-            sa.Column('format', sa.String(), nullable=True),
+            sa.Column('code', sa.String(255), nullable=False),
+            sa.Column('format', sa.String(32), nullable=True),
             sa.Column('data_ins', sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column('data_mod', sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column('user_ins', sa.Integer(), sa.ForeignKey('users.id'), nullable=True),
@@ -40,13 +40,13 @@ def upgrade() -> None:
     if 'barcode_product_cache' not in existing_tables:
         op.create_table(
             'barcode_product_cache',
-            sa.Column('code', sa.String(), primary_key=True),
+            sa.Column('code', sa.String(191), primary_key=True),
             sa.Column('found', sa.Boolean(), nullable=False),
-            sa.Column('name', sa.String(), nullable=True),
-            sa.Column('brand', sa.String(), nullable=True),
-            sa.Column('quantity_label', sa.String(), nullable=True),
-            sa.Column('image_url', sa.String(), nullable=True),
-            sa.Column('source', sa.String(), nullable=True),
+            sa.Column('name', sa.Text(), nullable=True),
+            sa.Column('brand', sa.Text(), nullable=True),
+            sa.Column('quantity_label', sa.Text(), nullable=True),
+            sa.Column('image_url', sa.Text(), nullable=True),
+            sa.Column('source', sa.Text(), nullable=True),
             sa.Column('fetched_at', sa.DateTime(), nullable=False),
         )
 
