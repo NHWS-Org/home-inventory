@@ -690,9 +690,12 @@ export async function deleteBackupsBulk(filenames: string[]): Promise<{
 }
 
 // Upload di un backup esistente
-export async function uploadBackup(file: File): Promise<void> {
+export async function uploadBackup(file: File, metadataFile?: File): Promise<void> {
   const formData = new FormData();
   formData.append('file', file);
+  if (metadataFile) {
+    formData.append('metadata_file', metadataFile);
+  }
 
   await api.post('/backup/upload', formData, {
     headers: {

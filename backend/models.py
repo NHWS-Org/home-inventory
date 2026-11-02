@@ -14,16 +14,14 @@ from sqlalchemy import (
     func,
     UniqueConstraint,
     CheckConstraint,
+    JSON,
 )
-try:
-    from sqlalchemy.dialects.postgresql import JSON
-except ImportError:
-    from sqlalchemy import JSON
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base, Session
 from enum import Enum
 
 Base = declarative_base()
+PortableString = String().with_variant(Text(), "mysql")
 
 ################################################
 class LoggingData:
@@ -58,7 +56,7 @@ class Role(Base, LoggingData):
     __tablename__ = "roles"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
+    name = Column(String(32), unique=True, index=True)
 
     users = relationship("User", back_populates="role", foreign_keys="[User.role_id]")
 
@@ -79,11 +77,11 @@ class User(Base, LoggingData):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
+    username = Column(String(255), unique=True, index=True)
+    hashed_password = Column(String(255))
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
     is_blocked = Column(Boolean, default=False)
-    email = Column(String, nullable=True)
+    email = Column(String(255), nullable=True)
 
     # Relazioni esplicite
     role = relationship("Role", foreign_keys=[role_id])
@@ -108,7 +106,7 @@ class Group(Base, LoggingData):
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
+    name = Column(String(255), unique=True, index=True)
     role_id = Column(Integer, ForeignKey("roles.id"))
 
     role = relationship("Role")
@@ -133,8 +131,8 @@ class Inventory(Base, LoggingData):
     __tablename__ = "inventories"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    type = Column(String, nullable=False, default="INVENTORY")
+    name = Column(String(255), index=True)
+    type = Column(String(16), nullable=False, default="INVENTORY")
     owner_id = Column(Integer, ForeignKey("users.id"))
     owner = relationship("User", foreign_keys=[owner_id])
     items = relationship("Item", back_populates="inventory", cascade="all, delete-orphan")
@@ -150,8 +148,8 @@ class Item(Base, LoggingData):
     __tablename__ = "items"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True, nullable=False)
-    description = Column(String, nullable=True)
+    name = Column(String(255), index=True, nullable=False)
+    description = Column(PortableString, nullable=True)
     quantity = Column(Integer, index=True)
     inventory_id = Column(Integer, ForeignKey("inventories.id"), nullable=False)
     inventory = relationship("Inventory", back_populates="items")
@@ -197,8 +195,8 @@ class ItemBarcode(Base, LoggingData):
 
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
-    code = Column(String, nullable=False, index=True)
-    format = Column(String, nullable=True)  # es. ean_13, qr_code, code_128
+    code = Column(String(255), nullable=False, index=True)
+    format = Column(String(32), nullable=True)  # es. ean_13, qr_code, code_128
 
     item = relationship("Item", back_populates="barcodes")
 
@@ -207,13 +205,13 @@ class ItemBarcode(Base, LoggingData):
 class BarcodeProductCache(Base):
     __tablename__ = "barcode_product_cache"
 
-    code = Column(String, primary_key=True)
+    code = Column(String(191), primary_key=True)
     found = Column(Boolean, nullable=False, default=False)
-    name = Column(String, nullable=True)
-    brand = Column(String, nullable=True)
-    quantity_label = Column(String, nullable=True)
-    image_url = Column(String, nullable=True)
-    source = Column(String, nullable=True)
+    name = Column(PortableString, nullable=True)
+    brand = Column(PortableString, nullable=True)
+    quantity_label = Column(PortableString, nullable=True)
+    image_url = Column(PortableString, nullable=True)
+    source = Column(PortableString, nullable=True)
     fetched_at = Column(DateTime, nullable=False)
 
 ################################################
@@ -319,8 +317,8 @@ class SharedInventoryGroup(Base, LoggingData):
 class Setting(Base, LoggingData):
     __tablename__ = "settings"
 
-    key = Column(String, primary_key=True)
-    value = Column(String)
+    key = Column(String(191), primary_key=True)
+    value = Column(PortableString)
     protected = Column(Boolean, default=False)  # ← nuovo campo
 
 ################################################
@@ -332,16 +330,16 @@ class ItemVersion(Base):
     item_id = Column(Integer, nullable=False, index=True)       # no FK → sopravvive alla delete
     inventory_id = Column(Integer, nullable=False, index=True)  # snapshot del contesto
     # snapshot del record al momento dell'azione
-    name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
+    name = Column(String(255), nullable=False)
+    description = Column(PortableString, nullable=True)
     quantity = Column(Integer, nullable=True)
     # metadati versione
     version_num = Column(Integer, nullable=False)
     operation = Column(String(16), nullable=False)               # CREATE | UPDATE | DELETE
     changed_at = Column(DateTime, server_default=func.now(), nullable=False)
     changed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    changed_by_username = Column(String, nullable=True)
-    diff = Column(String, nullable=True)                         # JSON: {"field": {"from": v, "to": v}}
+    changed_by_username = Column(String(255), nullable=True)
+    diff = Column(PortableString, nullable=True)                # JSON: {"field": {"from": v, "to": v}}
 
     changed_by = relationship("User", foreign_keys=[changed_by_id])
 
@@ -353,17 +351,17 @@ class InventoryVersion(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     inventory_id = Column(Integer, nullable=False, index=True)   # no FK → sopravvive alla delete
     # snapshot
-    name = Column(String, nullable=False)
-    type = Column(String, nullable=False)
+    name = Column(String(255), nullable=False)
+    type = Column(String(16), nullable=False)
     owner_id = Column(Integer, nullable=True)
-    owner_username = Column(String, nullable=True)
+    owner_username = Column(String(255), nullable=True)
     # metadati versione
     version_num = Column(Integer, nullable=False)
     operation = Column(String(16), nullable=False)               # CREATE | UPDATE | DELETE
     changed_at = Column(DateTime, server_default=func.now(), nullable=False)
     changed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    changed_by_username = Column(String, nullable=True)
-    diff = Column(String, nullable=True)                         # JSON
+    changed_by_username = Column(String(255), nullable=True)
+    diff = Column(PortableString, nullable=True)                # JSON
 
     changed_by = relationship("User", foreign_keys=[changed_by_id])
 
