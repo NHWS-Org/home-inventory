@@ -484,10 +484,15 @@ def list_shares_base(
     if not can_access_inventory(user, inventory, action="edit"):
         raise HTTPException(status_code=403, detail="Accesso negato")
 
-    return [
-        db.query(User).get(share.user_id)
-        for share in inventory.shared_with_users
-    ]
+    # Optimization: Eager-load shared users with their roles in a single query
+    # instead of iterating over shared_with_users and querying User one by one (avoids N+1 queries).
+    return (
+        db.query(User)
+        .join(SharedInventory, SharedInventory.user_id == User.id)
+        .filter(SharedInventory.inventory_id == inventory_id)
+        .options(joinedload(User.role))
+        .all()
+    )
 
 #############################################################################
 # Condivisione con gruppo
