@@ -34,3 +34,8 @@
 **Vulnerability:** In `GET /audit/logs/inventories`, non-admin query results were filtered solely by `InventoryVersion.owner_id == current_user.id`. This bypassed object-level authorization rules: users with valid shared access (direct or via group associations) could not view audit logs for shared inventories, and any change in inventory ownership or access model caused discrepancies with item audit logs.
 **Learning:** Filtering audit history solely by static `owner_id` fields instead of dynamic object-level authorization checks (`can_access_inventory`) breaks the shared inventory authorization model.
 **Prevention:** Consistently use the centralized authorization function `can_access_inventory(user, inventory, action="view")` across all audit log and historical query endpoints for container-level resources.
+
+## 2026-11-03 - Credential Leakage via Permissive CORS Wildcard Reflection
+**Vulnerability:** In `backend/main.py`, `CORSMiddleware` was configured with `allow_origins=["*"]` and `allow_credentials=True`. Starlette's CORS middleware responded to arbitrary origins by reflecting back the requested origin (`Access-Control-Allow-Origin: <origin>`) with `Access-Control-Allow-Credentials: true`, permitting unauthorized cross-origin websites to make authenticated requests and read responses.
+**Learning:** Configuring wildcard origins (`allow_origins=["*"]`) alongside `allow_credentials=True` bypasses standard CORS restrictions because middleware reflects arbitrary origins dynamically rather than sending literal `*`.
+**Prevention:** Always restrict `allow_origins` to an explicit whitelist of trusted origins (or configurable via environment variables such as `CORS_ORIGINS`) and never combine wildcard origins with `allow_credentials=True`.
