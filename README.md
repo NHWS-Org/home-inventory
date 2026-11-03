@@ -87,6 +87,12 @@ Gli aggiornamenti senza modifiche effettive non creano nuove versioni: una descr
 
 Le differenze equivalenti presenti nello storico precedente non vengono mostrate nell'interfaccia. I record storici e gli snapshot usati per il ripristino non vengono modificati.
 
+### Automazioni agentiche (GitHub Copilot)
+
+Tre workflow GitHub Agentic usano Copilot ogni notte: Sentinel alle **02:00**, Bolt alle **03:00** e Palette alle **04:00** (`Europe/Rome`). Puoi avviarli anche manualmente dalla scheda **Actions**. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
+
+Per abilitarli, GitHub Actions deve essere attivo e l'organizzazione deve consentire l'uso di Copilot CLI fatturato all'organizzazione. Le sorgenti sono i file `.md` in `.github/workflows`; dopo averli modificati, rigenera i workflow Actions con `gh aw compile`. Non modificare direttamente i corrispondenti file `.lock.yml` generati.
+
 ### Telemetria anonima (opt-in)
 
 La telemetria è **disattivata di default**: non viene inviato nulla finché non la attivi esplicitamente. Serve a stimare quante installazioni sono attive e con quali versioni.
@@ -239,6 +245,12 @@ Checklist entries have a priority from **−2** (very low) to **+2** (very high)
 Updates with no effective changes do not create new versions: a `null` description and an empty string are equivalent, as are numeric metadata values with different formatting but the same value. Creations, deletions, and actual changes are still recorded.
 
 Equivalent differences in existing history are hidden in the interface. Historical records and snapshots used for restoration are not modified.
+
+### Agentic workflows (GitHub Copilot)
+
+Three GitHub Agentic workflows use Copilot each night: Sentinel at **02:00**, Bolt at **03:00**, and Palette at **04:00** (`Europe/Rome`). You can also start them manually from the **Actions** tab. If they find a suitable improvement, they create at most one draft PR; they never merge automatically. Sentinel is restricted to generic preventive hardening and does not search for or publish details about specific vulnerabilities because this repository is public.
+
+To enable them, GitHub Actions must be enabled and the organization must allow Copilot CLI usage billed to the organization. The workflow sources are the `.md` files in `.github/workflows`; after editing them, regenerate the Actions workflows with `gh aw compile`. Do not edit the corresponding generated `.lock.yml` files directly.
 
 ### Anonymous telemetry (opt-in)
 
