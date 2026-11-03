@@ -40,6 +40,38 @@ interface Props {
 
 type MetadataDraftMap = Record<number, ItemMetadataValueUpsert>;
 
+const ITEM_PRIORITY_OPTIONS = [
+  { value: 2, label: "🔥🔥 Molto alta" },
+  { value: 1, label: "🔥 Alta" },
+  { value: 0, label: "● Media" },
+  { value: -1, label: "▼ Bassa" },
+  { value: -2, label: "▼▼ Molto bassa" },
+];
+
+const ITEM_PRIORITY_LABELS: Record<number, string> = {
+  [-2]: "Molto bassa",
+  [-1]: "Bassa",
+  0: "Media",
+  1: "Alta",
+  2: "Molto alta",
+};
+
+function getPriorityIndicator(priority: number) {
+  return {
+    label: ITEM_PRIORITY_LABELS[priority] ?? ITEM_PRIORITY_LABELS[0],
+    symbol: priority > 0 ? "▲".repeat(priority) : priority < 0 ? "▼".repeat(-priority) : "●",
+    className: priority === 2
+      ? "text-red-600 dark:text-red-400"
+      : priority === 1
+        ? "text-orange-500 dark:text-orange-400"
+        : priority === -2
+          ? "text-blue-700 dark:text-blue-300"
+          : priority === -1
+            ? "text-sky-500 dark:text-sky-400"
+            : "text-gray-500 dark:text-gray-400",
+  };
+}
+
 function createEmptyMetadataDraft(fieldType: MetadataDefinition['field_type']): ItemMetadataValueUpsert {
   if (fieldType === 'TEXT' || fieldType === 'LIST') {
     return { definition_id: 0, value_text: null };
@@ -270,6 +302,8 @@ export function SwipeableItemRow({
   });
 
   const isViewer = user?.role?.name === 'viewer';
+  const priority = item.priority ?? 0;
+  const priorityIndicator = getPriorityIndicator(priority);
 
   const cloneItem = () => {
     const cloned = {
@@ -406,6 +440,16 @@ export function SwipeableItemRow({
           <div className="flex flex-col">
             <div className="font-semibold flex items-center gap-2">
               <span>{item.name}</span>
+              {isChecklist && (
+                <span
+                  role="img"
+                  aria-label={`Priorità ${priorityIndicator.label.toLowerCase()}`}
+                  title={`Priorità ${priorityIndicator.label}`}
+                  className={`text-sm leading-none ${priorityIndicator.className}`}
+                >
+                  {priorityIndicator.symbol}
+                </span>
+              )}
               <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
                 v{item.version_num}
               </span>
@@ -646,13 +690,16 @@ export default function InventoryDetailPage() {
   const [newItemName, setNewItemName] = useState("");
   const [newItemDescription, setNewItemDescription] = useState("");
   const [newItemQuantity, setNewItemQuantity] = useState(isChecklist ? 0 : 1);
+  const [newItemPriority, setNewItemPriority] = useState(0);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<number[]>([]);
-  const [sortBy, setSortBy] = useState<'name' | 'date' | 'quantity'>(() => {
+  const [sortBy, setSortBy] = useState<'name' | 'date' | 'quantity' | 'priority'>(() => {
     const stored = localStorage.getItem('item_sortBy');
     // Migrazione: se era "date" (vecchio default) o non impostato, passa a "name"
-    if (stored === 'name' || stored === 'quantity') return stored as 'name' | 'quantity';
+    if (stored === 'name' || stored === 'quantity' || stored === 'priority') {
+      return stored as 'name' | 'quantity' | 'priority';
+    }
     localStorage.setItem('item_sortBy', 'name');
     return 'name';
   });
@@ -822,8 +869,10 @@ useEffect(() => {
       }
       // Then, sort by selected sortBy/sortOrder
       let result = 0;
-      if (sortBy === "name") result = a.name.localeCompare(b.name);
-      else if (sortBy === "quantity") result = a.quantity - b.quantity;
+      const activeSortBy = !isChecklist && sortBy === "priority" ? "name" : sortBy;
+      if (activeSortBy === "name") result = a.name.localeCompare(b.name);
+      else if (activeSortBy === "quantity") result = a.quantity - b.quantity;
+      else if (activeSortBy === "priority") result = (a.priority ?? 0) - (b.priority ?? 0);
       else result = new Date(a.data_mod).getTime() - new Date(b.data_mod).getTime();
       return sortOrder === "asc" ? result : -result;
     });
@@ -1047,17 +1096,22 @@ useEffect(() => {
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
             <label className="hidden sm:inline text-sm font-medium">Ordina per:</label>
             <select
-              value={sortBy}
+              value={sortBy === "priority" && !isChecklist ? "name" : sortBy}
               onChange={(e) => {
-                const value = e.target.value as 'name' | 'date' | 'quantity';
+                const value = e.target.value as 'name' | 'date' | 'quantity' | 'priority';
                 localStorage.setItem('item_sortBy', value);
                 setSortBy(value);
+                if (value === "priority" && sortOrder === "asc") {
+                  localStorage.setItem('item_sortOrder', "desc");
+                  setSortOrder("desc");
+                }
               }}
               className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none"
             >
               <option value="date">Data modifica</option>
               <option value="name">Nome</option>
               <option value="quantity">Quantità</option>
+              {isChecklist && <option value="priority">Priorità (alta prima)</option>}
             </select>
             <button
               onClick={() => {
@@ -1410,7 +1464,8 @@ useEffect(() => {
                   name: newItemName,
                   description: newItemDescription,
                   quantity: newItemQuantity,
-                  inventory_id: inventory.id
+                  priority: isChecklist ? newItemPriority : 0,
+                  inventory_id: inventory.id,
                 });
                 if (newItem) {
                   if (isChecklist && newItemLink) {
@@ -1437,6 +1492,7 @@ useEffect(() => {
                   setNewItemName("");
                   setNewItemDescription("");
                   setNewItemQuantity(isChecklist ? 0 : 1);
+                  setNewItemPriority(0);
                   setNewItemMetadataDrafts({});
                   setNewItemLink(null);
                   setisInsertMode(false);
@@ -1501,6 +1557,21 @@ useEffect(() => {
                     />
                     Elemento completato
                   </label>
+                </div>
+              )}
+              {isChecklist && (
+                <div className="mb-4">
+                  <label htmlFor="new-item-priority" className="mb-1 block text-sm font-medium">Priorità</label>
+                  <select
+                    id="new-item-priority"
+                    value={newItemPriority}
+                    onChange={(event) => setNewItemPriority(Number(event.target.value))}
+                    className="min-h-12 w-full rounded border p-3 dark:bg-gray-800"
+                  >
+                    {ITEM_PRIORITY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
               )}
               <MetadataFieldsSection
@@ -1569,6 +1640,7 @@ useEffect(() => {
                     name: itemBeingEdited.name,
                     description: itemBeingEdited.description ?? "",
                     quantity: itemBeingEdited.quantity,
+                    priority: isChecklist ? itemBeingEdited.priority ?? 0 : 0,
                     inventory_id: inventory.id,
                   });
                   if (newItem) {
@@ -1594,6 +1666,7 @@ useEffect(() => {
                     name: itemBeingEdited.name,
                     description: itemBeingEdited.description ?? "",
                     quantity: itemBeingEdited.quantity,
+                    priority: isChecklist ? itemBeingEdited.priority ?? 0 : 0,
                     inventory_id: itemBeingEdited.inventory_id,
                   });
                   if (updated) {
@@ -1710,6 +1783,23 @@ useEffect(() => {
                       />
                       Elemento completato
                     </label>
+                  </div>
+                )}
+                {isChecklist && (
+                  <div className="mb-4">
+                    <label htmlFor="edit-item-priority" className="mb-1 block text-sm font-medium">Priorità</label>
+                    <select
+                      id="edit-item-priority"
+                      value={itemBeingEdited.priority ?? 0}
+                      onChange={(event) =>
+                        setItemBeingEdited({ ...itemBeingEdited, priority: Number(event.target.value) })
+                      }
+                      className="min-h-12 w-full rounded border p-3 dark:bg-gray-800"
+                    >
+                      {ITEM_PRIORITY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
                   </div>
                 )}
                 {isChecklist && !isCloning && canEdit && (

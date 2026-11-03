@@ -151,6 +151,7 @@ class Item(Base, LoggingData):
     name = Column(String(255), index=True, nullable=False)
     description = Column(PortableString, nullable=True)
     quantity = Column(Integer, index=True)
+    priority = Column(Integer, nullable=False, default=0, server_default="0")
     inventory_id = Column(Integer, ForeignKey("inventories.id"), nullable=False)
     inventory = relationship("Inventory", back_populates="items")
     metadata_values = relationship("ItemMetadataValue", back_populates="item", cascade="all, delete-orphan")
@@ -333,6 +334,7 @@ class ItemVersion(Base):
     name = Column(String(255), nullable=False)
     description = Column(PortableString, nullable=True)
     quantity = Column(Integer, nullable=True)
+    priority = Column(Integer, nullable=False, default=0, server_default="0")
     # metadati versione
     version_num = Column(Integer, nullable=False)
     operation = Column(String(16), nullable=False)               # CREATE | UPDATE | DELETE

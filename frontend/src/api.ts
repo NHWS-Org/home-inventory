@@ -312,6 +312,7 @@ export async function createItem(data: {
   name: string;
   description?: string;
   quantity: number;
+  priority?: number;
   inventory_id: number;
   barcodes?: { code: string; format?: string | null }[];
 }): Promise<InventoryItem> {
@@ -404,6 +405,7 @@ export async function updateItem(itemId: number, data: {
   name: string;
   description?: string;
   quantity: number;
+  priority?: number;
   inventory_id: number;
 }, onInsufficient?: 'zero'): Promise<InventoryItem> {
   const response = await api.patch(`/item/${itemId}`, data, {
