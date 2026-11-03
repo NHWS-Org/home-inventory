@@ -100,13 +100,27 @@ def _write_inventory_version(
     )
     db.add(version)
 
-def _build_inventory_response(db: Session, inv: Inventory) -> InventoryResponse:
-    current_version = db.query(func.max(InventoryVersion.version_num)).filter(
-        InventoryVersion.inventory_id == inv.id
-    ).scalar() or 0
+def _build_inventory_response(db: Session, inv: Inventory, version_num: int | None = None) -> InventoryResponse:
+    # ⚡ Bolt optimization: Allow passing precomputed version_num to eliminate N+1 queries when listing inventories.
+    if version_num is None:
+        version_num = db.query(func.max(InventoryVersion.version_num)).filter(
+            InventoryVersion.inventory_id == inv.id
+        ).scalar() or 0
     resp = InventoryResponse.model_validate(inv)
-    resp.version_num = current_version
+    resp.version_num = version_num
     return resp
+
+def _get_inventory_version_map(db: Session, inventory_ids: list[int]) -> dict[int, int]:
+    """⚡ Bolt optimization: Ottiene in batch l'ultimo numero di versione per una lista di id inventario (evita problema N+1)."""
+    if not inventory_ids:
+        return {}
+    results = (
+        db.query(InventoryVersion.inventory_id, func.max(InventoryVersion.version_num))
+        .filter(InventoryVersion.inventory_id.in_(inventory_ids))
+        .group_by(InventoryVersion.inventory_id)
+        .all()
+    )
+    return {inv_id: max_ver or 0 for inv_id, max_ver in results}
 
 def _current_item_version_num(db: Session, item_id: int) -> int:
     return (
@@ -182,7 +196,12 @@ def list_inventories_base(
 
         return raw_text, display_text
 
-    # Pre-caricamento in batch delle versioni degli item per evitare query N+1
+    # Pre-caricamento in batch delle versioni degli item e degli inventari per evitare query N+1
+    # ⚡ Bolt optimization: Fetch all inventory version numbers in 1 batched query instead of 1 query per inventory.
+    # Impact: Reduces queries from O(N) to O(1) when listing N inventories.
+    all_inv_ids = [inv.id for inv in visible_inventories]
+    inv_version_map = _get_inventory_version_map(db, all_inv_ids)
+
     all_item_ids = [item.id for inv in visible_inventories for item in inv.items]
     item_version_map = _get_item_version_map(db, all_item_ids)
 
@@ -258,7 +277,7 @@ def list_inventories_base(
 
         result.append({
             **InventoryResponseWithItemCount(
-                **_build_inventory_response(db, inv).model_dump(),
+                **_build_inventory_response(db, inv, version_num=inv_version_map.get(inv.id, 0)).model_dump(),
                 item_count=len(inv.items)
             ).model_dump(),
             "matching_items": matching_items if filtro else None
