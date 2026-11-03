@@ -38,6 +38,12 @@ docker-compose up --build -d
 - Se deselezioni la riga entro 45 secondi, la giacenza viene ripristinata. Dopo 45 secondi, la giacenza non cambia e l'assegnazione torna attiva (utile per gli acquisti ricorrenti). Se riselezioni la riga entro 45 secondi dalla deselezione tardiva, l'operazione viene annullata senza sottrarre nuovamente la giacenza.
 - Negli inventari, ogni riga mostra la giacenza lorda e quella netta (giacenza lorda meno le assegnazioni non ancora spuntate).
 
+### Automazioni agentiche (GitHub Copilot)
+
+Tre workflow GitHub Agentic usano Copilot ogni notte: Sentinel alle **02:00**, Bolt alle **03:00** e Palette alle **04:00** (`Europe/Rome`). Puoi avviarli anche manualmente dalla scheda **Actions**. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
+
+Per abilitarli, GitHub Actions deve essere attivo e l'organizzazione deve consentire l'uso di Copilot CLI fatturato all'organizzazione. Le sorgenti sono i file `.md` in `.github/workflows`; dopo averli modificati, rigenera i workflow Actions con `gh aw compile`. Non modificare direttamente i corrispondenti file `.lock.yml` generati.
+
 ### Telemetria anonima (opt-in)
 
 La telemetria è **disattivata di default**: non viene inviato nulla finché non la attivi esplicitamente. Serve a stimare quante installazioni sono attive e con quali versioni.
@@ -141,6 +147,12 @@ docker-compose up --build -d
 - Checking the entry subtracts the assigned quantity from the stock. If there is not enough stock, you can choose to set it to zero or cancel the action.
 - Unchecking the entry within 45 seconds restores the stock. After 45 seconds, the stock remains unchanged and the assignment becomes active again (useful for recurring purchases). If you check the entry again within 45 seconds of a late uncheck, the action is cancelled without subtracting stock again.
 - Inventory entries show both gross and net stock (gross stock minus assignments that have not yet been checked off).
+
+### Agentic workflows (GitHub Copilot)
+
+Three GitHub Agentic workflows use Copilot each night: Sentinel at **02:00**, Bolt at **03:00**, and Palette at **04:00** (`Europe/Rome`). You can also start them manually from the **Actions** tab. If they find a suitable improvement, they create at most one draft PR; they never merge automatically. Sentinel is restricted to generic preventive hardening and does not search for or publish details about specific vulnerabilities because this repository is public.
+
+To enable them, GitHub Actions must be enabled and the organization must allow Copilot CLI usage billed to the organization. The workflow sources are the `.md` files in `.github/workflows`; after editing them, regenerate the Actions workflows with `gh aw compile`. Do not edit the corresponding generated `.lock.yml` files directly.
 
 ### Anonymous telemetry (opt-in)
 
