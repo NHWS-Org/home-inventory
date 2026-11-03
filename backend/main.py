@@ -52,10 +52,20 @@ app.openapi_schema = None  # Rigenera lo schema alla prima richiesta
 # Avvio dello scheduler per i backup
 start_scheduler()
 
+# Security: Avoid wildcard origins when allow_credentials=True to prevent credential leakage via CORS
+_default_origins = "http://localhost:3000,http://127.0.0.1:3000,http://localhost,http://127.0.0.1"
+_raw_cors_origins = os.getenv("CORS_ORIGINS", _default_origins).strip()
+if _raw_cors_origins == "*":
+    cors_origins = ["*"]
+    cors_allow_credentials = False
+else:
+    cors_origins = [o.strip() for o in _raw_cors_origins.split(",") if o.strip()]
+    cors_allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
