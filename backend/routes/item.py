@@ -278,7 +278,14 @@ def update_item(
     old_snapshot = _snapshot_item(item)         # cattura stato precedente
     update_data = item_update.model_dump(exclude_unset=True)
     new_inventory_id = update_data.get("inventory_id")
+    target_inventory = None
     if new_inventory_id is not None and new_inventory_id != item.inventory_id:
+        target_inventory = db.query(Inventory).filter(Inventory.id == new_inventory_id).first()
+        if not target_inventory:
+            raise HTTPException(status_code=404, detail="Inventario di destinazione non trovato")
+        # Verifica autorizzazione su inventario di destinazione
+        if not can_access_inventory(user, target_inventory, action="edit"):
+            raise HTTPException(status_code=403, detail="Accesso negato all'inventario di destinazione")
         for barcode in item.barcodes:
             _ensure_barcode_free(db, cast(str, barcode.code), new_inventory_id, exclude_item_id=cast(int, item.id))
     for field, value in update_data.items():
@@ -299,6 +306,9 @@ def update_item(
     db.refresh(item)
     item.inventory.data_mod = datetime.now(timezone.utc)
     item.inventory.user_mod = user.id
+    if target_inventory is not None:
+        target_inventory.data_mod = datetime.now(timezone.utc)
+        target_inventory.user_mod = user.id
     db.commit()
     return _build_item_response(db, item)
 
