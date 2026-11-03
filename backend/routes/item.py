@@ -65,7 +65,8 @@ def _write_item_version(
         new_snapshot = _snapshot_item(item)
         for key, new_val in new_snapshot.items():
             old_val = old_snapshot.get(key)
-            if old_val != new_val:
+            empty_description = key == "description" and old_val in (None, "") and new_val in (None, "")
+            if old_val != new_val and not empty_description:
                 diff[key] = {"from": old_val, "to": new_val}
 
         if extra_diff:

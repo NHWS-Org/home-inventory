@@ -85,6 +85,9 @@ def _write_inventory_version(
             if old_val != new_val:
                 diff[key] = {"from": old_val, "to": new_val}
 
+        if not diff:
+            return
+
     inventory_id = cast(int, inv.id)
     version = InventoryVersion(
         inventory_id=inventory_id,

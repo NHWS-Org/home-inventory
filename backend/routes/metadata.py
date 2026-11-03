@@ -374,6 +374,16 @@ def _snapshot_typed_values(typed_values: dict[str, Any]) -> dict[str, Any] | Non
     return payload or None
 
 
+def _metadata_values_equal(before: dict[str, Any] | None, after: dict[str, Any] | None) -> bool:
+    if before == after:
+        return True
+    if before is None or after is None:
+        return False
+    if set(before) == set(after) == {"value_number"}:
+        return Decimal(before["value_number"]) == Decimal(after["value_number"])
+    return False
+
+
 def _touch_item_for_metadata_change(
     db: Session,
     item: Item,
@@ -1029,7 +1039,7 @@ def update_item_metadata_value(
     _apply_typed_values(value, typed_values)
     value.user_mod = user.id
     after_value = _snapshot_typed_values(typed_values)
-    if before_value != after_value:
+    if not _metadata_values_equal(before_value, after_value):
         _touch_item_for_metadata_change(
             db,
             item,
@@ -1124,7 +1134,7 @@ def bulk_upsert_item_metadata_values(
         _apply_typed_values(value, typed_values)
         db.flush()
         after_value = _snapshot_typed_values(typed_values)
-        if before_value != after_value:
+        if not _metadata_values_equal(before_value, after_value):
             metadata_changes.append({
                 "definition_id": definition.id,
                 "definition_key": definition.key,
