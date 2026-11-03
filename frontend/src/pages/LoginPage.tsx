@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FiEye, FiEyeOff } from 'react-icons/fi'
+import { FiEye, FiEyeOff, FiLoader } from 'react-icons/fi'
 import { loginUser, getUserInfo } from '../api'
 import { useAuth } from '../useAuth'
 import { User } from '../types'
@@ -11,11 +11,13 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
   const { setUser } = useAuth()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setIsLoading(true)
     try {
       const data = await loginUser(username, password)
       localStorage.setItem('access_token', data.access_token)
@@ -27,6 +29,7 @@ function LoginPage() {
       }
       navigate('/')
     } catch (err: unknown) {
+      setIsLoading(false)
       localStorage.removeItem('access_token');
       console.error('Login error:', err)
   
@@ -91,9 +94,18 @@ function LoginPage() {
         </div>
         <button
           type="submit"
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded"
+          disabled={isLoading}
+          aria-busy={isLoading}
+          className="flex w-full items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Login
+          {isLoading ? (
+            <>
+              <FiLoader className="h-5 w-5 animate-spin" aria-hidden="true" />
+              <span>Accesso in corso...</span>
+            </>
+          ) : (
+            'Login'
+          )}
         </button>
         <p className="text-sm mt-4 text-center">
           Non hai un account? <a href="/register" className="text-blue-600 hover:underline">Registrati</a>
