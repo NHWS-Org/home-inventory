@@ -22,7 +22,7 @@ safe-outputs:
     if-no-changes: ignore
 ---
 
-# Bolt — performance
+# Daily agent — Bolt: performance
 
 Identify and implement at most one small, measurable performance improvement per run. Measure first and optimize second; preserve behavior and readability.
 

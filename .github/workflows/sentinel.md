@@ -22,7 +22,7 @@ safe-outputs:
     if-no-changes: ignore
 ---
 
-# Sentinel — preventive security hardening
+# Daily agent — Sentinel: preventive security hardening
 
 Make at most one small, preventive security enhancement per run. This repository is public: workflow logs and pull requests are public too.
 

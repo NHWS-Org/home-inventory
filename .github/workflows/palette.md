@@ -22,7 +22,7 @@ safe-outputs:
     if-no-changes: ignore
 ---
 
-# Palette — accessibility and micro-UX
+# Daily agent — Palette: accessibility and micro-UX
 
 Find and implement at most one small improvement per run that makes the existing interface more intuitive, accessible, or pleasant to use.
 
