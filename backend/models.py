@@ -102,6 +102,26 @@ class User(Base, LoggingData):
                         )
 
 ################################################
+class DeviceSession(Base):
+    __tablename__ = "device_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_token_id = Column(String(64), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_type = Column(String(32), nullable=True)
+    browser = Column(String(128), nullable=True)
+    operating_system = Column(String(128), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    language = Column(String(64), nullable=True)
+    timezone = Column(String(64), nullable=True)
+    region = Column(String(16), nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+
+################################################
 class Group(Base, LoggingData):
     __tablename__ = "groups"
 

@@ -1,10 +1,11 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, SecurityScopes
 from database import SessionLocal, Session
-from models import User, RoleEnum, Role
+from models import User, RoleEnum, Role, DeviceSession
 from crud import get_setting, set_setting
 import jwt
 import os
+import datetime
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
@@ -73,6 +74,15 @@ def get_current_user(security_scopes: SecurityScopes,
         user = db.query(User).filter(User.username == username).first()
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Utente non trovato")
+        session_token_id = payload.get("jti")
+        if session_token_id:
+            device_session = db.query(DeviceSession).filter(
+                DeviceSession.session_token_id == session_token_id,
+                DeviceSession.user_id == user.id,
+            ).first()
+            now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+            if not device_session or device_session.revoked_at or device_session.expires_at <= now:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessione non valida o revocata")
         if user.role is None:
             raise HTTPException(status_code=403, detail="Accesso negato: ruolo non assegnato")
         if user.is_blocked:  # ✅ Blocca l'accesso agli utenti disabilitati

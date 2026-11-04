@@ -86,10 +86,35 @@ export async function loginUser(username: string, password: string): Promise<{ a
     {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Client-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone || '',
       },
     }
   )
   return response.data as { access_token: string }
+}
+
+export interface DeviceSession {
+  id: number;
+  device_type: string | null;
+  browser: string | null;
+  operating_system: string | null;
+  language: string | null;
+  timezone: string | null;
+  region: string | null;
+  created_at: string;
+  expires_at: string;
+  is_expired: boolean;
+  revoked_at: string | null;
+  is_current: boolean;
+}
+
+export async function getDeviceSessions(): Promise<DeviceSession[]> {
+  const response = await api.get<DeviceSession[]>('/auth/sessions');
+  return response.data;
+}
+
+export async function revokeDeviceSession(sessionId: number): Promise<void> {
+  await api.delete(`/auth/sessions/${sessionId}`);
 }
 
 /* REGISTRAZIONE UTENTI */
