@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 VENV_DIR=".venv"
 REQ_FILE="requirements.txt"
+
+if [ ! -f "$REQ_FILE" ]; then
+  echo "[setup] Errore: $SCRIPT_DIR/$REQ_FILE non trovato." >&2
+  exit 1
+fi
 
 # 1. crea venv se mancante
 if [ ! -d "$VENV_DIR" ]; then
@@ -16,25 +24,9 @@ source "$VENV_DIR/bin/activate"
 # 3. aggiorna pip
 python -m pip install --upgrade pip wheel setuptools
 
-# 4. requirements.txt di default se non presente
-if [ ! -f "$REQ_FILE" ]; then
-  echo "[setup] Creo requirements.txt di base"
-  cat > "$REQ_FILE" <<'EOF'
-fastapi
-uvicorn
-sqlalchemy
-pydantic
-psycopg2-binary
-alembic
-python-multipart
-passlib[bcrypt]
-python-jose[cryptography]
-EOF
-fi
-
-# 5. installa pacchetti
+# 4. installa pacchetti
 echo "[setup] Installo dipendenze da $REQ_FILE"
-pip install -r "$REQ_FILE"
+python -m pip install -r "$REQ_FILE"
 
 echo "[setup] Ambiente pronto. Attivalo con:"
-echo "source $VENV_DIR/bin/activate"
+printf 'source %q\n' "$SCRIPT_DIR/$VENV_DIR/bin/activate"

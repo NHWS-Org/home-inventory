@@ -337,6 +337,7 @@ export async function createItem(data: {
   name: string;
   description?: string;
   quantity: number;
+  priority?: number;
   inventory_id: number;
   barcodes?: { code: string; format?: string | null }[];
 }): Promise<InventoryItem> {
@@ -429,6 +430,7 @@ export async function updateItem(itemId: number, data: {
   name: string;
   description?: string;
   quantity: number;
+  priority?: number;
   inventory_id: number;
 }, onInsufficient?: 'zero'): Promise<InventoryItem> {
   const response = await api.patch(`/item/${itemId}`, data, {
@@ -584,6 +586,54 @@ export async function listBackups() {
   return res.data;
 }
 
+export interface BackupComparison {
+  before: { filename: string | null; db_alembic_version: string | null };
+  after: { filename: string | null; db_alembic_version: string | null };
+  tables: Array<{
+    table: string;
+    before_count: number;
+    after_count: number;
+    before_present: boolean;
+    after_present: boolean;
+    added: number;
+    removed: number;
+    modified: number;
+    unchanged: number;
+  }>;
+  changes: Array<{
+    table: string;
+    key: Record<string, unknown>;
+    kind: "added" | "removed" | "modified";
+    fields: Array<{
+      field: string;
+      before_present: boolean;
+      after_present: boolean;
+      before: unknown;
+      after: unknown;
+    }>;
+  }>;
+  total_changes: number;
+  offset: number;
+  limit: number;
+}
+
+export async function compareBackups(
+  beforeFilename: string,
+  afterFilename: string | null,
+  table: string | null,
+  offset: number,
+  signal: AbortSignal,
+): Promise<BackupComparison> {
+  const res = await api.post<BackupComparison>("/backup/compare", {
+    before_filename: beforeFilename,
+    after_filename: afterFilename,
+    table,
+    offset,
+    limit: 50,
+  }, { signal });
+  return res.data;
+}
+
 export async function getBackupCompatibilityMap(): Promise<{
   revisions: string[];
   revision_labels?: Record<string, string | null>;
@@ -696,6 +746,19 @@ export async function deleteBackup(filename: string): Promise<void> {
   });
 }
 
+export async function convertLegacyBackup(filename: string): Promise<{ filename: string }> {
+  const response = await api.post<{ filename: string }>(`/backup/convert-legacy/${encodeURIComponent(filename)}`);
+  return response.data;
+}
+
+export async function deleteLegacyBackup(filename: string): Promise<void> {
+  await api.request({
+    url: `/backup/legacy/${encodeURIComponent(filename)}`,
+    method: 'DELETE',
+    data: true,
+  });
+}
+
 export async function deleteBackupsBulk(filenames: string[]): Promise<{
   message: string;
   deleted: string[];
@@ -715,9 +778,12 @@ export async function deleteBackupsBulk(filenames: string[]): Promise<{
 }
 
 // Upload di un backup esistente
-export async function uploadBackup(file: File): Promise<void> {
+export async function uploadBackup(file: File, metadataFile?: File): Promise<void> {
   const formData = new FormData();
   formData.append('file', file);
+  if (metadataFile) {
+    formData.append('metadata_file', metadataFile);
+  }
 
   await api.post('/backup/upload', formData, {
     headers: {

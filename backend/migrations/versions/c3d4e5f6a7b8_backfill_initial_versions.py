@@ -33,7 +33,7 @@ def upgrade() -> None:
             u_owner.username,
             1,
             'CREATE',
-            COALESCE(i.data_ins, now()),
+            COALESCE(i.data_ins, CURRENT_TIMESTAMP),
             i.user_ins,
             u_ins.username,
             NULL
@@ -62,7 +62,7 @@ def upgrade() -> None:
             it.quantity,
             1,
             'CREATE',
-            COALESCE(it.data_ins, now()),
+            COALESCE(it.data_ins, CURRENT_TIMESTAMP),
             it.user_ins,
             u_ins.username,
             NULL

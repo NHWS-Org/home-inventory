@@ -93,6 +93,7 @@ export interface InventoryItem {
     name: string;
     description: string;
     quantity: number;
+    priority: number;
     inventory_id: number;
     user_ins: number;
     user_mod: number | null;
@@ -126,6 +127,7 @@ export interface ChecklistItem {
     name: string;
     description: string;
     quantity: number;
+    priority: number;
     inventory_id: number;
     user_ins: number;
     user_mod: number | null;
@@ -147,6 +149,7 @@ export interface Item {
     name: string;
     description: string;
     quantity: number;
+    priority: number;
     inventory_id: number;
     user_ins: number;
     user_mod: number | null;
@@ -166,6 +169,7 @@ export interface ItemVersion {
     name: string;
     description: string | null;
     quantity: number | null;
+    priority: number;
     version_num: number;
     operation: "CREATE" | "UPDATE" | "DELETE";
     changed_at: string;
