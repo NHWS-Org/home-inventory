@@ -721,6 +721,19 @@ export async function deleteBackup(filename: string): Promise<void> {
   });
 }
 
+export async function convertLegacyBackup(filename: string): Promise<{ filename: string }> {
+  const response = await api.post<{ filename: string }>(`/backup/convert-legacy/${encodeURIComponent(filename)}`);
+  return response.data;
+}
+
+export async function deleteLegacyBackup(filename: string): Promise<void> {
+  await api.request({
+    url: `/backup/legacy/${encodeURIComponent(filename)}`,
+    method: 'DELETE',
+    data: true,
+  });
+}
+
 export async function deleteBackupsBulk(filenames: string[]): Promise<{
   message: string;
   deleted: string[];

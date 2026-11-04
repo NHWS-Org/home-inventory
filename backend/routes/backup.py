@@ -134,7 +134,7 @@ class BackupComparisonRequest(BaseModel):
     limit: int = Field(default=50, ge=1, le=100)
 
 
-def _safe_backup_path(filename: str) -> Path:
+def _safe_backup_path(filename: str, *, extension: str = BACKUP_EXTENSION) -> Path:
     if (
         not filename
         or filename.startswith(".")
@@ -143,10 +143,10 @@ def _safe_backup_path(filename: str) -> Path:
         or ".." in filename
     ):
         raise HTTPException(status_code=400, detail="Nome file backup non valido")
-    if not filename.endswith(BACKUP_EXTENSION):
+    if not filename.endswith(extension):
         raise HTTPException(
             status_code=400,
-            detail=f"Formato file non valido. Sono ammessi solo {BACKUP_EXTENSION}",
+            detail=f"Formato file non valido. Sono ammessi solo {extension}",
         )
 
     backup_dir_resolved = BACKUP_DIR.resolve()
@@ -565,7 +565,74 @@ def list_backups(db: Session = Depends(get_db)):
                 "restore_compatibility": compatibility,
             }
         )
+    for file in sorted(BACKUP_DIR.glob("*.sql")):
+        try:
+            sql_path = _safe_backup_path(file.name, extension=".sql")
+            metadata_path = _safe_backup_path(f"{file.name}.meta.json", extension=".sql.meta.json")
+        except HTTPException:
+            logger.warning("Backup legacy con percorso non valido ignorato")
+            continue
+        if not sql_path.is_file():
+            continue
+        has_metadata = metadata_path.is_file()
+        backups.append({
+            "filename": file.name,
+            "size": sql_path.stat().st_size + (metadata_path.stat().st_size if has_metadata else 0),
+            "modified": datetime.fromtimestamp(sql_path.stat().st_mtime),
+            "legacy": True,
+            "has_metadata": has_metadata,
+            "restorable_on_current_db": False,
+        })
     return backups
+
+
+@router.post("/convert-legacy/{filename}")
+def convert_legacy_backup_in_place(filename: str):
+    sql_path = _safe_backup_path(filename, extension=".sql")
+    metadata_path = _safe_backup_path(f"{filename}.meta.json", extension=".sql.meta.json")
+    output = _safe_backup_path(f"{filename[:-4]}{BACKUP_EXTENSION}")
+    if not sql_path.is_file() or not metadata_path.is_file():
+        raise HTTPException(status_code=404, detail="Servono entrambi i file .sql e .sql.meta.json")
+    if output.exists():
+        raise HTTPException(status_code=409, detail="Il backup .hibackup di destinazione esiste gia")
+    staging = BACKUP_DIR / f".conversion-{uuid.uuid4().hex}.tmp"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+        convert_legacy_backup(sql_path.read_text(encoding="utf-8-sig"), metadata, staging)
+        read_backup_metadata(staging)
+        # Publish without overwriting an existing archive, even during concurrent conversions.
+        os.link(staging, output)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="Il backup .hibackup di destinazione esiste gia") from exc
+    except (ValueError, TypeError, ArithmeticError, RecursionError) as exc:
+        logger.warning("Conversione backup legacy rifiutata: dati non validi")
+        raise HTTPException(status_code=400, detail="Backup legacy o metadati non validi") from exc
+    except OSError as exc:
+        logger.exception("Errore nella conversione del backup legacy")
+        raise HTTPException(status_code=500, detail="Impossibile convertire il backup legacy") from exc
+    finally:
+        staging.unlink(missing_ok=True)
+    return {"message": "Backup convertito; sorgenti conservati", "filename": output.name}
+
+
+@router.delete("/legacy/{filename}")
+def delete_legacy_backup(filename: str, confirm: bool = Body(...)):
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Cancellazione non confermata")
+    sql_path = _safe_backup_path(filename, extension=".sql")
+    metadata_path = _safe_backup_path(f"{filename}.meta.json", extension=".sql.meta.json")
+    if not sql_path.is_file() and not metadata_path.is_file():
+        raise HTTPException(status_code=404, detail="File sorgenti non trovati")
+    try:
+        metadata_path.unlink(missing_ok=True)
+        sql_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.exception("Errore durante la cancellazione dei sorgenti legacy")
+        raise HTTPException(
+            status_code=500,
+            detail="Cancellazione dei sorgenti incompleta: verificare i file rimasti",
+        ) from exc
+    return {"message": "File sorgenti legacy eliminati"}
 
 
 @router.get("/compatibility-map")

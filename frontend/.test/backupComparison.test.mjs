@@ -9,7 +9,7 @@ const server = await createServer({
   server: { middlewareMode: true, ws: false },
 });
 after(() => server.close());
-const { api, compareBackups } = await server.ssrLoadModule('/src/api.ts');
+const { api, compareBackups, convertLegacyBackup, deleteLegacyBackup } = await server.ssrLoadModule('/src/api.ts');
 
 test('comparison client preserves direction, filters, pagination and cancellation', async () => {
   const originalPost = api.post;
@@ -47,5 +47,28 @@ test('comparison client propagates API errors', async () => {
     );
   } finally {
     api.post = originalPost;
+  }
+});
+
+test('legacy conversion and source deletion are separate requests', async () => {
+  const originalPost = api.post;
+  const originalRequest = api.request;
+  const calls = [];
+  api.post = async (...args) => {
+    calls.push(args);
+    return { data: { filename: 'old backup.hibackup' } };
+  };
+  api.request = async config => { calls.push(config); };
+  try {
+    assert.deepEqual(await convertLegacyBackup('old backup.sql'), { filename: 'old backup.hibackup' });
+    assert.equal(calls.length, 1);
+    await deleteLegacyBackup('old backup.sql');
+    assert.deepEqual(calls, [
+      ['/backup/convert-legacy/old%20backup.sql'],
+      { url: '/backup/legacy/old%20backup.sql', method: 'DELETE', data: true },
+    ]);
+  } finally {
+    api.post = originalPost;
+    api.request = originalRequest;
   }
 });

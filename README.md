@@ -28,6 +28,8 @@ docker-compose up --build -d
 
 Per impostazione predefinita l'app usa SQLite, senza un container database: il file e i backup compressi `.hibackup` sono conservati in `data/` (sul volume montato). I backup includono i metadati Alembic e possono essere ripristinati su un motore diverso. I vecchi backup PostgreSQL v2 vengono convertiti durante il caricamento della coppia `.sql` + `.sql.meta.json`.
 
+Per migrare sul posto una vecchia installazione, lascia le coppie `nome.sql` + `nome.sql.meta.json` nella cartella dei backup. Ogni backup SQL mostra solo **Converti** ed **Elimina** e non partecipa alle selezioni multiple. **Converti** crea `nome.hibackup` senza modificare il database o sovrascrivere un archivio esistente; soltanto al termine chiede se eliminare entrambi i sorgenti. Annullando la conferma, i sorgenti restano disponibili. **Elimina** chiede conferma e rimuove la coppia SQL, non l'eventuale `.hibackup`. Senza il file `.sql.meta.json` la conversione è disabilitata.
+
 Gli amministratori possono confrontare i dati dalla pagina **Backup**:
 
 - Seleziona un backup e premi **Confronta con DB corrente**: la direzione è backup (prima) verso DB corrente (dopo).
@@ -195,6 +197,8 @@ docker-compose up --build -d
 ### Database and backups
 
 The app uses SQLite by default, with no database container: the database file and compressed `.hibackup` backups are stored in the mounted `data/` volume. Backups include Alembic metadata and can be restored to a different engine. Legacy v2 PostgreSQL backups are converted when uploading the `.sql` + `.sql.meta.json` pair.
+
+For in-place migrations, leave `name.sql` + `name.sql.meta.json` pairs in the backup directory. Each SQL backup only offers **Converti** and **Elimina**, and is excluded from bulk selections. **Converti** creates `name.hibackup` without modifying the database or overwriting an existing archive; only after success does it ask whether to delete both source files. Canceling keeps the sources. **Elimina** confirms deletion of the SQL pair, not any converted `.hibackup`. Conversion is disabled when `.sql.meta.json` is missing.
 
 Administrators can compare data on the **Backup** page:
 

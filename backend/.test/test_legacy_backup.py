@@ -175,6 +175,132 @@ def test_upload_legacy_pair_converts_without_accessing_database(client, tmp_path
     assert second.json()["converted"] is False
 
 
+def write_legacy_pair(path, name="old.sql"):
+    (path / name).write_text(legacy_sql(), encoding="utf-8")
+    (path / f"{name}.meta.json").write_text(json.dumps(METADATA), encoding="utf-8")
+
+
+def test_in_place_conversion_keeps_names_sources_and_data(client, tmp_path, monkeypatch):
+    write_legacy_pair(tmp_path)
+    original = {file.name: file.read_bytes() for file in tmp_path.iterdir()}
+    monkeypatch.setattr(backup, "SessionLocal", lambda: pytest.fail("Conversion must not access DB"))
+    response = client.post("/backup/convert-legacy/old.sql")
+    assert response.status_code == 200
+    assert response.json()["filename"] == "old.hibackup"
+    metadata, rows = read_backup_archive(tmp_path / "old.hibackup")
+    assert metadata["db_alembic_version"] == REVISION
+    assert len(rows["items"]) == 2
+    for name, content in original.items():
+        assert (tmp_path / name).read_bytes() == content
+    assert sorted(file.name for file in tmp_path.iterdir()) == [
+        "old.hibackup", "old.sql", "old.sql.meta.json",
+    ]
+    archive = (tmp_path / "old.hibackup").read_bytes()
+    assert client.post("/backup/convert-legacy/old.sql").status_code == 409
+    assert (tmp_path / "old.hibackup").read_bytes() == archive
+    assert client.request("DELETE", "/backup/legacy/old.sql", json=False).status_code == 400
+    assert (tmp_path / "old.sql").exists()
+    assert client.request("DELETE", "/backup/legacy/old.sql", json=True).status_code == 200
+    assert list(tmp_path.iterdir()) == [tmp_path / "old.hibackup"]
+    assert (tmp_path / "old.hibackup").read_bytes() == archive
+
+
+def test_listing_includes_legacy_pairs_and_incomplete_sql(client, tmp_path, monkeypatch):
+    write_legacy_pair(tmp_path)
+    (tmp_path / "missing.sql").write_text(legacy_sql())
+    (tmp_path / "orphan.sql.meta.json").write_text(json.dumps(METADATA))
+    client.app.dependency_overrides[backup.get_db] = lambda: None
+    monkeypatch.setattr(backup, "_get_alembic_version", lambda db: REVISION)
+    response = client.get("/backup/")
+    assert response.status_code == 200
+    entries = {entry["filename"]: entry for entry in response.json()}
+    assert set(entries) == {"old.sql", "missing.sql"}
+    assert entries["old.sql"]["legacy"] is True
+    assert entries["old.sql"]["has_metadata"] is True
+    assert entries["missing.sql"]["has_metadata"] is False
+    assert entries["old.sql"]["restorable_on_current_db"] is False
+    assert entries["old.sql"]["size"] == sum(file.stat().st_size for file in [
+        tmp_path / "old.sql", tmp_path / "old.sql.meta.json",
+    ])
+
+
+def test_in_place_conversion_rejects_missing_invalid_and_unsafe_sources(client, tmp_path):
+    assert client.post("/backup/convert-legacy/missing.sql").status_code == 404
+    write_legacy_pair(tmp_path)
+    (tmp_path / "old.sql.meta.json").unlink()
+    assert client.post("/backup/convert-legacy/old.sql").status_code == 404
+    (tmp_path / "old.sql.meta.json").write_text("not-json")
+    assert client.post("/backup/convert-legacy/old.sql").status_code == 400
+    (tmp_path / "old.sql.meta.json").write_text(json.dumps(METADATA))
+    (tmp_path / "old.sql").write_text("DROP TABLE users;")
+    assert client.post("/backup/convert-legacy/old.sql").status_code == 400
+    assert not (tmp_path / "old.hibackup").exists()
+    assert not list(tmp_path.glob(".conversion-*"))
+    for filename in [".hidden.sql", "old.hibackup", r"..\old.sql"]:
+        assert client.post(f"/backup/convert-legacy/{filename}").status_code == 400
+        assert client.request("DELETE", f"/backup/legacy/{filename}", json=True).status_code == 400
+
+
+def test_in_place_conversion_rejects_external_symlinks(client, tmp_path):
+    from fastapi import HTTPException
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.sql"
+    outside.write_text(legacy_sql())
+    try:
+        (tmp_path / "linked.sql").symlink_to(outside)
+        with pytest.raises(HTTPException) as exc:
+            backup._safe_backup_path("linked.sql", extension=".sql")
+        assert exc.value.status_code == 400
+        assert client.post("/backup/convert-legacy/linked.sql").status_code == 400
+        assert client.request("DELETE", "/backup/legacy/linked.sql", json=True).status_code == 400
+        assert outside.exists()
+    finally:
+        outside.unlink()
+
+
+def test_in_place_conversion_never_overwrites_concurrent_destination(client, tmp_path, monkeypatch):
+    write_legacy_pair(tmp_path)
+    convert = backup.convert_legacy_backup
+
+    def competing_conversion(sql, metadata, destination):
+        convert(sql, metadata, destination)
+        (tmp_path / "old.hibackup").write_bytes(b"existing-archive")
+
+    monkeypatch.setattr(backup, "convert_legacy_backup", competing_conversion)
+    assert client.post("/backup/convert-legacy/old.sql").status_code == 409
+    assert (tmp_path / "old.hibackup").read_bytes() == b"existing-archive"
+    assert (tmp_path / "old.sql").is_file()
+    assert (tmp_path / "old.sql.meta.json").is_file()
+    assert not list(tmp_path.glob(".conversion-*"))
+
+
+def test_legacy_delete_surfaces_partial_failure_and_can_be_retried(client, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    write_legacy_pair(tmp_path)
+    unlink = Path.unlink
+
+    def fail_sql(path, *args, **kwargs):
+        if path.name == "old.sql":
+            raise PermissionError("test")
+        return unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", fail_sql)
+        response = client.request("DELETE", "/backup/legacy/old.sql", json=True)
+    assert response.status_code == 500
+    assert "incompleta" in response.json()["detail"]
+    assert (tmp_path / "old.sql").exists()
+    assert client.request("DELETE", "/backup/legacy/old.sql", json=True).status_code == 200
+    assert not list(tmp_path.iterdir())
+
+
+def test_legacy_endpoints_require_login(client):
+    client.app.dependency_overrides.clear()
+    assert client.post("/backup/convert-legacy/old.sql").status_code == 401
+    assert client.request("DELETE", "/backup/legacy/old.sql", json=True).status_code == 401
+
+
 @pytest.mark.parametrize("sidecar_name,sidecar_content", [
     (None, None),
     ("wrong.sql.meta.json", json.dumps(METADATA)),
