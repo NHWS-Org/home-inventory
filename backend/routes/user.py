@@ -4,7 +4,7 @@ from sqlalchemy import not_
 from routes.auth import hash_password, get_current_user
 from routes.inventory import can_access_inventory
 from dependencies import get_db, role_required
-from models import User, RoleEnum, Role, Group, Inventory
+from models import User, RoleEnum, Role, Group, Inventory, UserGroupAssociation
 import crud, schemas
 from typing import List
 
@@ -237,18 +237,28 @@ def get_shareable_users(inventory_id: int, db: Session = Depends(get_db), curren
     if not can_access_inventory(current_user, inventory, action="edit"):
         raise HTTPException(status_code=403, detail="Accesso negato")
 
-    # utenti con accesso diretto
+    # ⚡ Bolt optimization: Batch group user lookups and eager-load roles to avoid N+1 queries.
+    # Impact: Reduces query count from O(G + U) to O(1) where G is shared groups and U is non-admin users.
+    # Utenti con accesso diretto
     shared_user_ids = {s.user_id for s in inventory.shared_with_users}
 
-    # utenti che hanno già accesso (direttamente o tramite gruppo)
-    for shared_group in inventory.shared_with_groups:
-        group = db.query(Group).filter(Group.id == shared_group.group_id).first()
-        if group:
-            for user in group.users:
-                shared_user_ids.add(user.id)
+    # Utenti che hanno già accesso tramite gruppo (query singola su UserGroupAssociation)
+    shared_group_ids = [s.group_id for s in inventory.shared_with_groups]
+    if shared_group_ids:
+        group_user_ids = (
+            db.query(UserGroupAssociation.user_id)
+            .filter(UserGroupAssociation.group_id.in_(shared_group_ids))
+            .all()
+        )
+        shared_user_ids.update(uid for (uid,) in group_user_ids)
 
-    # tutti gli utenti non admin
-    all_users = db.query(User).filter(User.role.has(Role.name != "admin")).all()
+    # Tutti gli utenti non admin, con ruolo pre-caricato per evitare N+1 in fase di serializzazione UserResponse
+    all_users = (
+        db.query(User)
+        .options(joinedload(User.role))
+        .filter(User.role.has(Role.name != "admin"))
+        .all()
+    )
 
-    # ritorna solo quelli non ancora condivisi in nessun modo
+    # Ritorna solo quelli non ancora condivisi in nessun modo
     return [u for u in all_users if u.id not in shared_user_ids]
