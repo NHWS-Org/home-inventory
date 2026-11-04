@@ -4,10 +4,15 @@ http {
   include       mime.types;
   default_type  application/octet-stream;
   sendfile      on;
+  server_tokens off;
 
   server {
     listen 80;
     server_name _;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
     # Usa il resolver DNS interno di Docker per ri-risolvere il nome del backend
     # ad ogni richiesta, evitando cache IP stale dopo restart del container
