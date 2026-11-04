@@ -1175,16 +1175,18 @@ def get_inventory_history(inventory_id: int, db: Session = Depends(get_db), user
     else:
         latest = (
             db.query(InventoryVersion)
-            .filter(InventoryVersion.inventory_id == inventory_id)
+            .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "INVENTORY")
             .order_by(InventoryVersion.version_num.desc())
             .first()
         )
-        if latest and user.role.name != "admin" and latest.owner_id != user.id:
+        if not latest:
+            raise HTTPException(status_code=404, detail="Inventario non trovato")
+        if user.role.name == "viewer" or (user.role.name != "admin" and latest.owner_id != user.id):
             raise HTTPException(status_code=403, detail="Accesso negato")
 
     versions = (
         db.query(InventoryVersion)
-        .filter(InventoryVersion.inventory_id == inventory_id)
+        .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "INVENTORY")
         .order_by(InventoryVersion.version_num.asc())
         .all()
     )
@@ -1200,16 +1202,18 @@ def get_checklist_history(inventory_id: int, db: Session = Depends(get_db), user
     else:
         latest = (
             db.query(InventoryVersion)
-            .filter(InventoryVersion.inventory_id == inventory_id)
+            .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "CHECKLIST")
             .order_by(InventoryVersion.version_num.desc())
             .first()
         )
-        if latest and user.role.name != "admin" and latest.owner_id != user.id:
+        if not latest:
+            raise HTTPException(status_code=404, detail="Checklist non trovata")
+        if user.role.name == "viewer" or (user.role.name != "admin" and latest.owner_id != user.id):
             raise HTTPException(status_code=403, detail="Accesso negato")
 
     versions = (
         db.query(InventoryVersion)
-        .filter(InventoryVersion.inventory_id == inventory_id)
+        .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "CHECKLIST")
         .order_by(InventoryVersion.version_num.asc())
         .all()
     )
