@@ -1,12 +1,13 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --test .test/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

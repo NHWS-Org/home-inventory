@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getUserInfo, updateMe } from "../api";
+import { getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
 
 const ProfilePage = () => {
@@ -19,6 +19,8 @@ const ProfilePage = () => {
   const [messageCountdown, setMessageCountdown] = useState(5);
   const [passwordCountdown, setPasswordCountdown] = useState(5);
   const [isPasswordError, setIsPasswordError] = useState(false);
+  const [deviceSessions, setDeviceSessions] = useState<DeviceSession[]>([]);
+  const [sessionMessage, setSessionMessage] = useState("");
 
   const emailInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -37,6 +39,12 @@ const ProfilePage = () => {
       .catch(() => {
         setMessage("Errore nel recupero delle informazioni utente.");
       });
+  }, []);
+
+  useEffect(() => {
+    getDeviceSessions()
+      .then(setDeviceSessions)
+      .catch(() => setSessionMessage("Errore nel recupero dei dispositivi."));
   }, []);
 
   useEffect(() => {
@@ -164,6 +172,24 @@ const ProfilePage = () => {
     }, 1000);
   };
 
+  const handleRevokeSession = async (session: DeviceSession) => {
+    try {
+      await revokeDeviceSession(session.id);
+      if (session.is_current) {
+        localStorage.removeItem("access_token");
+        window.location.assign("/login");
+        return;
+      }
+      setDeviceSessions((sessions) =>
+        sessions.map((item) =>
+          item.id === session.id ? { ...item, revoked_at: new Date().toISOString() } : item
+        )
+      );
+    } catch {
+      setSessionMessage("Errore nella disconnessione del dispositivo.");
+    }
+  };
+
   return (
     <div className="max-w-md mx-auto mt-8 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-8">
       <Link to={returnPath} className="inline-flex min-h-11 items-center rounded-xl bg-gray-100 px-4 font-medium text-blue-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-gray-700">
@@ -274,6 +300,52 @@ const ProfilePage = () => {
           </p>
         )}
       </div>
+
+      <section>
+        <h2 className="text-xl font-bold mb-4">Dispositivi connessi</h2>
+        {sessionMessage && <p className="mb-3 text-sm text-red-600">{sessionMessage}</p>}
+        {deviceSessions.length === 0 ? (
+          <p className="text-sm text-gray-600 dark:text-gray-300">Nessun dispositivo registrato.</p>
+        ) : (
+          <ul className="space-y-3">
+            {deviceSessions.map((session) => {
+              const isExpired = session.is_expired;
+              const isRevoked = Boolean(session.revoked_at);
+              return (
+                <li key={session.id} className="rounded border border-gray-300 p-3 dark:border-gray-700">
+                  <p className="font-medium">
+                    {[session.device_type, session.browser, session.operating_system].filter(Boolean).join(" · ")}
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    Accesso: {new Date(session.created_at).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    Valida fino al: {new Date(session.expires_at).toLocaleString()}
+                  </p>
+                  {(session.region || session.language || session.timezone) && (
+                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                      {[session.region, session.language, session.timezone].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                  <p className="mt-1 text-sm">
+                    {isRevoked ? "Disconnesso" : isExpired ? "Sessione scaduta" : "Attivo"}
+                    {session.is_current && !isRevoked && " · Questo dispositivo"}
+                  </p>
+                  {!isRevoked && !isExpired && (
+                    <button
+                      type="button"
+                      onClick={() => handleRevokeSession(session)}
+                      className="mt-2 min-h-11 rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700"
+                    >
+                      Disconnetti dispositivo
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
     </div>
   );
 };

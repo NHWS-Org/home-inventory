@@ -42,4 +42,4 @@ ENV BACKEND_BASE_URL=http://localhost:8000
 ENTRYPOINT ["/entrypoint.sh"]
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
-  CMD curl -fs http://localhost || exit 1
+  CMD curl -fsS -o /dev/null http://localhost/health-check || exit 1

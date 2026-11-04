@@ -12,11 +12,55 @@ export const fieldLabel = (field: string): string => {
   return labels[field] || field;
 };
 
+const isEmptyValue = (value: unknown): boolean =>
+  value === null || value === undefined || value === '' ||
+  (Array.isArray(value) && value.length === 0);
+
 export const formatValue = (value: unknown): string => {
-  if (value === null || value === undefined || value === '') return 'vuoto';
+  if (isEmptyValue(value)) return 'vuoto';
   if (typeof value === 'boolean') return value ? 'si' : 'no';
   return String(value);
 };
+
+function sameValue(from: unknown, to: unknown): boolean {
+  if (from === to || (isEmptyValue(from) && isEmptyValue(to))) return true;
+  return Array.isArray(from) && Array.isArray(to) &&
+    from.length === to.length && from.every((value, index) => value === to[index]);
+}
+
+function normalizedDecimal(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const match = /^([+-]?)(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/i.exec(String(value));
+  if (!match || (!match[2] && !match[3])) return null;
+
+  // Compare decimal values without losing precision through Number conversion.
+  const fractional = match[3] ?? '';
+  const digits = `${match[2]}${fractional}`.replace(/^0+/, '');
+  if (!digits) return '0';
+  const significant = digits.replace(/0+$/, '');
+  const exponent = BigInt(match[4] ?? '0') - BigInt(fractional.length) +
+    BigInt(digits.length - significant.length);
+  return `${match[1] === '-' ? '-' : ''}${significant}e${exponent}`;
+}
+
+function sameMetadataValue(from: unknown, to: unknown): boolean {
+  if (sameValue(from, to)) return true;
+  if (!from || !to || typeof from !== 'object' || typeof to !== 'object') return false;
+
+  const before = from as Record<string, unknown>;
+  const after = to as Record<string, unknown>;
+  const beforeKeys = Object.keys(before).filter((key) => before[key] !== null && before[key] !== undefined);
+  const afterKeys = Object.keys(after).filter((key) => after[key] !== null && after[key] !== undefined);
+  if (beforeKeys.length !== 1 || afterKeys.length !== 1 || beforeKeys[0] !== afterKeys[0]) return false;
+
+  const key = beforeKeys[0];
+  if (key === 'value_number') {
+    const beforeNumber = normalizedDecimal(before[key]);
+    const afterNumber = normalizedDecimal(after[key]);
+    return beforeNumber !== null && beforeNumber === afterNumber;
+  }
+  return sameValue(before[key], after[key]);
+}
 
 export const formatTypedMetadataValue = (typed: unknown): string => {
   if (typed === null || typed === undefined) return 'vuoto';
@@ -71,6 +115,7 @@ export function parseDiffEntries(
       if (field === 'metadata' && Array.isArray(values)) {
         for (const change of values) {
           const c = change as Record<string, unknown>;
+          if (sameMetadataValue(c.from, c.to)) continue;
           const label =
             (c.definition_label as string | undefined) ??
             (c.definition_key as string | undefined) ??
@@ -85,6 +130,7 @@ export function parseDiffEntries(
         }
       } else {
         const v = values as { from: unknown; to: unknown } | null | undefined;
+        if (sameValue(v?.from, v?.to)) continue;
         const isStatusField = field === 'quantity' && isChecklist;
         result.push({
           field,
@@ -104,7 +150,8 @@ export function parseDiffEntries(
       }
     }
     return result;
-  } catch {
+  } catch (error) {
+    console.error('Errore nella lettura delle modifiche audit', error);
     return [];
   }
 }
@@ -120,4 +167,3 @@ export const getInventoryPath = (
   if (inventoryType === 'INVENTORY') return `/inventories/${inventoryId}`;
   return null;
 };
-

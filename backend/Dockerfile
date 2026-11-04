@@ -8,15 +8,8 @@ LABEL org.opencontainers.image.source="https://github.com/NHWS-Org/home-inventor
 # Imposta le variabili d'ambiente
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Aggiungi repository PostgreSQL in modo moderno e sicuro
-RUN apt-get update && apt-get install -y wget gnupg lsb-release && \
-    echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
-    wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgres.gpg
-
 # Install curl
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    postgresql-client-18 \
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,21 +27,25 @@ RUN pip install --no-cache-dir --upgrade "pip>=25.3" "wheel>=0.46.2" \
 # Copia il codice dell'app
 COPY . .
 
+# Mantieni l'entrypoint fuori da /app, che puo essere coperta da un bind mount.
+COPY entrypoint.sh /usr/local/bin/home-inventory-entrypoint
+RUN chmod 755 /usr/local/bin/home-inventory-entrypoint
+
 # Pulisci i file non necessari
 RUN rm -f Dockerfile requirements.txt
 
 # Esponi la porta 8000 per FastAPI
 EXPOSE 8000
 
-# Crea cartelle per i backup e imposta i permessi
-RUN mkdir -p /app/backups && chmod 777 /app/backups
+# Crea le cartelle dati e backup
+RUN mkdir -p /app/data/backups && chmod 777 /app/data /app/data/backups
 
 # Canale dell'immagine (release|dev), usato dalla telemetria opt-in
 ARG IMAGE_CHANNEL=release
 ENV IMAGE_CHANNEL=$IMAGE_CHANNEL
 
 # Comando per avviare l'API
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/home-inventory-entrypoint"]
 
 HEALTHCHECK --interval=60s --timeout=5s --retries=3 \
-  CMD curl -fs http://localhost:8000/system/health-check || exit 1
+  CMD curl -fsS -o /dev/null http://localhost:8000/system/health-check || exit 1

@@ -85,6 +85,9 @@ def _write_inventory_version(
             if old_val != new_val:
                 diff[key] = {"from": old_val, "to": new_val}
 
+        if not diff:
+            return
+
     inventory_id = cast(int, inv.id)
     version = InventoryVersion(
         inventory_id=inventory_id,
@@ -248,6 +251,7 @@ def list_inventories_base(
                             name=item.name,
                             description=item.description,
                             quantity=item.quantity,
+                            priority=item.priority,
                             inventory_id=item.inventory_id,
                             data_ins=item.data_ins,
                             data_mod=item.data_mod,
@@ -390,6 +394,7 @@ def list_items_base(
             name=item.name,
             description=item.description,
             quantity=item.quantity,
+            priority=item.priority,
             inventory_id=item.inventory_id,
             data_ins=item.data_ins,
             data_mod=item.data_mod,
@@ -1170,16 +1175,18 @@ def get_inventory_history(inventory_id: int, db: Session = Depends(get_db), user
     else:
         latest = (
             db.query(InventoryVersion)
-            .filter(InventoryVersion.inventory_id == inventory_id)
+            .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "INVENTORY")
             .order_by(InventoryVersion.version_num.desc())
             .first()
         )
-        if latest and user.role.name != "admin" and latest.owner_id != user.id:
+        if not latest:
+            raise HTTPException(status_code=404, detail="Inventario non trovato")
+        if user.role.name == "viewer" or (user.role.name != "admin" and latest.owner_id != user.id):
             raise HTTPException(status_code=403, detail="Accesso negato")
 
     versions = (
         db.query(InventoryVersion)
-        .filter(InventoryVersion.inventory_id == inventory_id)
+        .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "INVENTORY")
         .order_by(InventoryVersion.version_num.asc())
         .all()
     )
@@ -1195,16 +1202,18 @@ def get_checklist_history(inventory_id: int, db: Session = Depends(get_db), user
     else:
         latest = (
             db.query(InventoryVersion)
-            .filter(InventoryVersion.inventory_id == inventory_id)
+            .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "CHECKLIST")
             .order_by(InventoryVersion.version_num.desc())
             .first()
         )
-        if latest and user.role.name != "admin" and latest.owner_id != user.id:
+        if not latest:
+            raise HTTPException(status_code=404, detail="Checklist non trovata")
+        if user.role.name == "viewer" or (user.role.name != "admin" and latest.owner_id != user.id):
             raise HTTPException(status_code=403, detail="Accesso negato")
 
     versions = (
         db.query(InventoryVersion)
-        .filter(InventoryVersion.inventory_id == inventory_id)
+        .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == "CHECKLIST")
         .order_by(InventoryVersion.version_num.asc())
         .all()
     )
