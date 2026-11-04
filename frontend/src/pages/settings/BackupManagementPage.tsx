@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 import {
   listBackups,
   getBackupCompatibilityMap,
   createBackup,
   downloadBackup,
   deleteBackup,
+  convertLegacyBackup,
+  deleteLegacyBackup,
   deleteBackupsBulk,
   restoreBackup,
   restoreBackupGuided,
@@ -13,11 +16,13 @@ import {
   getSetting
 } from "../../api";
 import BackupScheduleManager from "./BackupScheduleManager";
+import BackupComparisonPanel from "./BackupComparisonPanel";
 import { useBottomSheetDrag } from "../../components/useBottomSheetDrag";
 
 export default function BackupManagementPage() {
   const [backups, setBackups] = useState<{
     filename: string;
+    legacy?: boolean;
     size: number;
     modified: string;
     has_metadata?: boolean;
@@ -41,6 +46,7 @@ export default function BackupManagementPage() {
   const [message, setMessage] = useState<string>("");
   const [messageType, setMessageType] = useState<"success" | "error" | "">("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedMetadataFile, setSelectedMetadataFile] = useState<File | null>(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleConfig, setScheduleConfig] = useState<{
     frequency: string;
@@ -75,6 +81,7 @@ export default function BackupManagementPage() {
   const [sortField, setSortField] = useState<"filename" | "modified" | "size">("modified");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedBackupNames, setSelectedBackupNames] = useState<string[]>([]);
+  const [comparison, setComparison] = useState<{ before: string; after: string | null } | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<{
     filename: string;
     metadata?: {
@@ -171,6 +178,7 @@ export default function BackupManagementPage() {
         (
           data as {
             filename: string;
+            legacy?: boolean;
             size: number;
             modified: string;
             has_metadata?: boolean;
@@ -231,7 +239,7 @@ export default function BackupManagementPage() {
   }, [backups, filterText, backupTypeFilter, sortField, sortDirection]);
 
   useEffect(() => {
-    const available = new Set(displayedBackups.map((b) => b.filename));
+    const available = new Set(displayedBackups.filter(b => !b.legacy).map((b) => b.filename));
     setSelectedBackupNames((prev) => prev.filter((name) => available.has(name)));
   }, [displayedBackups]);
 
@@ -262,16 +270,27 @@ export default function BackupManagementPage() {
       setMessageType("error");
       return;
     }
+    const legacy = selectedFile.name.endsWith(".sql");
+    if (legacy && selectedMetadataFile?.name !== `${selectedFile.name}.meta.json`) {
+      setMessage("Seleziona il file .sql.meta.json corrispondente al backup SQL.");
+      setMessageType("error");
+      return;
+    }
     setLoading(true);
     try {
-      await uploadBackup(selectedFile);
-      setMessage("Backup caricato con successo!");
+      await uploadBackup(selectedFile, legacy ? selectedMetadataFile ?? undefined : undefined);
+      setMessage(legacy ? "Backup convertito in .hibackup e caricato!" : "Backup caricato con successo!");
       setMessageType("success");
       setSelectedFile(null);
+      setSelectedMetadataFile(null);
       fetchBackups();
     } catch (error) {
       console.error("Errore nel caricamento del backup:", error);
-      setMessage("Errore nel caricamento del backup.");
+      setMessage(
+        isAxiosError<{ detail?: string }>(error) && typeof error.response?.data.detail === "string"
+          ? error.response.data.detail
+          : "Errore nel caricamento del backup."
+      );
       setMessageType("error");
     } finally {
       setLoading(false);
@@ -282,11 +301,41 @@ export default function BackupManagementPage() {
     downloadBackup(filename);
   };
 
-  const deleteBackupLocal = async (filename: string) => {
-    if (!window.confirm(`Sei sicuro di voler eliminare il backup ${filename}?`)) return;
+  const convertLegacyBackupLocal = async (filename: string) => {
     setLoading(true);
     try {
-      await deleteBackup(filename);
+      const result = await convertLegacyBackup(filename);
+      setMessage(`Backup convertito in ${result.filename}. Sorgenti conservati.`);
+      setMessageType("success");
+      if (window.confirm(`Conversione completata: ${result.filename}.\nVuoi eliminare i due file sorgenti ${filename} e ${filename}.meta.json? Annulla per conservarli.`)) {
+        try {
+          await deleteLegacyBackup(filename);
+          setMessage(`Backup convertito in ${result.filename}. File sorgenti eliminati.`);
+        } catch (error) {
+          console.error("Errore nella cancellazione dei sorgenti legacy:", error);
+          setMessage(`Backup convertito in ${result.filename}, ma la cancellazione dei sorgenti non e' stata completata. Verifica i file rimasti.`);
+          setMessageType("error");
+        }
+      }
+    } catch (error) {
+      console.error("Errore nella conversione del backup legacy:", error);
+      setMessage(isAxiosError<{ detail?: string }>(error) && typeof error.response?.data.detail === "string"
+        ? error.response.data.detail : "Errore nella conversione del backup legacy.");
+      setMessageType("error");
+    } finally {
+      await fetchBackups();
+      setLoading(false);
+    }
+  };
+
+  const deleteBackupLocal = async (filename: string, legacy = false) => {
+    if (!window.confirm(legacy
+      ? `Eliminare i file sorgenti ${filename} e ${filename}.meta.json?`
+      : `Sei sicuro di voler eliminare il backup ${filename}?`)) return;
+    setLoading(true);
+    try {
+      if (legacy) await deleteLegacyBackup(filename);
+      else await deleteBackup(filename);
       setMessage("Backup eliminato con successo!");
       setMessageType("success");
       fetchBackups();
@@ -306,7 +355,7 @@ export default function BackupManagementPage() {
   };
 
   const selectAllDisplayed = () => {
-    setSelectedBackupNames(displayedBackups.map((b) => b.filename));
+    setSelectedBackupNames(displayedBackups.filter(b => !b.legacy).map((b) => b.filename));
   };
 
   const clearSelection = () => {
@@ -350,7 +399,7 @@ export default function BackupManagementPage() {
     setLoading(true);
     try {
       await restoreBackup(filename);
-      setMessage("Ripristino base avviato con successo!");
+      setMessage("Ripristino base completato con successo!");
       setMessageType("success");
     } catch (error) {
       console.error("Errore nel ripristino del backup:", error);
@@ -383,7 +432,7 @@ export default function BackupManagementPage() {
         overwrite_settings: overwriteSettings,
         overwrite_admin: overwriteAdmin,
       });
-      setMessage("Ripristino avanzato avviato con successo!");
+      setMessage("Ripristino avanzato completato con successo!");
       setMessageType("success");
     } catch (error) {
       console.error("Errore nel ripristino avanzato:", error);
@@ -444,10 +493,25 @@ export default function BackupManagementPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-2 sm:space-y-0">
         <input
           type="file"
-          accept=".sql"
-          onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+          accept=".hibackup,.sql"
+          aria-label="Backup .hibackup o .sql"
+          onChange={(e) => {
+            setSelectedFile(e.target.files ? e.target.files[0] : null);
+            setSelectedMetadataFile(null);
+          }}
           className="border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1"
         />
+        {selectedFile?.name.endsWith(".sql") && (
+          <label className="text-sm">
+            Metadati corrispondenti (.sql.meta.json)
+            <input
+              type="file"
+              accept=".json"
+              onChange={(e) => setSelectedMetadataFile(e.target.files?.[0] ?? null)}
+              className="block border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded p-1"
+            />
+          </label>
+        )}
         <button
           onClick={uploadBackupLocal}
           disabled={loading || !selectedFile}
@@ -457,6 +521,10 @@ export default function BackupManagementPage() {
           {loading && <span className="ml-2 animate-spin">⏳</span>}
         </button>
       </div>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        I vecchi backup richiedono entrambi i file .sql e .sql.meta.json: vengono
+        convertiti in .hibackup senza eseguire il SQL. Il ripristino va confermato separatamente.
+      </p>
       <button
         onClick={createBackupLocal}
         disabled={loading}
@@ -613,7 +681,30 @@ export default function BackupManagementPage() {
         >
           Elimina selezionati ({selectedBackupNames.length})
         </button>
+        <button
+          onClick={() => setComparison({ before: selectedBackupNames[0], after: null })}
+          disabled={loading || selectedBackupNames.length !== 1}
+          className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+        >
+          Confronta con DB corrente (1 selezionato)
+        </button>
+        <button
+          onClick={() => setComparison({ before: selectedBackupNames[0], after: selectedBackupNames[1] })}
+          disabled={loading || selectedBackupNames.length !== 2}
+          className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+        >
+          Confronta 2 backup selezionati
+        </button>
       </div>
+
+      {comparison && (
+        <BackupComparisonPanel
+          key={JSON.stringify(comparison)}
+          beforeFilename={comparison.before}
+          afterFilename={comparison.after}
+          onClose={() => setComparison(null)}
+        />
+      )}
 
       <ul className="space-y-2">
         {displayedBackups.map((backup) => {
@@ -629,13 +720,13 @@ export default function BackupManagementPage() {
                 }`}
               >
                 <div className="flex min-w-0 w-full items-start gap-3 sm:flex-1">
-                  <input
+                  {!backup.legacy && <input
                     type="checkbox"
                     checked={selectedBackupNames.includes(backup.filename)}
                     onChange={() => toggleBackupSelection(backup.filename)}
                     className="mt-1 w-4 h-4"
                     title={`Seleziona ${backup.filename}`}
-                  />
+                  />}
                   <div className="min-w-0 flex-1">
                   <div className="break-all font-medium">{backup.filename}
                     {isAuto && <span className="inline-block text-xs font-semibold text-yellow-800 bg-yellow-200 dark:bg-amber-900/50 dark:text-amber-200 rounded px-2 py-0.5 ml-2">Automatico</span>}
@@ -647,8 +738,10 @@ export default function BackupManagementPage() {
                   <div className="mt-1 space-y-1 break-words text-xs text-gray-600 dark:text-gray-300">
                     <div>
                       <span className="font-semibold">Formato:</span>{" "}
-                      {backup.metadata?.format || (backup.has_metadata ? "n/d" : "legacy/no-metadata")}
+                      {backup.legacy ? "Legacy SQL (da convertire)" : backup.metadata?.format || (backup.has_metadata ? "n/d" : "legacy/no-metadata")}
                     </div>
+                    {backup.legacy && !backup.has_metadata && <p className="text-red-700 dark:text-red-400">File .sql.meta.json mancante: aggiungilo per convertire.</p>}
+                    {!backup.legacy && <>
                     <div>
                       <span className="font-semibold">Revisione backup:</span>{" "}
                       {backup.db_alembic_version_label || revisionDisplay(backup.db_alembic_version)}
@@ -683,10 +776,18 @@ export default function BackupManagementPage() {
                         {new Date(backup.metadata.created_at).toLocaleString()}
                       </div>
                     )}
+                    </>}
                   </div>
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2 mt-2 sm:mt-0">
+                  {backup.legacy ? (
+                    <button
+                      onClick={() => convertLegacyBackupLocal(backup.filename)}
+                      disabled={loading || !backup.has_metadata}
+                      className="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                    >Converti</button>
+                  ) : <>
                   <button
                     onClick={() => downloadBackupLocal(backup.filename)}
                     className="px-2 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
@@ -710,8 +811,10 @@ export default function BackupManagementPage() {
                   >
                     Ripristina
                   </button>
+                  </>}
                   <button
-                    onClick={() => deleteBackupLocal(backup.filename)}
+                    onClick={() => deleteBackupLocal(backup.filename, backup.legacy)}
+                    disabled={loading}
                     className="px-2 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
                   >
                     Elimina

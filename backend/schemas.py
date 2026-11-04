@@ -130,6 +130,7 @@ class ItemBase(BaseModel):
     description: Optional[str] = None
     quantity: int
     inventory_id: int
+    priority: int = Field(default=0, ge=-2, le=2)
 
 class ItemCreate(ItemBase):
     barcodes: List['ItemBarcodeCreate'] = []
@@ -139,6 +140,7 @@ class ItemUpdate(BaseModel):
     description: Optional[str]
     quantity: Optional[int]
     inventory_id: Optional[int]
+    priority: int = Field(default=0, ge=-2, le=2)
 
 class ItemDelete(BaseModel):
     confirm: bool
@@ -241,6 +243,7 @@ class ItemVersionResponse(BaseModel):
     name: str
     description: Optional[str] = None
     quantity: Optional[int] = None
+    priority: int = 0
     version_num: int
     operation: str
     changed_at: datetime

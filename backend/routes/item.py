@@ -41,6 +41,7 @@ def _snapshot_item(item: Item) -> dict:
         "name": item.name,
         "description": item.description,
         "quantity": item.quantity,
+        "priority": item.priority,
         "inventory_id": item.inventory_id,
     }
 
@@ -65,7 +66,8 @@ def _write_item_version(
         new_snapshot = _snapshot_item(item)
         for key, new_val in new_snapshot.items():
             old_val = old_snapshot.get(key)
-            if old_val != new_val:
+            empty_description = key == "description" and old_val in (None, "") and new_val in (None, "")
+            if old_val != new_val and not empty_description:
                 diff[key] = {"from": old_val, "to": new_val}
 
         if extra_diff:
@@ -129,6 +131,7 @@ def _write_item_version(
                     setattr(last_version, "name", item.name)
                     setattr(last_version, "description", item.description)
                     setattr(last_version, "quantity", item.quantity)
+                    setattr(last_version, "priority", item.priority)
                     setattr(last_version, "inventory_id", item.inventory_id)
                     setattr(last_version, "changed_at", _utc_now_naive())
                     setattr(last_version, "changed_by_username", user.username)
@@ -143,6 +146,7 @@ def _write_item_version(
         name=item.name,
         description=item.description,
         quantity=item.quantity,
+        priority=item.priority,
         version_num=_next_item_version_num(db, item_id),
         operation=operation,
         changed_at=_utc_now_naive(),
@@ -201,6 +205,7 @@ def _build_item_response(db: Session, item: Item) -> ItemResponse:
         name=cast(str, item.name),
         description=cast(str | None, item.description),
         quantity=cast(int, item.quantity),
+        priority=cast(int, item.priority),
         inventory_id=cast(int, item.inventory_id),
         data_ins=item.data_ins,
         data_mod=item.data_mod,
@@ -241,6 +246,8 @@ def create_item(item: ItemCreate, db: Session = Depends(get_db), user=Depends(ge
         raise HTTPException(status_code=404, detail="Inventario non trovato")
     if not can_access_inventory(user, inventory, action="edit"):
         raise HTTPException(status_code=403, detail="Accesso negato")
+    if inventory.type != "CHECKLIST" and item.priority != 0:
+        raise HTTPException(status_code=400, detail="La priorità è disponibile solo per le checklist")
     new_barcodes = _dedupe_barcodes(item.barcodes)
     for code, _fmt in new_barcodes:
         _ensure_barcode_free(db, code, cast(int, inventory.id))
@@ -288,6 +295,12 @@ def update_item(
             raise HTTPException(status_code=403, detail="Accesso negato all'inventario di destinazione")
         for barcode in item.barcodes:
             _ensure_barcode_free(db, cast(str, barcode.code), new_inventory_id, exclude_item_id=cast(int, item.id))
+    priority_inventory = target_inventory or item.inventory
+    if priority_inventory.type != "CHECKLIST":
+        if update_data.get("priority", 0) != 0:
+            raise HTTPException(status_code=400, detail="La priorità è disponibile solo per le checklist")
+        if item.priority != 0:
+            update_data["priority"] = 0
     for field, value in update_data.items():
         if field in ("quantity") and value is not None:
             if isinstance(value, (int, float)) and value < 0:
@@ -458,6 +471,7 @@ def rollback_item(
             name=target.name,
             description=target.description,
             quantity=target.quantity,
+            priority=target.priority if parent_inventory.type == "CHECKLIST" else 0,
             inventory_id=target.inventory_id,
             user_ins=user.id,
             user_mod=user.id,
@@ -476,6 +490,7 @@ def rollback_item(
     item.name = target.name
     item.description = target.description
     item.quantity = target.quantity
+    item.priority = target.priority if item.inventory.type == "CHECKLIST" else 0
     item.user_mod = user.id
     _write_item_version(db, item, "UPDATE", user, old_snapshot, merge_quantity_updates=False)
     db.commit()

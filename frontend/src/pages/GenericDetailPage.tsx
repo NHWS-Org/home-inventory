@@ -40,6 +40,38 @@ interface Props {
 
 type MetadataDraftMap = Record<number, ItemMetadataValueUpsert>;
 
+const ITEM_PRIORITY_OPTIONS = [
+  { value: 2, label: "🔥🔥 Molto alta" },
+  { value: 1, label: "🔥 Alta" },
+  { value: 0, label: "● Media" },
+  { value: -1, label: "▼ Bassa" },
+  { value: -2, label: "▼▼ Molto bassa" },
+];
+
+const ITEM_PRIORITY_LABELS: Record<number, string> = {
+  [-2]: "Molto bassa",
+  [-1]: "Bassa",
+  0: "Media",
+  1: "Alta",
+  2: "Molto alta",
+};
+
+function getPriorityIndicator(priority: number) {
+  return {
+    label: ITEM_PRIORITY_LABELS[priority] ?? ITEM_PRIORITY_LABELS[0],
+    symbol: priority > 0 ? "▲".repeat(priority) : priority < 0 ? "▼".repeat(-priority) : "●",
+    className: priority === 2
+      ? "text-red-600 dark:text-red-400"
+      : priority === 1
+        ? "text-orange-500 dark:text-orange-400"
+        : priority === -2
+          ? "text-blue-700 dark:text-blue-300"
+          : priority === -1
+            ? "text-sky-500 dark:text-sky-400"
+            : "text-gray-500 dark:text-gray-400",
+  };
+}
+
 function createEmptyMetadataDraft(fieldType: MetadataDefinition['field_type']): ItemMetadataValueUpsert {
   if (fieldType === 'TEXT' || fieldType === 'LIST') {
     return { definition_id: 0, value_text: null };
@@ -242,8 +274,10 @@ export function SwipeableItemRow({
 }: Props) {
   const [action, setAction] = useState<'left' | 'right' | null>(null);
   const [isItemHistoryOpen, setIsItemHistoryOpen] = useState(false);
+  const [isPriorityMenuOpen, setIsPriorityMenuOpen] = useState(false);
   const [assignDialog, setAssignDialog] = useState<'assign' | 'link' | 'sources' | 'edit' | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
+  const priorityMenuRef = useRef<HTMLSpanElement>(null);
 
   // Gestione click fuori per chiudere i pulsanti swipe
   useEffect(() => {
@@ -270,6 +304,33 @@ export function SwipeableItemRow({
   });
 
   const isViewer = user?.role?.name === 'viewer';
+  const priority = item.priority ?? 0;
+  const priorityIndicator = getPriorityIndicator(priority);
+
+  // Chiudi il menu priorità al click fuori
+  useEffect(() => {
+    if (!isPriorityMenuOpen) return;
+
+    function handleClickOutside(e: MouseEvent) {
+      if (priorityMenuRef.current && !priorityMenuRef.current.contains(e.target as Node)) {
+        setIsPriorityMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isPriorityMenuOpen]);
+
+  const changePriority = async (value: number) => {
+    setIsPriorityMenuOpen(false);
+    if (value === priority) return;
+    try {
+      const updated = await updateItem(item.id, { ...item, priority: value });
+      if (updated) setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+    } catch {
+      alert('Aggiornamento priorità non riuscito');
+    }
+  };
 
   const cloneItem = () => {
     const cloned = {
@@ -406,6 +467,47 @@ export function SwipeableItemRow({
           <div className="flex flex-col">
             <div className="font-semibold flex items-center gap-2">
               <span>{item.name}</span>
+              {isChecklist && (
+                <span ref={priorityMenuRef} className="relative inline-flex">
+                  <button
+                    type="button"
+                    disabled={isViewer}
+                    aria-label={`Priorità ${priorityIndicator.label.toLowerCase()}${isViewer ? '' : ' - tocca per modificare'}`}
+                    title={`Priorità ${priorityIndicator.label}${isViewer ? '' : ' - tocca per modificare'}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isViewer) setIsPriorityMenuOpen((open) => !open);
+                    }}
+                    className={`flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-gray-300 bg-gray-100 px-2 text-sm leading-none dark:border-gray-600 dark:bg-gray-700 md:min-h-7 md:min-w-7 ${
+                      isViewer ? '' : 'hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer'
+                    } ${priorityIndicator.className}`}
+                  >
+                    {priorityIndicator.symbol}
+                  </button>
+                  {isPriorityMenuOpen && (
+                    <div
+                      className="absolute left-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-lg border border-gray-300 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {ITEM_PRIORITY_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void changePriority(option.value);
+                          }}
+                          className={`block min-h-11 w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                            option.value === priority ? 'bg-blue-50 font-semibold dark:bg-blue-900' : ''
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </span>
+              )}
               <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
                 v{item.version_num}
               </span>
@@ -646,13 +748,16 @@ export default function InventoryDetailPage() {
   const [newItemName, setNewItemName] = useState("");
   const [newItemDescription, setNewItemDescription] = useState("");
   const [newItemQuantity, setNewItemQuantity] = useState(isChecklist ? 0 : 1);
+  const [newItemPriority, setNewItemPriority] = useState(0);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<number[]>([]);
   const [sortBy, setSortBy] = useState<'name' | 'date' | 'quantity'>(() => {
     const stored = localStorage.getItem('item_sortBy');
-    // Migrazione: se era "date" (vecchio default) o non impostato, passa a "name"
-    if (stored === 'name' || stored === 'quantity') return stored as 'name' | 'quantity';
+    // Migrazione: se era "date" (vecchio default), "priority" o non impostato, passa a "name"
+    if (stored === 'name' || stored === 'quantity') {
+      return stored;
+    }
     localStorage.setItem('item_sortBy', 'name');
     return 'name';
   });
@@ -660,6 +765,12 @@ export default function InventoryDetailPage() {
     const stored = localStorage.getItem('item_sortOrder');
     if (stored === 'asc' || stored === 'desc') return stored;
     return 'asc';
+  });
+  // Ordinamento per priorità: separato e prioritario rispetto agli altri criteri (solo checklist)
+  const [prioritySortOrder, setPrioritySortOrder] = useState<'asc' | 'desc'>(() => {
+    const stored = localStorage.getItem('item_prioritySortOrder');
+    if (stored === 'asc' || stored === 'desc') return stored;
+    return 'desc';
   });
   const [itemBeingEdited, setItemBeingEdited] = useState<Item | null>(null);
   const detailTopRef = useRef<HTMLDivElement>(null);
@@ -781,7 +892,8 @@ useEffect(() => {
   useEffect(() => {
     localStorage.setItem("item_sortBy", sortBy);
     localStorage.setItem("item_sortOrder", sortOrder);
-  }, [sortBy, sortOrder]);
+    localStorage.setItem("item_prioritySortOrder", prioritySortOrder);
+  }, [sortBy, sortOrder, prioritySortOrder]);
 
   const sortedItems = [...items]
     .filter((item) => {
@@ -812,18 +924,23 @@ useEffect(() => {
       return matchesMetadata && matchesText && matchesBarcodeFilter;
     })
     .sort((a, b) => {
-      // First, sort by checklist/inventory logic for completed/zero items
+      // 1) Completato/non completato (checklist) o quantità zero in fondo (inventario)
       if (isChecklist) {
-        if (a.quantity === 1 && b.quantity === 0) return 1;
-        if (a.quantity === 0 && b.quantity === 1) return -1;
+        const aDone = a.quantity > 0;
+        const bDone = b.quantity > 0;
+        if (aDone !== bDone) return aDone ? 1 : -1;
+        // 2) Priorità: criterio prioritario e separato (default: alta prima)
+        const priorityDiff = (b.priority ?? 0) - (a.priority ?? 0);
+        if (priorityDiff !== 0) return prioritySortOrder === "desc" ? priorityDiff : -priorityDiff;
       } else {
         if (a.quantity === 0 && b.quantity > 0) return 1;
         if (a.quantity > 0 && b.quantity === 0) return -1;
       }
-      // Then, sort by selected sortBy/sortOrder
+      // 3) Criterio di ordinamento selezionato
       let result = 0;
-      if (sortBy === "name") result = a.name.localeCompare(b.name);
-      else if (sortBy === "quantity") result = a.quantity - b.quantity;
+      const activeSortBy = isChecklist && sortBy === "quantity" ? "name" : sortBy;
+      if (activeSortBy === "name") result = a.name.localeCompare(b.name);
+      else if (activeSortBy === "quantity") result = a.quantity - b.quantity;
       else result = new Date(a.data_mod).getTime() - new Date(b.data_mod).getTime();
       return sortOrder === "asc" ? result : -result;
     });
@@ -1046,8 +1163,23 @@ useEffect(() => {
         <div>
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
             <label className="hidden sm:inline text-sm font-medium">Ordina per:</label>
+            {isChecklist && (
+              <button
+                onClick={() => {
+                  const next = prioritySortOrder === 'desc' ? 'asc' : 'desc';
+                  localStorage.setItem('item_prioritySortOrder', next);
+                  setPrioritySortOrder(next);
+                }}
+                className="min-h-10 rounded border px-2 sm:min-h-0 sm:py-1 whitespace-nowrap"
+                title={prioritySortOrder === 'desc'
+                  ? 'Priorità: prima alta (tocca per invertire)'
+                  : 'Priorità: prima bassa (tocca per invertire)'}
+              >
+                🔥<span className="hidden sm:inline"> Priorità</span> {prioritySortOrder === 'desc' ? '⬇️' : '⬆️'}
+              </button>
+            )}
             <select
-              value={sortBy}
+              value={isChecklist && sortBy === "quantity" ? "name" : sortBy}
               onChange={(e) => {
                 const value = e.target.value as 'name' | 'date' | 'quantity';
                 localStorage.setItem('item_sortBy', value);
@@ -1057,7 +1189,7 @@ useEffect(() => {
             >
               <option value="date">Data modifica</option>
               <option value="name">Nome</option>
-              <option value="quantity">Quantità</option>
+              {!isChecklist && <option value="quantity">Quantità</option>}
             </select>
             <button
               onClick={() => {
@@ -1184,6 +1316,7 @@ useEffect(() => {
                     name: itemArg.name ?? "",
                     description: itemArg.description,
                     quantity: itemArg.quantity ?? 0,
+                    priority: isChecklist ? itemArg.priority ?? 0 : 0,
                     inventory_id: itemArg.inventory_id ?? inventory?.id ?? 0,
                   }, onInsufficient)
                 }
@@ -1410,7 +1543,8 @@ useEffect(() => {
                   name: newItemName,
                   description: newItemDescription,
                   quantity: newItemQuantity,
-                  inventory_id: inventory.id
+                  priority: isChecklist ? newItemPriority : 0,
+                  inventory_id: inventory.id,
                 });
                 if (newItem) {
                   if (isChecklist && newItemLink) {
@@ -1437,6 +1571,7 @@ useEffect(() => {
                   setNewItemName("");
                   setNewItemDescription("");
                   setNewItemQuantity(isChecklist ? 0 : 1);
+                  setNewItemPriority(0);
                   setNewItemMetadataDrafts({});
                   setNewItemLink(null);
                   setisInsertMode(false);
@@ -1501,6 +1636,21 @@ useEffect(() => {
                     />
                     Elemento completato
                   </label>
+                </div>
+              )}
+              {isChecklist && (
+                <div className="mb-4">
+                  <label htmlFor="new-item-priority" className="mb-1 block text-sm font-medium">Priorità</label>
+                  <select
+                    id="new-item-priority"
+                    value={newItemPriority}
+                    onChange={(event) => setNewItemPriority(Number(event.target.value))}
+                    className="min-h-12 w-full rounded border p-3 dark:bg-gray-800"
+                  >
+                    {ITEM_PRIORITY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
               )}
               <MetadataFieldsSection
@@ -1569,6 +1719,7 @@ useEffect(() => {
                     name: itemBeingEdited.name,
                     description: itemBeingEdited.description ?? "",
                     quantity: itemBeingEdited.quantity,
+                    priority: isChecklist ? itemBeingEdited.priority ?? 0 : 0,
                     inventory_id: inventory.id,
                   });
                   if (newItem) {
@@ -1594,6 +1745,7 @@ useEffect(() => {
                     name: itemBeingEdited.name,
                     description: itemBeingEdited.description ?? "",
                     quantity: itemBeingEdited.quantity,
+                    priority: isChecklist ? itemBeingEdited.priority ?? 0 : 0,
                     inventory_id: itemBeingEdited.inventory_id,
                   });
                   if (updated) {
@@ -1710,6 +1862,23 @@ useEffect(() => {
                       />
                       Elemento completato
                     </label>
+                  </div>
+                )}
+                {isChecklist && (
+                  <div className="mb-4">
+                    <label htmlFor="edit-item-priority" className="mb-1 block text-sm font-medium">Priorità</label>
+                    <select
+                      id="edit-item-priority"
+                      value={itemBeingEdited.priority ?? 0}
+                      onChange={(event) =>
+                        setItemBeingEdited({ ...itemBeingEdited, priority: Number(event.target.value) })
+                      }
+                      className="min-h-12 w-full rounded border p-3 dark:bg-gray-800"
+                    >
+                      {ITEM_PRIORITY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
                   </div>
                 )}
                 {isChecklist && !isCloning && canEdit && (
