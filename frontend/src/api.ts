@@ -561,6 +561,54 @@ export async function listBackups() {
   return res.data;
 }
 
+export interface BackupComparison {
+  before: { filename: string | null; db_alembic_version: string | null };
+  after: { filename: string | null; db_alembic_version: string | null };
+  tables: Array<{
+    table: string;
+    before_count: number;
+    after_count: number;
+    before_present: boolean;
+    after_present: boolean;
+    added: number;
+    removed: number;
+    modified: number;
+    unchanged: number;
+  }>;
+  changes: Array<{
+    table: string;
+    key: Record<string, unknown>;
+    kind: "added" | "removed" | "modified";
+    fields: Array<{
+      field: string;
+      before_present: boolean;
+      after_present: boolean;
+      before: unknown;
+      after: unknown;
+    }>;
+  }>;
+  total_changes: number;
+  offset: number;
+  limit: number;
+}
+
+export async function compareBackups(
+  beforeFilename: string,
+  afterFilename: string | null,
+  table: string | null,
+  offset: number,
+  signal: AbortSignal,
+): Promise<BackupComparison> {
+  const res = await api.post<BackupComparison>("/backup/compare", {
+    before_filename: beforeFilename,
+    after_filename: afterFilename,
+    table,
+    offset,
+    limit: 50,
+  }, { signal });
+  return res.data;
+}
+
 export async function getBackupCompatibilityMap(): Promise<{
   revisions: string[];
   revision_labels?: Record<string, string | null>;

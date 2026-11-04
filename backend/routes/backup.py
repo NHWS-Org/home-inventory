@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import Integer, func, inspect, select, text
 from sqlalchemy.orm import Session
 
@@ -24,7 +24,9 @@ from backup_archive import (
     decode_value,
     read_backup_archive,
     read_backup_metadata,
+    read_database_snapshot,
 )
+from backup_comparison import compare_snapshots
 from crud import get_setting, set_setting
 from database import DATABASE_TYPE, SessionLocal
 from dependencies import get_db, role_required
@@ -122,6 +124,14 @@ class RestoreRequest(BaseModel):
 class BackupBulkDeleteRequest(BaseModel):
     confirm: bool
     filenames: list[str]
+
+
+class BackupComparisonRequest(BaseModel):
+    before_filename: str
+    after_filename: str | None = None
+    table: str | None = None
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=100)
 
 
 def _safe_backup_path(filename: str) -> Path:
@@ -592,6 +602,52 @@ def get_backup_compatibility_map():
             }
             for (source, target), rule in sorted(DB_COMPATIBILITY_MATRIX.items())
         ],
+    }
+
+
+@router.post("/compare")
+def compare_backups(payload: BackupComparisonRequest, db: Session = Depends(get_db)):
+    def load(filename: str) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+        path = _safe_backup_path(filename)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="File backup non trovato")
+        metadata, rows = read_backup_archive(path)
+        table_names = metadata.get("tables", [])
+        if not isinstance(table_names, list) or not all(
+            isinstance(name, str) for name in table_names
+        ):
+            raise ValueError("Elenco tabelle del backup non valido")
+        for table_name in table_names:
+            rows.setdefault(table_name, [])
+        return metadata, rows
+
+    try:
+        before_meta, before = load(payload.before_filename)
+        if payload.after_filename is not None:
+            after_meta, after = load(payload.after_filename)
+        else:
+            after_meta = {"db_alembic_version": _get_alembic_version(db)}
+            after = read_database_snapshot(db)
+        result = compare_snapshots(
+            before, after, table_filter=payload.table,
+            offset=payload.offset, limit=payload.limit,
+        )
+    except (ValueError, TypeError, RecursionError) as exc:
+        logger.warning("Confronto backup rifiutato: dati non validi")
+        raise HTTPException(
+            status_code=400,
+            detail="Impossibile confrontare i backup: archivio, tabella o dati non validi",
+        ) from exc
+    return {
+        **result,
+        "before": {
+            "filename": payload.before_filename,
+            "db_alembic_version": before_meta.get("db_alembic_version"),
+        },
+        "after": {
+            "filename": payload.after_filename,
+            "db_alembic_version": after_meta.get("db_alembic_version"),
+        },
     }
 
 

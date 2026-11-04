@@ -14,6 +14,7 @@ import {
   getSetting
 } from "../../api";
 import BackupScheduleManager from "./BackupScheduleManager";
+import BackupComparisonPanel from "./BackupComparisonPanel";
 import { useBottomSheetDrag } from "../../components/useBottomSheetDrag";
 
 export default function BackupManagementPage() {
@@ -77,6 +78,7 @@ export default function BackupManagementPage() {
   const [sortField, setSortField] = useState<"filename" | "modified" | "size">("modified");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedBackupNames, setSelectedBackupNames] = useState<string[]>([]);
+  const [comparison, setComparison] = useState<{ before: string; after: string | null } | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<{
     filename: string;
     metadata?: {
@@ -645,7 +647,30 @@ export default function BackupManagementPage() {
         >
           Elimina selezionati ({selectedBackupNames.length})
         </button>
+        <button
+          onClick={() => setComparison({ before: selectedBackupNames[0], after: null })}
+          disabled={loading || selectedBackupNames.length !== 1}
+          className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+        >
+          Confronta con DB corrente (1 selezionato)
+        </button>
+        <button
+          onClick={() => setComparison({ before: selectedBackupNames[0], after: selectedBackupNames[1] })}
+          disabled={loading || selectedBackupNames.length !== 2}
+          className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+        >
+          Confronta 2 backup selezionati
+        </button>
       </div>
+
+      {comparison && (
+        <BackupComparisonPanel
+          key={JSON.stringify(comparison)}
+          beforeFilename={comparison.before}
+          afterFilename={comparison.after}
+          onClose={() => setComparison(null)}
+        />
+      )}
 
       <ul className="space-y-2">
         {displayedBackups.map((backup) => {

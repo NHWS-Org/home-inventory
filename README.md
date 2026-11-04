@@ -28,6 +28,15 @@ docker-compose up --build -d
 
 Per impostazione predefinita l'app usa SQLite, senza un container database: il file e i backup compressi `.hibackup` sono conservati in `data/` (sul volume montato). I backup includono i metadati Alembic e possono essere ripristinati su un motore diverso. I vecchi backup PostgreSQL v2 vengono convertiti durante il caricamento della coppia `.sql` + `.sql.meta.json`.
 
+Gli amministratori possono confrontare i dati dalla pagina **Backup**:
+
+- Seleziona un backup e premi **Confronta con DB corrente**: la direzione è backup (prima) verso DB corrente (dopo).
+- Seleziona due backup e premi **Confronta 2 backup selezionati**: il primo selezionato è il prima, il secondo il dopo; **Inverti prima/dopo** scambia la direzione.
+- Il riepilogo include tutte le tabelle applicative, anche utenti, impostazioni e storico. I dettagli mostrano record aggiunti, rimossi e modificati, con valori prima/dopo per campo, filtro per tabella e pagine da 50 record.
+- I record sono associati per chiave primaria, anche composta: usa backup della stessa installazione. Password, hash, segreti riconosciuti e tutti i valori delle impostazioni sono oscurati; le relative modifiche vengono comunque conteggiate.
+
+Il confronto è in sola lettura: non modifica il database o i backup e non esegue un ripristino. Sono confrontabili anche revisioni Alembic diverse con tabelle riconosciute; i controlli del ripristino restano invariati. Il DB corrente viene riletto a ogni cambio pagina o filtro, quindi modifiche concorrenti possono cambiare i risultati.
+
 Il volume persistente va montato su `/app/data`, non sull'intera directory `/app`: il codice e i file runtime dell'immagine devono restare visibili. L'entrypoint è installato in `/usr/local/bin` così non viene nascosto da bind mount dell'applicazione.
 
 All'avvio il backend mostra il tipo di database e l'URL di destinazione con password mascherata e parametri query esclusi.
@@ -186,6 +195,15 @@ docker-compose up --build -d
 ### Database and backups
 
 The app uses SQLite by default, with no database container: the database file and compressed `.hibackup` backups are stored in the mounted `data/` volume. Backups include Alembic metadata and can be restored to a different engine. Legacy v2 PostgreSQL backups are converted when uploading the `.sql` + `.sql.meta.json` pair.
+
+Administrators can compare data on the **Backup** page:
+
+- Select one backup and click **Confronta con DB corrente**: the direction is backup (before) to current database (after).
+- Select two backups and click **Confronta 2 backup selezionati**: the first selected is before, the second is after; **Inverti prima/dopo** reverses the direction.
+- Summaries include every application table, including users, settings and history. Details show added, removed and modified records, with before/after field values, a table filter and pages of 50 records.
+- Records are matched by primary key, including composite keys: use backups from the same installation. Passwords, hashes, recognized secrets and all settings values are redacted; their changes are still counted.
+
+Comparison is read-only: it neither modifies the database or backups nor performs a restore. Different Alembic revisions can be compared when their tables are recognized; restore compatibility checks are unchanged. The current database is read again for each page or filter change, so concurrent updates can change results.
 
 Mount persistent storage at `/app/data`, not over the entire `/app` directory: the image's application code and runtime files must remain visible. The entrypoint is installed in `/usr/local/bin` so application bind mounts cannot hide it.
 

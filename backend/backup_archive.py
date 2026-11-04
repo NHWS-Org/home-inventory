@@ -115,12 +115,7 @@ def read_backup_archive(
     return metadata, rows_by_table
 
 
-def create_backup_archive(
-    db: Session,
-    file_path: Path,
-    metadata: dict[str, Any],
-) -> None:
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+def _database_tables(db: Session) -> list[tuple[Any, list[Any]]]:
     connection = db.connection()
     inspector = inspect(connection)
     tables: list[tuple[Any, list[Any]]] = []
@@ -133,6 +128,33 @@ def create_backup_archive(
         columns = [column for column in table.columns if column.name in available_columns]
         if columns:
             tables.append((table, columns))
+    return tables
+
+
+def _encoded_rows(db: Session, columns: list[Any]) -> Iterable[dict[str, Any]]:
+    result = db.execute(select(*columns))
+    while rows := result.mappings().fetchmany(500):
+        for row in rows:
+            yield {
+                column.name: encode_value(row[column.name], column.type)
+                for column in columns
+            }
+
+
+def read_database_snapshot(db: Session) -> dict[str, list[dict[str, Any]]]:
+    return {
+        table.name: list(_encoded_rows(db, columns))
+        for table, columns in _database_tables(db)
+    }
+
+
+def create_backup_archive(
+    db: Session,
+    file_path: Path,
+    metadata: dict[str, Any],
+) -> None:
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    tables = _database_tables(db)
 
     metadata["tables"] = [table.name for table, _columns in tables]
     users = Base.metadata.tables.get("users")
@@ -147,16 +169,8 @@ def create_backup_archive(
 
     def records():
         for table, columns in tables:
-            result = db.execute(select(*columns))
-            while rows := result.mappings().fetchmany(500):
-                for row in rows:
-                    yield {
-                        "table": table.name,
-                        "row": {
-                            column.name: encode_value(row[column.name], column.type)
-                            for column in columns
-                        },
-                    }
+            for row in _encoded_rows(db, columns):
+                yield {"table": table.name, "row": row}
 
     write_backup_archive(file_path, metadata, records())
 
