@@ -47,5 +47,5 @@ def test_sqlite_bootstrap_and_migrations(tmp_path, legacy_schema):
         assert columns["type"]["nullable"] is False
         assert connection.execute(
             text("SELECT version_num FROM alembic_version")
-        ).scalar_one() == "8a9b0c1d2e3f"
+        ).scalar_one() == "9b0c1d2e3f4a"
     engine.dispose()

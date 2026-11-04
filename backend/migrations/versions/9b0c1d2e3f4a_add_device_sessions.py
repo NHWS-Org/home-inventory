@@ -1,7 +1,7 @@
 """add device sessions
 
-Revision ID: 8a9b0c1d2e3f
-Revises: f7a8b9c0d1e2
+Revision ID: 9b0c1d2e3f4a
+Revises: 8a9b0c1d2e3f
 Create Date: 2026-11-03 21:42:00.000000
 """
 
@@ -10,13 +10,17 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "8a9b0c1d2e3f"
-down_revision: Union[str, None] = "f7a8b9c0d1e2"
+revision: str = "9b0c1d2e3f4a"
+down_revision: Union[str, None] = "8a9b0c1d2e3f"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    existing_tables = set(sa.inspect(bind).get_table_names())
+    if "device_sessions" in existing_tables:
+        return
     op.create_table(
         "device_sessions",
         sa.Column("id", sa.Integer(), primary_key=True),
