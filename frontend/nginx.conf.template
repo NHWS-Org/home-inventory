@@ -5,6 +5,12 @@ http {
   default_type  application/octet-stream;
   sendfile      on;
 
+  map "$request_uri:$status" $log_health_access {
+    default 1;
+    ~^/health-check(?:\?.*)?:200$ 0;
+  }
+  access_log /var/log/nginx/access.log combined if=$log_health_access;
+
   server {
     listen 80;
     server_name _;
@@ -12,6 +18,11 @@ http {
     # Usa il resolver DNS interno di Docker per ri-risolvere il nome del backend
     # ad ogni richiesta, evitando cache IP stale dopo restart del container
     resolver 127.0.0.11 valid=10s ipv6=off;
+
+    location = /health-check {
+      root /usr/share/nginx/html;
+      try_files /index.html =503;
+    }
 
     location / {
       root /usr/share/nginx/html;

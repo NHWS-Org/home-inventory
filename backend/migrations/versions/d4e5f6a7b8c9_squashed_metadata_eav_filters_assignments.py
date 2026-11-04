@@ -22,13 +22,53 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSON
 
 # revision identifiers, used by Alembic.
 revision: str = 'd4e5f6a7b8c9'
 down_revision: Union[str, None] = 'c3d4e5f6a7b8'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+
+def _create_index_if_missing(
+    index_name: str,
+    table_name: str,
+    columns: list[str],
+    *,
+    unique: bool = False,
+    where: str | None = None,
+) -> None:
+    bind = op.get_bind()
+    existing_indexes = {
+        index["name"] for index in sa.inspect(bind).get_indexes(table_name)
+    }
+    if index_name in existing_indexes:
+        return
+
+    dialect = bind.dialect.name
+    if where and dialect not in {"postgresql", "sqlite"}:
+        return
+    index_options = {}
+    if where:
+        index_options[f"{dialect}_where"] = sa.text(where)
+    if dialect in {"mysql", "mariadb"} and columns == ["value_text"]:
+        index_options["mysql_length"] = {"value_text": 191}
+    op.create_index(
+        index_name,
+        table_name,
+        columns,
+        unique=unique,
+        **index_options,
+    )
+
+
+def _drop_index_if_exists(index_name: str, table_name: str) -> None:
+    bind = op.get_bind()
+    existing_indexes = {
+        index["name"] for index in sa.inspect(bind).get_indexes(table_name)
+    }
+    if index_name in existing_indexes:
+        op.drop_index(index_name, table_name=table_name)
 
 
 def upgrade() -> None:
@@ -49,12 +89,12 @@ def upgrade() -> None:
             sa.Column('label', sa.String(length=128), nullable=False),
             sa.Column('description', sa.Text(), nullable=True),
             sa.Column('field_type', sa.String(length=16), nullable=False),
-            sa.Column('list_options', JSON(), nullable=True),
+            sa.Column('list_options', sa.JSON(), nullable=True),
             sa.Column('sort_order', sa.Integer(), nullable=False, server_default='0'),
             sa.Column('is_required', sa.Boolean(), nullable=False, server_default=sa.text('false')),
             sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.text('true')),
-            sa.Column('data_ins', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-            sa.Column('data_mod', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+            sa.Column('data_ins', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+            sa.Column('data_mod', sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column('user_ins', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
             sa.Column('user_mod', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
             sa.UniqueConstraint('key', name='uq_metadata_definitions_key'),
@@ -77,8 +117,8 @@ def upgrade() -> None:
             sa.Column('value_number', sa.Numeric(14, 4), nullable=True),
             sa.Column('value_boolean', sa.Boolean(), nullable=True),
             sa.Column('value_date', sa.Date(), nullable=True),
-            sa.Column('data_ins', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-            sa.Column('data_mod', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+            sa.Column('data_ins', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+            sa.Column('data_mod', sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column('user_ins', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
             sa.Column('user_mod', sa.Integer(), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
             sa.UniqueConstraint('item_id', 'definition_id', name='uq_item_metadata_values_item_definition'),
@@ -93,30 +133,19 @@ def upgrade() -> None:
             ),
         )
 
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_item_metadata_values_item_id "
-        "ON item_metadata_values (item_id)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_item_metadata_values_definition_id "
-        "ON item_metadata_values (definition_id)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_item_metadata_values_value_text "
-        "ON item_metadata_values (value_text)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_item_metadata_values_value_number "
-        "ON item_metadata_values (value_number)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_item_metadata_values_value_boolean "
-        "ON item_metadata_values (value_boolean)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_item_metadata_values_value_date "
-        "ON item_metadata_values (value_date)"
-    )
+    for column_name in (
+        "item_id",
+        "definition_id",
+        "value_text",
+        "value_number",
+        "value_boolean",
+        "value_date",
+    ):
+        _create_index_if_missing(
+            f"ix_item_metadata_values_{column_name}",
+            "item_metadata_values",
+            [column_name],
+        )
 
     # -------------------------------------------------------------------------
     # 3. metadata_definition_assignments
@@ -149,22 +178,34 @@ def upgrade() -> None:
                 name='ck_mda_scope_target',
             ),
         )
-        op.create_index('ix_mda_definition_id', 'metadata_definition_assignments', ['definition_id'])
-        op.create_index('ix_mda_inventory_id', 'metadata_definition_assignments', ['inventory_id'])
-        op.create_index('ix_mda_inventory_type', 'metadata_definition_assignments', ['inventory_type'])
-        op.create_index('ix_mda_scope', 'metadata_definition_assignments', ['scope'])
-        op.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_mda_global_def "
-            "ON metadata_definition_assignments (definition_id) WHERE scope = 'GLOBAL'"
-        )
-        op.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_mda_type_def "
-            "ON metadata_definition_assignments (definition_id, inventory_type) WHERE scope = 'INVENTORY_TYPE'"
-        )
-        op.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_mda_inventory_def "
-            "ON metadata_definition_assignments (definition_id, inventory_id) WHERE scope = 'INVENTORY'"
-        )
+    for index_name, column_name in (
+        ("ix_mda_definition_id", "definition_id"),
+        ("ix_mda_inventory_id", "inventory_id"),
+        ("ix_mda_inventory_type", "inventory_type"),
+        ("ix_mda_scope", "scope"),
+    ):
+        _create_index_if_missing(index_name, "metadata_definition_assignments", [column_name])
+    _create_index_if_missing(
+        "uq_mda_global_def",
+        "metadata_definition_assignments",
+        ["definition_id"],
+        unique=True,
+        where="scope = 'GLOBAL'",
+    )
+    _create_index_if_missing(
+        "uq_mda_type_def",
+        "metadata_definition_assignments",
+        ["definition_id", "inventory_type"],
+        unique=True,
+        where="scope = 'INVENTORY_TYPE'",
+    )
+    _create_index_if_missing(
+        "uq_mda_inventory_def",
+        "metadata_definition_assignments",
+        ["definition_id", "inventory_id"],
+        unique=True,
+        where="scope = 'INVENTORY'",
+    )
 
     # -------------------------------------------------------------------------
     # 4. filter_templates
@@ -179,7 +220,7 @@ def upgrade() -> None:
             sa.Column('name', sa.String(length=128), nullable=False),
             sa.Column('description', sa.Text(), nullable=True),
             sa.Column('filter_type', sa.String(length=32), nullable=False),
-            sa.Column('criteria', JSON(), nullable=False),
+            sa.Column('criteria', sa.JSON(), nullable=False),
             sa.Column('is_shared', sa.Boolean(), nullable=False, server_default=sa.text('false')),
             sa.Column('data_ins', sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column('data_mod', sa.DateTime(), server_default=sa.func.now(), nullable=False),
@@ -205,27 +246,36 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # filter_templates
-    op.drop_index(op.f('ix_filter_templates_id'), table_name='filter_templates')
-    op.drop_index(op.f('ix_filter_templates_inventory_id'), table_name='filter_templates')
+    _drop_index_if_exists(op.f('ix_filter_templates_id'), 'filter_templates')
+    _drop_index_if_exists(op.f('ix_filter_templates_inventory_id'), 'filter_templates')
     op.drop_table('filter_templates')
 
     # metadata_definition_assignments
-    op.execute("DROP INDEX IF EXISTS uq_mda_inventory_def")
-    op.execute("DROP INDEX IF EXISTS uq_mda_type_def")
-    op.execute("DROP INDEX IF EXISTS uq_mda_global_def")
-    op.drop_index('ix_mda_scope', table_name='metadata_definition_assignments')
-    op.drop_index('ix_mda_inventory_type', table_name='metadata_definition_assignments')
-    op.drop_index('ix_mda_inventory_id', table_name='metadata_definition_assignments')
-    op.drop_index('ix_mda_definition_id', table_name='metadata_definition_assignments')
+    for index_name in (
+        "uq_mda_inventory_def",
+        "uq_mda_type_def",
+        "uq_mda_global_def",
+        "ix_mda_scope",
+        "ix_mda_inventory_type",
+        "ix_mda_inventory_id",
+        "ix_mda_definition_id",
+    ):
+        _drop_index_if_exists(index_name, 'metadata_definition_assignments')
     op.drop_table('metadata_definition_assignments')
 
     # item_metadata_values
-    op.execute("DROP INDEX IF EXISTS ix_item_metadata_values_value_date")
-    op.execute("DROP INDEX IF EXISTS ix_item_metadata_values_value_boolean")
-    op.execute("DROP INDEX IF EXISTS ix_item_metadata_values_value_number")
-    op.execute("DROP INDEX IF EXISTS ix_item_metadata_values_value_text")
-    op.execute("DROP INDEX IF EXISTS ix_item_metadata_values_definition_id")
-    op.execute("DROP INDEX IF EXISTS ix_item_metadata_values_item_id")
+    for column_name in (
+        "value_date",
+        "value_boolean",
+        "value_number",
+        "value_text",
+        "definition_id",
+        "item_id",
+    ):
+        _drop_index_if_exists(
+            f"ix_item_metadata_values_{column_name}",
+            'item_metadata_values',
+        )
     op.drop_table('item_metadata_values')
 
     # metadata_definitions

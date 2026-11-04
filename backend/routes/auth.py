@@ -6,11 +6,14 @@ from passlib.context import CryptContext
 import jwt
 import datetime
 import os
+import re
+import uuid
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.security.utils import get_authorization_scheme_param
 from dotenv import load_dotenv
 from dependencies import get_db, get_current_user
 from crud import get_setting, set_setting
+from models import DeviceSession
 
 load_dotenv()
 
@@ -34,6 +37,57 @@ def create_access_token(data: dict, expires_delta: int = ACCESS_TOKEN_EXPIRE_MIN
     to_encode = data.copy()
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _device_details(user_agent: str) -> tuple[str, str, str]:
+    ua = user_agent or ""
+
+    def version(pattern: str) -> str | None:
+        match = re.search(pattern, ua, re.IGNORECASE)
+        return match.group(1).replace("_", ".") if match else None
+
+    browser = "Unknown browser"
+    for name, pattern in (
+        ("Edge", r"Edg(?:e|A|iOS)?/([\d.]+)"),
+        ("Opera", r"(?:OPR|Opera)/([\d.]+)"),
+        ("Samsung Internet", r"SamsungBrowser/([\d.]+)"),
+        ("Chrome", r"(?:Chrome|CriOS)/([\d.]+)"),
+        ("Firefox", r"(?:Firefox|FxiOS)/([\d.]+)"),
+        ("Safari", r"Version/([\d.]+).*Safari"),
+    ):
+        browser_version = version(pattern)
+        if browser_version:
+            browser = f"{name} {browser_version}"
+            break
+
+    operating_system = "Unknown OS"
+    for name, pattern in (
+        ("Windows", r"Windows NT ([\d.]+)"),
+        ("Android", r"Android ([\d.]+)"),
+        ("iOS", r"(?:iPhone OS|CPU OS) ([\d_]+)"),
+        ("macOS", r"Mac OS X ([\d_]+)"),
+    ):
+        os_version = version(pattern)
+        if os_version:
+            operating_system = f"{name} {os_version}"
+            break
+    else:
+        if "Linux" in ua:
+            operating_system = "Linux"
+
+    ua_lower = ua.lower()
+    if "ipad" in ua_lower or "tablet" in ua_lower or ("android" in ua_lower and "mobile" not in ua_lower):
+        device_type = "Tablet"
+    elif any(marker in ua_lower for marker in ("mobile", "iphone", "ipod", "android")):
+        device_type = "Mobile"
+    else:
+        device_type = "Desktop"
+
+    return device_type, browser, operating_system
+
+
+def _session_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 #############################################################################
 # Registrazione utente
@@ -69,8 +123,9 @@ def register(
 # Login utente
 @router.post("/login", response_model=Token)
 def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     #print(f"🔍 DEBUG: db ricevuto in login -> {db}")  # ✅ Debug
 
@@ -85,16 +140,97 @@ def login(
     if user.is_blocked:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Utente bloccato. Accesso negato.")
     
-    token = create_access_token({"sub": user.username})
+    session_token_id = str(uuid.uuid4())
+    token = create_access_token({"sub": user.username, "jti": session_token_id})
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    expires_at = datetime.datetime.fromtimestamp(payload["exp"], datetime.timezone.utc).replace(tzinfo=None)
+    user_agent = request.headers.get("user-agent", "")
+    device_type, browser, operating_system = _device_details(user_agent)
+    region = request.headers.get("cf-ipcountry", "").upper()
+    if not re.fullmatch(r"[A-Z]{2}", region):
+        region = None
+    device_session = DeviceSession(
+        session_token_id=session_token_id,
+        user_id=user.id,
+        device_type=device_type,
+        browser=browser,
+        operating_system=operating_system,
+        user_agent=user_agent[:2048] or None,
+        language=request.headers.get("accept-language", "")[:64] or None,
+        timezone=request.headers.get("x-client-timezone", "")[:64] or None,
+        region=region,
+        expires_at=expires_at,
+    )
+    db.add(device_session)
+    db.commit()
     return {"access_token": token, "token_type": "bearer"}
 
 #############################################################################
 # Logout utente
 @router.post("/logout")
-def logout(current_user=Depends(get_current_user)):
-    # In un'app solo token, il logout è gestito sul client
-    # Qui possiamo solo registrare l'evento, oppure implementare blacklist del token
+def logout(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    session_token_id = payload.get("jti")
+    if session_token_id:
+        device_session = db.query(DeviceSession).filter(
+            DeviceSession.session_token_id == session_token_id,
+            DeviceSession.user_id == current_user.id,
+        ).first()
+        if device_session and not device_session.revoked_at:
+            device_session.revoked_at = _session_now()
+            db.commit()
     return {"message": f"Utente {current_user.username} disconnesso"}
+
+
+@router.get("/sessions")
+def get_device_sessions(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    session_token_id = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM]).get("jti")
+    sessions = db.query(DeviceSession).filter(
+        DeviceSession.user_id == current_user.id,
+    ).order_by(DeviceSession.created_at.desc()).all()
+    return [
+        {
+            "id": session.id,
+            "device_type": session.device_type,
+            "browser": session.browser,
+            "operating_system": session.operating_system,
+            "language": session.language,
+            "timezone": session.timezone,
+            "region": session.region,
+            "created_at": session.created_at,
+            "expires_at": session.expires_at,
+            "is_expired": session.expires_at <= _session_now(),
+            "revoked_at": session.revoked_at,
+            "is_current": session.session_token_id == session_token_id,
+        }
+        for session in sessions
+    ]
+
+
+@router.delete("/sessions/{session_id}")
+def revoke_device_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    device_session = db.query(DeviceSession).filter(
+        DeviceSession.id == session_id,
+        DeviceSession.user_id == current_user.id,
+    ).first()
+    if not device_session:
+        raise HTTPException(status_code=404, detail="Sessione non trovata")
+    if not device_session.revoked_at:
+        device_session.revoked_at = _session_now()
+        db.commit()
+    return {"message": "Sessione revocata"}
 
 #############################################################################
 # Info sull'utente loggato

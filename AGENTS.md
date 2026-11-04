@@ -21,7 +21,8 @@ Istruzioni operative per agenti AI che lavorano in questo repository.
 - Backend:
   - Setup venv: `cd backend && ./setup_venv.sh`
   - Run API: `cd backend && source .venv/bin/activate && uvicorn main:app --reload`
-  - Test principali: `cd backend && source .venv/bin/activate && pytest test_metadata_backend.py`
+  - Test principali: `cd backend && source .venv/bin/activate && pytest .test/test_metadata_backend.py`
+  - Suite backend completa: `cd backend && source .venv/bin/activate && pytest` (discovery configurata in [backend/pytest.ini](backend/pytest.ini)).
 - Frontend:
   - Install: `cd frontend && npm ci`
   - Dev: `cd frontend && npm run dev`
@@ -44,12 +45,13 @@ Istruzioni operative per agenti AI che lavorano in questo repository.
 - EAV metadata: rispettare tipi e operatori definiti in [backend/metadata_model.py](backend/metadata_model.py); evitare logica duplicata in altri file.
 - Ruoli applicativi: admin/moderator/viewer nel dominio backend.
 - Root path API dietro proxy: variabile `FASTAPI_ROOT_PATH=/api` nei compose.
+- File di test: collocarli esclusivamente in [backend/.test/](backend/.test/) o [frontend/.test/](frontend/.test/), secondo il componente interessato; non crearli nella root del componente o insieme al codice applicativo. Quando si aggiungono o spostano test, mantenere coerenti discovery, import, percorsi e comandi di esecuzione.
 
 ## Pitfall ricorrenti
 
 - In Docker il DB host è `db`; in locale spesso `localhost`. Verificare `DATABASE_URL` prima di test/migrazioni.
 - L'entrypoint backend applica migrazioni all'avvio: [backend/entrypoint.sh](backend/entrypoint.sh).
-- I test backend usano SQLite in-memory, non Postgres: [backend/test_metadata_backend.py](backend/test_metadata_backend.py).
+- I test backend usano SQLite in-memory, non Postgres: [backend/.test/test_metadata_backend.py](backend/.test/test_metadata_backend.py).
 - Il frontend dipende da `BACKEND_BASE_URL` (template nginx): [frontend/nginx.conf.template](frontend/nginx.conf.template).
 
 ## Strategia modifiche per agenti
