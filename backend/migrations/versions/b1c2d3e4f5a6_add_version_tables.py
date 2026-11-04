@@ -29,15 +29,15 @@ def upgrade() -> None:
             sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
             sa.Column('item_id', sa.Integer(), nullable=False),
             sa.Column('inventory_id', sa.Integer(), nullable=False),
-            sa.Column('name', sa.String(), nullable=False),
-            sa.Column('description', sa.String(), nullable=True),
+            sa.Column('name', sa.String(255), nullable=False),
+            sa.Column('description', sa.Text(), nullable=True),
             sa.Column('quantity', sa.Integer(), nullable=True),
             sa.Column('version_num', sa.Integer(), nullable=False),
             sa.Column('operation', sa.String(length=16), nullable=False),
-            sa.Column('changed_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+            sa.Column('changed_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column('changed_by_id', sa.Integer(),
                       sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
-            sa.Column('changed_by_username', sa.String(), nullable=True),
+            sa.Column('changed_by_username', sa.String(255), nullable=True),
             sa.Column('diff', sa.Text(), nullable=True),
         )
 
@@ -46,23 +46,29 @@ def upgrade() -> None:
             'inventory_versions',
             sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
             sa.Column('inventory_id', sa.Integer(), nullable=False),
-            sa.Column('name', sa.String(), nullable=False),
-            sa.Column('type', sa.String(), nullable=False),
+            sa.Column('name', sa.String(255), nullable=False),
+            sa.Column('type', sa.String(16), nullable=False),
             sa.Column('owner_id', sa.Integer(), nullable=True),
-            sa.Column('owner_username', sa.String(), nullable=True),
+            sa.Column('owner_username', sa.String(255), nullable=True),
             sa.Column('version_num', sa.Integer(), nullable=False),
             sa.Column('operation', sa.String(length=16), nullable=False),
-            sa.Column('changed_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+            sa.Column('changed_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.Column('changed_by_id', sa.Integer(),
                       sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
-            sa.Column('changed_by_username', sa.String(), nullable=True),
+            sa.Column('changed_by_username', sa.String(255), nullable=True),
             sa.Column('diff', sa.Text(), nullable=True),
         )
 
-    # Crea indici in modo idempotente
-    op.execute("CREATE INDEX IF NOT EXISTS ix_item_versions_item_id ON item_versions (item_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_item_versions_inventory_id ON item_versions (inventory_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS ix_inventory_versions_inventory_id ON inventory_versions (inventory_id)")
+    for table_name, index_name, columns in (
+        ("item_versions", "ix_item_versions_item_id", ["item_id"]),
+        ("item_versions", "ix_item_versions_inventory_id", ["inventory_id"]),
+        ("inventory_versions", "ix_inventory_versions_inventory_id", ["inventory_id"]),
+    ):
+        existing_indexes = {
+            index["name"] for index in sa.inspect(bind).get_indexes(table_name)
+        }
+        if index_name not in existing_indexes:
+            op.create_index(index_name, table_name, columns)
 
     # Backfill: crea la versione iniziale (v1, CREATE) per i record esistenti
     op.execute(
@@ -79,7 +85,7 @@ def upgrade() -> None:
             u_owner.username,
             1,
             'CREATE',
-            COALESCE(i.data_ins, now()),
+            COALESCE(i.data_ins, CURRENT_TIMESTAMP),
             i.user_ins,
             u_ins.username,
             NULL
@@ -108,7 +114,7 @@ def upgrade() -> None:
             it.quantity,
             1,
             'CREATE',
-            COALESCE(it.data_ins, now()),
+            COALESCE(it.data_ins, CURRENT_TIMESTAMP),
             it.user_ins,
             u_ins.username,
             NULL

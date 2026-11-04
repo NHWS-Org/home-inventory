@@ -1,58 +1,55 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
-from fastapi.responses import FileResponse
-from fastapi import UploadFile, File
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from datetime import datetime
-from pathlib import Path
-import os
-import subprocess
-import threading
+from __future__ import annotations
+
 import logging
 import json
+import os
 import re
+import shutil
 import uuid
+from datetime import datetime, timezone
 from functools import lru_cache
-from dependencies import get_db, role_required
-from models import RoleEnum
-from dotenv import load_dotenv
-from database import SessionLocal
-from crud import get_setting, set_setting
-from pydantic import BaseModel
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
-load_dotenv()
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import Integer, func, inspect, select, text
+from sqlalchemy.orm import Session
+
+from backup_archive import (
+    BACKUP_FORMAT,
+    BACKUP_FORMAT_VERSION,
+    create_backup_archive,
+    decode_value,
+    read_backup_archive,
+    read_backup_metadata,
+    read_database_snapshot,
+)
+from backup_comparison import compare_snapshots
+from crud import get_setting, set_setting
+from database import DATABASE_TYPE, SessionLocal
+from dependencies import get_db, role_required
+from models import Base, RoleEnum
+from legacy_backup import convert_legacy_backup
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(role_required(RoleEnum.admin))])
 
-BACKUP_DIR = Path("./backups")
-BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR", "./data/backups"))
+BACKUP_EXTENSION = ".hibackup"
 
-BACKUP_META_PREFIX = "-- HI_BACKUP_META: "
-
-# Matrice di compatibilita DB (source_revision -> target_revision)
-# Va mantenuta nel tempo per esplicitare restore cross-version consentiti.
-DB_COMPATIBILITY_MATRIX: dict[tuple[str, str], dict] = {
-    (
-        "4ef54a6a9ff5",
-        "d4e5f6a7b8c9",
-    ): {
+DB_COMPATIBILITY_MATRIX: dict[tuple[str, str], dict[str, str]] = {
+    ("4ef54a6a9ff5", "d4e5f6a7b8c9"): {
         "strategy": "forward_core_data",
         "reason": "Backup precedente all'introduzione audit/metadati: ripristino dati core consentito.",
     },
-    (
-        "b1c2d3e4f5a6",
-        "d4e5f6a7b8c9",
-    ): {
+    ("b1c2d3e4f5a6", "d4e5f6a7b8c9"): {
         "strategy": "forward_core_data",
         "reason": "Backup con audit ma senza metadati: ripristino dati core consentito.",
     },
-    (
-        "c3d4e5f6a7b8",
-        "d4e5f6a7b8c9",
-    ): {
+    ("c3d4e5f6a7b8", "d4e5f6a7b8c9"): {
         "strategy": "forward_core_data",
         "reason": "Backup pre-metadata: metadati facoltativi, restore consentito su schema piu recente.",
     },
@@ -69,11 +66,51 @@ CORE_RESTORE_TABLES = {
     "filter_templates",
     "items",
     "item_barcodes",
+    "barcode_product_cache",
     "list_assignments",
     "inventories",
     "user_group_association",
     "groups",
 }
+
+RESTORE_DELETE_ORDER = [
+    "shared_inventories",
+    "shared_inventory_groups",
+    "list_assignments",
+    "item_barcodes",
+    "item_metadata_values",
+    "metadata_definition_assignments",
+    "filter_templates",
+    "item_versions",
+    "inventory_versions",
+    "user_group_association",
+    "items",
+    "metadata_definitions",
+    "barcode_product_cache",
+    "groups",
+    "inventories",
+]
+
+RESTORE_INSERT_ORDER = [
+    "roles",
+    "users",
+    "groups",
+    "inventories",
+    "items",
+    "metadata_definitions",
+    "metadata_definition_assignments",
+    "item_metadata_values",
+    "item_barcodes",
+    "barcode_product_cache",
+    "list_assignments",
+    "shared_inventories",
+    "shared_inventory_groups",
+    "user_group_association",
+    "item_versions",
+    "inventory_versions",
+    "filter_templates",
+    "settings",
+]
 
 
 class RestoreRequest(BaseModel):
@@ -89,26 +126,36 @@ class BackupBulkDeleteRequest(BaseModel):
     filenames: list[str]
 
 
+class BackupComparisonRequest(BaseModel):
+    before_filename: str
+    after_filename: str | None = None
+    table: str | None = None
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=100)
+
+
 def _safe_backup_path(filename: str) -> Path:
-    """Valida e sanitizza il nome file di backup per prevenire vulnerabilità di Path Traversal."""
-    if not filename or filename.startswith(".") or "/" in filename or "\\" in filename or ".." in filename:
-        raise HTTPException(status_code=400, detail="Nome file non valido: tentato path traversal")
-    if not filename.endswith(".sql"):
-        raise HTTPException(status_code=400, detail="Formato file non valido. Solo file .sql ammessi")
+    if (
+        not filename
+        or filename.startswith(".")
+        or "/" in filename
+        or "\\" in filename
+        or ".." in filename
+    ):
+        raise HTTPException(status_code=400, detail="Nome file backup non valido")
+    if not filename.endswith(BACKUP_EXTENSION):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato file non valido. Sono ammessi solo {BACKUP_EXTENSION}",
+        )
 
     backup_dir_resolved = BACKUP_DIR.resolve()
     file_path = (BACKUP_DIR / filename).resolve()
-
     try:
         file_path.relative_to(backup_dir_resolved)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Percorso file non valido")
-
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Percorso file non valido") from exc
     return file_path
-
-
-def _backup_meta_path(file_path: Path) -> Path:
-    return file_path.parent / f"{file_path.name}.meta.json"
 
 
 def _get_alembic_version(db: Session) -> str | None:
@@ -149,7 +196,7 @@ def _migration_parent_map() -> dict[str, str | None]:
 
 def _is_ancestor_revision(ancestor: str, descendant: str) -> bool:
     parent_map = _migration_parent_map()
-    current = descendant
+    current: str | None = descendant
     while current:
         if current == ancestor:
             return True
@@ -173,22 +220,14 @@ def _migration_description_map() -> dict[str, str]:
         if not revision_match:
             continue
         revision = revision_match.group(1)
-
-        description = None
         doc_match = docstring_re.search(raw)
+        description = None
         if doc_match:
-            for line in doc_match.group(1).splitlines():
-                clean = line.strip()
-                if clean:
-                    description = clean
-                    break
-
-        if not description:
-            stem = file.stem
-            description = stem.split("_", 1)[1].replace("_", " ") if "_" in stem else stem
-
-        descriptions[revision] = description
-
+            description = next(
+                (line.strip() for line in doc_match.group(1).splitlines() if line.strip()),
+                None,
+            )
+        descriptions[revision] = description or file.stem.split("_", 1)[-1].replace("_", " ")
     return descriptions
 
 
@@ -196,23 +235,16 @@ def _revision_display_label(revision: str | None) -> str | None:
     if not revision:
         return None
     description = _migration_description_map().get(revision)
-    if not description:
-        return revision
-    return f"{description} ({revision})"
+    return f"{description} ({revision})" if description else revision
 
 
 def _list_all_revisions_in_repo() -> list[str]:
     parent_map = _migration_parent_map()
-    if not parent_map:
-        return []
-
     children_map: dict[str, list[str]] = {}
     for revision, parent in parent_map.items():
-        if parent is None:
-            continue
-        children_map.setdefault(parent, []).append(revision)
+        if parent is not None:
+            children_map.setdefault(parent, []).append(revision)
 
-    roots = sorted([revision for revision, parent in parent_map.items() if parent is None])
     ordered: list[str] = []
     visited: set[str] = set()
 
@@ -224,47 +256,40 @@ def _list_all_revisions_in_repo() -> list[str]:
         for child in sorted(children_map.get(node, [])):
             walk(child)
 
-    for root in roots:
+    for root in sorted(revision for revision, parent in parent_map.items() if parent is None):
         walk(root)
-
-    # Safety: include eventual orfani non raggiunti
-    for revision in sorted(parent_map.keys()):
-        if revision not in visited:
-            ordered.append(revision)
-
+    ordered.extend(sorted(set(parent_map) - visited))
     return ordered
 
 
-def _evaluate_restore_compatibility(backup_revision: str | None, current_revision: str | None) -> dict:
+def _evaluate_restore_compatibility(
+    backup_revision: str | None, current_revision: str | None
+) -> dict[str, Any]:
     if not backup_revision or not current_revision:
         return {
             "compatible": False,
             "strategy": "blocked",
             "reason": "Versione alembic non disponibile",
         }
-
     if backup_revision == current_revision:
         return {
             "compatible": True,
             "strategy": "same_revision",
             "reason": "Revisioni identiche",
         }
-
     explicit_rule = DB_COMPATIBILITY_MATRIX.get((backup_revision, current_revision))
     if explicit_rule:
         return {
             "compatible": True,
-            "strategy": explicit_rule.get("strategy", "matrix"),
-            "reason": explicit_rule.get("reason", "Compatibilita esplicita in matrice"),
+            "strategy": explicit_rule["strategy"],
+            "reason": explicit_rule["reason"],
         }
-
     if _is_ancestor_revision(backup_revision, current_revision):
         return {
             "compatible": True,
             "strategy": "forward_ancestor",
             "reason": "Backup proveniente da revisione precedente nella stessa catena migrazioni",
         }
-
     return {
         "compatible": False,
         "strategy": "blocked",
@@ -273,254 +298,283 @@ def _evaluate_restore_compatibility(backup_revision: str | None, current_revisio
 
 
 def _table_exists(db: Session, table_name: str) -> bool:
-    row = db.execute(text("SELECT to_regclass(:table_name)"), {"table_name": table_name}).fetchone()
-    return bool(row and row[0])
+    return inspect(db.connection()).has_table(table_name)
 
 
 def _safe_delete_table(db: Session, table_name: str) -> None:
-    if _table_exists(db, table_name):
-        db.execute(text(f"DELETE FROM {table_name}"))
-
-
-def _sync_id_sequences(db: Session) -> None:
-    """Riallinea le sequence PostgreSQL delle colonne `id` al valore max presente.
-
-    Utile dopo restore da dump quando i setval del backup sono assenti/non aggiornati.
-    """
-    db.execute(
-        text(
-            """
-            DO $$
-            DECLARE
-                seq_record RECORD;
-                max_id BIGINT;
-            BEGIN
-                FOR seq_record IN
-                    SELECT
-                        n.nspname AS schema_name,
-                        c.relname AS table_name,
-                        a.attname AS column_name,
-                        pg_get_serial_sequence(format('%I.%I', n.nspname, c.relname), a.attname) AS sequence_name
-                    FROM pg_class c
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    JOIN pg_attribute a ON a.attrelid = c.oid
-                    WHERE c.relkind = 'r'
-                      AND n.nspname = 'public'
-                      AND a.attnum > 0
-                      AND NOT a.attisdropped
-                      AND a.attname = 'id'
-                LOOP
-                    IF seq_record.sequence_name IS NOT NULL THEN
-                        EXECUTE format(
-                            'SELECT COALESCE(MAX(%I), 0) FROM %I.%I',
-                            seq_record.column_name,
-                            seq_record.schema_name,
-                            seq_record.table_name
-                        ) INTO max_id;
-
-                        -- false => il prossimo nextval restituira esattamente max_id + 1
-                        EXECUTE format(
-                            'SELECT setval(%L, %s, false)',
-                            seq_record.sequence_name,
-                            max_id + 1
-                        );
-                    END IF;
-                END LOOP;
-            END
-            $$;
-            """
-        )
-    )
-    db.commit()
+    table = Base.metadata.tables.get(table_name)
+    if table is not None and _table_exists(db, table_name):
+        db.execute(table.delete())
 
 
 def _nullify_foreign_keys_to_users(db: Session) -> None:
-    """Imposta a NULL tutte le FK nullable che puntano a users.id.
-
-    Serve prima della cancellazione massiva utenti nel restore avanzato,
-    per evitare violazioni su colonne audit (es. roles.user_ins/user_mod).
-    """
-    db.execute(
-        text(
-            """
-            DO $$
-            DECLARE
-                fk_record RECORD;
-            BEGIN
-                FOR fk_record IN
-                    SELECT
-                        n.nspname AS schema_name,
-                        c.relname AS table_name,
-                        a.attname AS column_name,
-                        a.attnotnull AS is_not_null
-                    FROM pg_constraint con
-                    JOIN pg_class c ON c.oid = con.conrelid
-                    JOIN pg_namespace n ON n.oid = c.relnamespace
-                    JOIN unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ord) ON TRUE
-                    JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = cols.attnum
-                    WHERE con.contype = 'f'
-                      AND con.confrelid = 'public.users'::regclass
-                LOOP
-                    IF fk_record.is_not_null THEN
-                        CONTINUE;
-                    END IF;
-
-                    EXECUTE format(
-                        'UPDATE %I.%I SET %I = NULL WHERE %I IS NOT NULL',
-                        fk_record.schema_name,
-                        fk_record.table_name,
-                        fk_record.column_name,
-                        fk_record.column_name
-                    );
-                END LOOP;
-            END
-            $$;
-            """
-        )
-    )
-    db.commit()
+    for table in Base.metadata.tables.values():
+        if table.name == "users" or not _table_exists(db, table.name):
+            continue
+        for foreign_key in table.foreign_keys:
+            column = foreign_key.parent
+            if foreign_key.column.table.name == "users" and column.nullable:
+                db.execute(
+                    table.update()
+                    .where(column.is_not(None))
+                    .values({column.name: None})
+                )
+    user_table = Base.metadata.tables.get("users")
+    if user_table is not None:
+        for foreign_key in user_table.foreign_keys:
+            column = foreign_key.parent
+            if foreign_key.column.table.name == "users" and column.nullable:
+                db.execute(
+                    user_table.update()
+                    .where(column.is_not(None))
+                    .values({column.name: None})
+                )
 
 
-def _write_backup_metadata(file_path: Path, metadata: dict) -> None:
-    meta_path = _backup_meta_path(file_path)
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=True, indent=2)
+def _sync_id_sequences(db: Session) -> None:
+    if db.get_bind().dialect.name != "postgresql":
+        return
+
+    for table in Base.metadata.tables.values():
+        if not _table_exists(db, table.name):
+            continue
+        for column in table.primary_key.columns:
+            if not isinstance(column.type, Integer):
+                continue
+            sequence_name = db.execute(
+                text("SELECT pg_get_serial_sequence(:table_name, :column_name)"),
+                {"table_name": table.name, "column_name": column.name},
+            ).scalar_one_or_none()
+            if sequence_name is None:
+                continue
+            max_id = db.execute(select(func.max(column))).scalar_one()
+            db.execute(
+                text(
+                    "SELECT setval(CAST(:sequence_name AS regclass), :value, :called)"
+                ),
+                {
+                    "sequence_name": sequence_name,
+                    "value": max_id if max_id is not None else 1,
+                    "called": max_id is not None,
+                },
+            )
 
 
-def _prepend_backup_metadata_comment(file_path: Path, metadata: dict) -> None:
-    # Manteniamo i backup single-file auto-descrittivi anche in caso di upload/download solo .sql
-    meta_line = f"{BACKUP_META_PREFIX}{json.dumps(metadata, ensure_ascii=True)}\n"
-    with open(file_path, "r", encoding="utf-8") as f:
-        original = f.read()
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(meta_line)
-        f.write(original)
+def _current_admin_id(db: Session) -> Any:
+    users = Base.metadata.tables.get("users")
+    if users is None or not _table_exists(db, "users"):
+        return None
+    return db.execute(
+        select(users.c.id).where(users.c.username == "admin")
+    ).scalar_one_or_none()
 
 
-def _read_backup_metadata(file_path: Path) -> dict | None:
-    sidecar = _backup_meta_path(file_path)
-    if sidecar.exists():
-        with open(sidecar, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        for _ in range(30):
-            line = f.readline()
-            if not line:
-                break
-            if line.startswith(BACKUP_META_PREFIX):
-                raw = line[len(BACKUP_META_PREFIX):].strip()
-                try:
-                    return json.loads(raw)
-                except json.JSONDecodeError:
-                    return None
-    return None
+def _foreign_keys_to_users(table: Any) -> list[Any]:
+    return [
+        foreign_key.parent
+        for foreign_key in table.foreign_keys
+        if foreign_key.column.table.name == "users"
+    ]
 
 
-def _build_filtered_restore_sql(
-    source_file: Path,
-    output_file: Path,
-    include_tables: set[str],
-    skip_admin_insert: bool,
+def _insert_restored_rows(
+    db: Session,
+    table: Any,
+    source_rows: list[dict[str, Any]],
+    source_admin_id: Any,
+    target_admin_id: Any,
+    skip_admin: bool,
+    deferred_user_refs: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]],
 ) -> None:
-    insert_re = re.compile(r"^INSERT INTO (?:public\.)?\"?([a-zA-Z0-9_]+)\"? ")
-    setval_re = re.compile(r"^SELECT pg_catalog\.setval\('(?:public\.)?\"?([a-zA-Z0-9_]+)_")
+    columns = {column.name: column for column in table.columns}
+    user_fk_columns = _foreign_keys_to_users(table)
+    prepared_rows: list[dict[str, Any]] = []
 
-    with open(source_file, "r", encoding="utf-8") as src, open(output_file, "w", encoding="utf-8") as dst:
-        for line in src:
-            if line.startswith(BACKUP_META_PREFIX):
-                continue
+    for source_row in source_rows:
+        if table.name == "users" and source_row.get("username") == "admin" and skip_admin:
+            continue
 
-            ins = insert_re.match(line)
-            if ins:
-                table = ins.group(1)
-                if table not in include_tables:
-                    continue
-                if table == "users" and skip_admin_insert and "'admin'" in line:
-                    continue
-                dst.write(line)
-                continue
+        row = {
+            name: decode_value(value, columns[name].type)
+            for name, value in source_row.items()
+            if name in columns
+        }
+        for column in user_fk_columns:
+            if (
+                skip_admin
+                and source_admin_id is not None
+                and target_admin_id is not None
+                and row.get(column.name) == source_admin_id
+            ):
+                row[column.name] = target_admin_id
 
-            seq = setval_re.match(line)
-            if seq:
-                table = seq.group(1)
-                if table not in include_tables:
-                    continue
-                dst.write(line)
-                continue
+        if table.name in {"users", "roles"}:
+            deferred: dict[str, Any] = {}
+            for column in user_fk_columns:
+                if column.name in row and column.nullable:
+                    deferred[column.name] = row[column.name]
+                    row[column.name] = None
+            if deferred:
+                deferred_user_refs.setdefault(table.name, []).append((row, deferred))
+        prepared_rows.append(row)
 
-            # Manteniamo SET/SELECT/COMMENT utili al restore
-            dst.write(line)
+    if prepared_rows:
+        db.execute(table.insert(), prepared_rows)
+
+
+def _restore_backup_rows(
+    db: Session,
+    rows_by_table: dict[str, list[dict[str, Any]]],
+    payload: RestoreRequest,
+    metadata: dict[str, Any],
+) -> None:
+    selected_tables = set(CORE_RESTORE_TABLES) | {"users"}
+    overwrite_roles = payload.mode == "advanced" and payload.overwrite_users_roles
+    if overwrite_roles:
+        selected_tables.add("roles")
+    if payload.mode == "advanced" and payload.overwrite_settings:
+        selected_tables.add("settings")
+
+    target_admin_id = _current_admin_id(db)
+    source_admin_id = metadata.get("admin_user_id")
+
+    for table_name in RESTORE_DELETE_ORDER:
+        if table_name in selected_tables:
+            _safe_delete_table(db, table_name)
+
+    _nullify_foreign_keys_to_users(db)
+    users = Base.metadata.tables["users"]
+    if overwrite_roles and payload.overwrite_admin:
+        db.execute(users.delete())
+        _safe_delete_table(db, "roles")
+    else:
+        db.execute(users.delete().where(users.c.username != "admin"))
+
+    if payload.mode == "advanced" and payload.overwrite_settings:
+        _safe_delete_table(db, "settings")
+
+    skip_admin = not (
+        payload.mode == "advanced"
+        and payload.overwrite_users_roles
+        and payload.overwrite_admin
+    )
+    if (
+        skip_admin
+        and source_admin_id is not None
+        and target_admin_id is None
+        and rows_by_table.get("users")
+    ):
+        raise ValueError("Impossibile preservare l'utente admin: non esiste nel database")
+
+    deferred_user_refs: dict[
+        str, list[tuple[dict[str, Any], dict[str, Any]]]
+    ] = {}
+    for table_name in RESTORE_INSERT_ORDER:
+        if table_name not in selected_tables:
+            continue
+        table = Base.metadata.tables.get(table_name)
+        if (
+            table is None
+            or not _table_exists(db, table_name)
+            or not rows_by_table.get(table_name)
+        ):
+            continue
+        _insert_restored_rows(
+            db,
+            table,
+            rows_by_table[table_name],
+            source_admin_id,
+            target_admin_id,
+            skip_admin,
+            deferred_user_refs,
+        )
+
+    for table_name, deferred_rows in deferred_user_refs.items():
+        table = Base.metadata.tables[table_name]
+        primary_key = list(table.primary_key.columns)
+        for inserted_row, deferred in deferred_rows:
+            identity = {column.name: inserted_row[column.name] for column in primary_key}
+            predicate = [table.c[name] == value for name, value in identity.items()]
+            db.execute(
+                table.update()
+                .where(*predicate)
+                .values(deferred)
+            )
+
+    _sync_id_sequences(db)
+
 
 @router.post("/create")
 def create_backup(db: Session = Depends(get_db), prefix: str = "manual"):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", prefix):
+        raise HTTPException(status_code=400, detail="Prefisso backup non valido")
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{prefix}_backup_{timestamp}.sql"
+    filename = f"{prefix}_backup_{timestamp}{BACKUP_EXTENSION}"
     full_backup_path = _safe_backup_path(filename)
+    metadata = {
+        "format": BACKUP_FORMAT,
+        "format_version": BACKUP_FORMAT_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "db_type": DATABASE_TYPE,
+        "db_alembic_version": _get_alembic_version(db),
+    }
+    if not metadata["db_alembic_version"]:
+        raise HTTPException(status_code=500, detail="Versione Alembic del database non disponibile")
 
     try:
-        env = os.environ.copy()
-        env["PGPASSWORD"] = os.getenv("POSTGRES_PASSWORD", "admin")
-
-        logger.info(f"Avvio backup: {full_backup_path.name}")
-
-        # Backup totale data-only: include tutte le tabelle/record
-        subprocess.run([
-            "pg_dump",
-            "-U", os.getenv("POSTGRES_USER", "admin"),
-            "-h", os.getenv("POSTGRES_HOST", "db"),
-            "-d", os.getenv("POSTGRES_DB", "inventory"),
-            "--data-only",
-            "--disable-triggers", #Aggiunto per evitare problemi di FK durante il restore, soprattutto con tabelle condivise e versioning
-            "--column-inserts",
-            "-f", str(full_backup_path)
-        ], check=True, env=env)
-
-        metadata = {
-            "format": "home-inventory-backup-v2",
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "db_alembic_version": _get_alembic_version(db),
-        }
-        _write_backup_metadata(full_backup_path, metadata)
-        _prepend_backup_metadata_comment(full_backup_path, metadata)
-
-        logger.info(f"Backup completato: {full_backup_path.name}")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Errore nel backup: {str(e)}")
+        create_backup_archive(db, full_backup_path, metadata)
+        logger.info("Backup completato: %s", full_backup_path.name)
+    except Exception as exc:
+        logger.exception("Errore durante la creazione del backup %s", filename)
+        if full_backup_path.exists():
+            full_backup_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Errore nel backup: {exc}") from exc
 
     return {"message": "Backup creato", "filename": full_backup_path.name}
 
+
 @router.get("/")
 def list_backups(db: Session = Depends(get_db)):
-    backups = []
     current_revision = _get_alembic_version(db)
-    for file in sorted(BACKUP_DIR.glob("*.sql")):
-        metadata = _read_backup_metadata(file)
+    backups = []
+    for file in sorted(BACKUP_DIR.glob(f"*{BACKUP_EXTENSION}")):
+        metadata_error = None
+        try:
+            metadata = read_backup_metadata(file)
+        except ValueError as exc:
+            metadata = None
+            metadata_error = str(exc)
         backup_revision = metadata.get("db_alembic_version") if metadata else None
         compatibility = _evaluate_restore_compatibility(backup_revision, current_revision)
-        backups.append({
-            "filename": file.name,
-            "size": file.stat().st_size,
-            "modified": datetime.fromtimestamp(file.stat().st_mtime),
-            "metadata": metadata,
-            "has_metadata": metadata is not None,
-            "db_alembic_version": backup_revision,
-            "db_alembic_version_label": _revision_display_label(backup_revision),
-            "current_db_alembic_version": current_revision,
-            "current_db_alembic_version_label": _revision_display_label(current_revision),
-            "restorable_on_current_db": bool(metadata and compatibility.get("compatible")),
-            "restore_compatibility": compatibility,
-        })
+        backups.append(
+            {
+                "filename": file.name,
+                "size": file.stat().st_size,
+                "modified": datetime.fromtimestamp(file.stat().st_mtime),
+                "metadata": metadata,
+                "metadata_error": metadata_error,
+                "has_metadata": metadata is not None,
+                "db_alembic_version": backup_revision,
+                "db_alembic_version_label": _revision_display_label(backup_revision),
+                "current_db_alembic_version": current_revision,
+                "current_db_alembic_version_label": _revision_display_label(current_revision),
+                "restorable_on_current_db": bool(
+                    metadata and compatibility.get("compatible")
+                ),
+                "restore_compatibility": compatibility,
+            }
+        )
     return backups
 
 
 @router.get("/compatibility-map")
 def get_backup_compatibility_map():
     revisions = _list_all_revisions_in_repo()
-    revision_labels = {revision: _revision_display_label(revision) for revision in revisions}
+    revision_labels = {
+        revision: _revision_display_label(revision) for revision in revisions
+    }
     matrix = []
-
     for source in revisions:
         targets = []
         for target in revisions:
@@ -550,32 +604,73 @@ def get_backup_compatibility_map():
         ],
     }
 
+
+@router.post("/compare")
+def compare_backups(payload: BackupComparisonRequest, db: Session = Depends(get_db)):
+    def load(filename: str) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+        path = _safe_backup_path(filename)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="File backup non trovato")
+        metadata, rows = read_backup_archive(path)
+        table_names = metadata.get("tables", [])
+        if not isinstance(table_names, list) or not all(
+            isinstance(name, str) for name in table_names
+        ):
+            raise ValueError("Elenco tabelle del backup non valido")
+        for table_name in table_names:
+            rows.setdefault(table_name, [])
+        return metadata, rows
+
+    try:
+        before_meta, before = load(payload.before_filename)
+        if payload.after_filename is not None:
+            after_meta, after = load(payload.after_filename)
+        else:
+            after_meta = {"db_alembic_version": _get_alembic_version(db)}
+            after = read_database_snapshot(db)
+        result = compare_snapshots(
+            before, after, table_filter=payload.table,
+            offset=payload.offset, limit=payload.limit,
+        )
+    except (ValueError, TypeError, RecursionError) as exc:
+        logger.warning("Confronto backup rifiutato: dati non validi")
+        raise HTTPException(
+            status_code=400,
+            detail="Impossibile confrontare i backup: archivio, tabella o dati non validi",
+        ) from exc
+    return {
+        **result,
+        "before": {
+            "filename": payload.before_filename,
+            "db_alembic_version": before_meta.get("db_alembic_version"),
+        },
+        "after": {
+            "filename": payload.after_filename,
+            "db_alembic_version": after_meta.get("db_alembic_version"),
+        },
+    }
+
+
 @router.get("/download/{filename}")
 def download_backup(filename: str):
     file_path = _safe_backup_path(filename)
-    if not file_path.exists():
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File non trovato")
-    return FileResponse(path=file_path, filename=file_path.name, media_type='application/octet-stream')
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type="application/octet-stream",
+    )
+
 
 @router.delete("/delete/{filename}")
 def delete_backup(filename: str, confirm: bool = Body(...)):
     if not confirm:
         raise HTTPException(status_code=400, detail="Cancellazione non confermata")
-
     file_path = _safe_backup_path(filename)
-    if not file_path.exists():
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File non trovato")
-
-    try:
-        logger.info(f"Cancellazione avviata per il file: {file_path.name}")
-        file_path.unlink()
-        meta_path = _backup_meta_path(file_path)
-        if meta_path.exists():
-            meta_path.unlink()
-        logger.info(f"Cancellazione completata per il file: {file_path.name}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Errore durante la cancellazione: {str(e)}")
-
+    file_path.unlink()
     return {"message": "Backup cancellato"}
 
 
@@ -589,28 +684,21 @@ def delete_backups_bulk(payload: BackupBulkDeleteRequest):
     deleted: list[str] = []
     missing: list[str] = []
     invalid: list[str] = []
-
     for filename in payload.filenames:
         try:
             file_path = _safe_backup_path(filename)
         except HTTPException:
             invalid.append(filename)
             continue
-
-        if not file_path.exists():
+        if not file_path.is_file():
             missing.append(filename)
             continue
-
         try:
             file_path.unlink()
-            meta_path = _backup_meta_path(file_path)
-            if meta_path.exists():
-                meta_path.unlink()
             deleted.append(filename)
-        except Exception:
-            logger.exception(f"Errore durante la cancellazione del backup {filename}")
+        except OSError:
+            logger.exception("Errore durante la cancellazione del backup %s", filename)
             missing.append(filename)
-
     return {
         "message": "Cancellazione massiva completata",
         "deleted": deleted,
@@ -618,184 +706,147 @@ def delete_backups_bulk(payload: BackupBulkDeleteRequest):
         "invalid": invalid,
     }
 
+
 @router.post("/restore/{filename}")
 def restore_backup(filename: str, payload: RestoreRequest = Body(...)):
     if not payload.confirm:
         raise HTTPException(status_code=400, detail="Restore non confermato")
-
     file_path = _safe_backup_path(filename)
-    if not file_path.exists():
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File non trovato")
-
     if payload.mode == "advanced" and payload.overwrite_users_roles and not payload.overwrite_admin:
         raise HTTPException(
             status_code=400,
-            detail="Per sovrascrivere utenti/ruoli e mantenere consistenza è necessario abilitare anche overwrite_admin",
+            detail="Per sovrascrivere utenti/ruoli è necessario abilitare anche overwrite_admin",
         )
 
-    metadata = _read_backup_metadata(file_path)
-    if not metadata or not metadata.get("db_alembic_version"):
-        raise HTTPException(status_code=400, detail="Backup privo di metadati versione, restore bloccato")
-
-    current_db = SessionLocal()
     try:
-        current_revision = _get_alembic_version(current_db)
+        metadata, rows_by_table = read_backup_archive(file_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    compatibility_db = SessionLocal()
+    try:
+        current_revision = _get_alembic_version(compatibility_db)
     finally:
-        current_db.close()
-
-    backup_revision = metadata.get("db_alembic_version")
-    compatibility = _evaluate_restore_compatibility(backup_revision, current_revision)
-
+        compatibility_db.close()
+    compatibility = _evaluate_restore_compatibility(
+        metadata.get("db_alembic_version"), current_revision
+    )
     if not compatibility.get("compatible"):
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Backup non ripristinabile su questo DB: versione backup={backup_revision} "
-                f"versione corrente={current_revision}. Motivo: {compatibility.get('reason')}"
+                f"Backup non ripristinabile su questo DB: "
+                f"versione backup={metadata.get('db_alembic_version')} "
+                f"versione corrente={current_revision}. "
+                f"Motivo: {compatibility.get('reason')}"
             ),
         )
 
+    db = SessionLocal()
     try:
-        env = os.environ.copy()
-        env["PGPASSWORD"] = os.getenv("POSTGRES_PASSWORD", "admin")
-
-        include_tables = set(CORE_RESTORE_TABLES)
-        include_tables.add("users")
-        if payload.mode == "advanced" and payload.overwrite_users_roles:
-            include_tables.add("roles")
-        if payload.mode == "advanced" and payload.overwrite_settings:
-            include_tables.add("settings")
-
-        skip_admin_insert = not (payload.mode == "advanced" and payload.overwrite_users_roles and payload.overwrite_admin)
-
-        restore_sql_path = BACKUP_DIR / f"tmp_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
-        _build_filtered_restore_sql(file_path, restore_sql_path, include_tables, skip_admin_insert)
-
-        def run_restore():
-            db = None
-            try:
-                logger.info(f"Restore avviato per il file: {filename}")
-                # Esegui il comando di restore in un thread separato
-                logger.info(f"Pulizia tabelle prima del restore...")
-                db = SessionLocal()
-
-                # Ordine child -> parent per minimizzare problemi FK
-                for table_name in [
-                    "shared_inventories",
-                    "shared_inventory_groups",
-                    "item_metadata_values",
-                    "metadata_definition_assignments",
-                    "filter_templates",
-                    "item_versions",
-                    "inventory_versions",
-                    "item_barcodes",
-                    "list_assignments",
-                    "items",
-                    "metadata_definitions",
-                    "user_group_association",
-                    "groups",
-                    "inventories",
-                ]:
-                    _safe_delete_table(db, table_name)
-
-                if payload.mode == "advanced" and payload.overwrite_users_roles and payload.overwrite_admin:
-                    _nullify_foreign_keys_to_users(db)
-                    _safe_delete_table(db, "users")
-                    _safe_delete_table(db, "roles")
-                else:
-                    if _table_exists(db, "users"):
-                        db.execute(text("DELETE FROM users WHERE username != 'admin'"))
-
-                if payload.mode == "advanced" and payload.overwrite_settings:
-                    _safe_delete_table(db, "settings")
-
-                db.commit()
-                logger.info(f"Pulizia completata. Avvio restore da {filename}")
-
-                subprocess.run([
-                    "psql",
-                    "-U", os.getenv("POSTGRES_USER", "admin"),
-                    "-h", os.getenv("POSTGRES_HOST", "db"),
-                    "-d", os.getenv("POSTGRES_DB", "inventory"),
-                    "-f", str(restore_sql_path)
-                ], check=True, env=env)
-
-                # Allinea tutte le sequence PK dopo il restore per evitare duplicate key.
-                _sync_id_sequences(db)
-                logger.info(f"Restore completato per il file: {filename}")
-            except Exception as e:
-                logger.error(f"Errore durante il restore: {str(e)}")
-            finally:
-                if db:
-                    db.close()
-                try:
-                    if restore_sql_path.exists():
-                        restore_sql_path.unlink()
-                except Exception:
-                    logger.warning(f"Impossibile eliminare file temporaneo restore {restore_sql_path.name}")
-
-        threading.Thread(target=run_restore).start()
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Errore nel restore: {str(e)}")
+        with db.begin():
+            _restore_backup_rows(db, rows_by_table, payload, metadata)
+        logger.info("Restore completato per il file: %s", filename)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Errore durante il restore del file %s", filename)
+        raise HTTPException(status_code=500, detail=f"Errore durante il restore: {exc}") from exc
+    finally:
+        db.close()
 
     return {
-        "message": "Restore avviato in background",
+        "message": "Restore completato",
         "mode": payload.mode,
         "compatibility": compatibility,
     }
 
+
 @router.post("/upload")
-def upload_backup(file: UploadFile = File(...)):
+def upload_backup(
+    file: UploadFile = File(...),
+    metadata_file: UploadFile | None = File(None),
+):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Nome file non fornito.")
-    # Gli upload sono importazioni, anche quando il file proviene da un backup
-    # automatico. Il prefisso li distingue dai backup creati localmente; il token
-    # evita collisioni anche con upload ripetuti o nomi uguali.
+        raise HTTPException(status_code=400, detail="Nome file non fornito")
     original_name = file.filename.replace("\\", "/").rsplit("/", 1)[-1]
-    if not original_name.endswith(".sql"):
-        raise HTTPException(status_code=400, detail="Formato file non valido. Solo file .sql ammessi")
-    original_name = original_name.lstrip(".") or "backup.sql"
-    original_name = original_name[:120]
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    filename = f"uploaded_{timestamp}_{uuid.uuid4().hex}_{original_name}"
+    legacy = original_name.endswith(".sql")
+    if not original_name.endswith(BACKUP_EXTENSION) and not legacy:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sono ammessi {BACKUP_EXTENSION} oppure .sql con .sql.meta.json",
+        )
+    if legacy and (
+        metadata_file is None
+        or metadata_file.filename is None
+        or metadata_file.filename.replace("\\", "/").rsplit("/", 1)[-1]
+        != f"{original_name}.meta.json"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Seleziona il file .sql.meta.json corrispondente al backup SQL",
+        )
+    if not legacy and metadata_file is not None:
+        raise HTTPException(status_code=400, detail="Un backup .hibackup non richiede metadati separati")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"uploaded_{timestamp}_{uuid.uuid4().hex}{BACKUP_EXTENSION}"
     file_path = _safe_backup_path(filename)
 
     try:
-        with open(file_path, "wb") as buffer:
-            buffer.write(file.file.read())
-        logger.info(f"File di backup caricato: {file_path.name}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Errore durante il caricamento del file: {str(e)}")
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        if legacy and metadata_file is not None:
+            metadata = json.load(metadata_file.file)
+            sql = file.file.read().decode("utf-8-sig")
+            convert_legacy_backup(sql, metadata, file_path)
+        else:
+            with file_path.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        read_backup_metadata(file_path)
+    except (OSError, ValueError) as exc:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Backup non valido: {exc}") from exc
+    finally:
+        file.file.close()
+        if metadata_file is not None:
+            metadata_file.file.close()
 
-    return {"message": "Backup caricato correttamente", "filename": file_path.name}
+    logger.info("File di backup caricato: %s", file_path.name)
+    return {
+        "message": "Backup convertito e caricato" if legacy else "Backup caricato correttamente",
+        "filename": file_path.name,
+        "converted": legacy,
+    }
+
 
 @router.get("/schedule")
 def get_backup_schedule(db: Session = Depends(get_db)):
-    """Restituisce la configurazione della schedulazione backup."""
-    frequency   = get_setting(db, "BACKUP_FREQUENCY")
-    int_days    = get_setting(db, "BACKUP_INTERVAL_DAYS")
-    int_hours   = get_setting(db, "BACKUP_INTERVAL_HOURS")
+    frequency = get_setting(db, "BACKUP_FREQUENCY")
+    int_days = get_setting(db, "BACKUP_INTERVAL_DAYS")
+    int_hours = get_setting(db, "BACKUP_INTERVAL_HOURS")
     int_minutes = get_setting(db, "BACKUP_INTERVAL_MINUTES")
-    retention   = get_setting(db, "BACKUP_RETENTION")
+    retention = get_setting(db, "BACKUP_RETENTION")
     return {
         "BACKUP_FREQUENCY": frequency,
         "BACKUP_INTERVAL_DAYS": int_days,
         "BACKUP_INTERVAL_HOURS": int_hours,
         "BACKUP_INTERVAL_MINUTES": int_minutes,
-        "BACKUP_RETENTION": retention
+        "BACKUP_RETENTION": retention,
     }
+
 
 @router.post("/schedule")
 def set_backup_schedule(
-    backup_frequency:   str = Body(..., embed=True),
-    backup_int_days:    int = Body(..., embed=True),
-    backup_int_hours:   int = Body(..., embed=True),
+    backup_frequency: str = Body(..., embed=True),
+    backup_int_days: int = Body(..., embed=True),
+    backup_int_hours: int = Body(..., embed=True),
     backup_int_minutes: int = Body(..., embed=True),
-    backup_retention:   int = Body(..., embed=True),
-    db: Session = Depends(get_db)
+    backup_retention: int = Body(..., embed=True),
+    db: Session = Depends(get_db),
 ):
-    """Aggiorna o crea la configurazione della schedulazione backup."""
     set_setting(db, "BACKUP_FREQUENCY", str(backup_frequency))
     set_setting(db, "BACKUP_INTERVAL_DAYS", str(backup_int_days))
     set_setting(db, "BACKUP_INTERVAL_HOURS", str(backup_int_hours))
@@ -803,21 +854,28 @@ def set_backup_schedule(
     set_setting(db, "BACKUP_RETENTION", str(backup_retention))
 
     try:
-        from scheduler import start_scheduler as perform_start_scheduler
-        perform_start_scheduler()
-    except Exception as e:
-        logger.error(f"Errore durante l'avvio dello scheduler: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Errore durante l'avvio dello scheduler: {str(e)}")
-    
-    return {"message": "Schedulazione aggiornata correttamente."}
+        from scheduler import start_scheduler
+
+        start_scheduler()
+    except Exception as exc:
+        logger.exception("Errore durante l'avvio dello scheduler")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Errore durante l'avvio dello scheduler: {exc}",
+        ) from exc
+    return {"message": "Schedulazione aggiornata correttamente"}
+
 
 @router.post("/schedule/trigger")
 def trigger_backup_now(db: Session = Depends(get_db)):
-    """Esegue immediatamente un backup manuale come se fosse schedulato."""
     try:
-        from scheduler import scheduled_backup as perform_scheduled_backup
-        perform_scheduled_backup()
-        return {"message": "Backup schedulato avviato manualmente."}
-    except Exception as e:
-        logger.error(f"Errore durante il trigger manuale del backup: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Errore durante il trigger manuale del backup: {str(e)}")
+        from scheduler import scheduled_backup
+
+        scheduled_backup()
+        return {"message": "Backup schedulato avviato"}
+    except Exception as exc:
+        logger.exception("Errore durante il trigger manuale del backup")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Errore durante il trigger manuale del backup: {exc}",
+        ) from exc
