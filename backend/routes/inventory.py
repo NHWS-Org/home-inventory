@@ -153,13 +153,21 @@ def list_inventories_base(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    # ⚡ Bolt optimization: Eager load shared_with_users and shared_with_groups to eliminate N+1 queries during access checks.
+    # Impact: Reduces queries from O(N) to O(1) for non-admin users viewing N inventories.
     query = db.query(Inventory).filter(Inventory.type == inventory_type)
     if filtro:
         query = query.options(
-            joinedload(Inventory.items).joinedload(Item.metadata_values).joinedload(ItemMetadataValue.definition)
+            joinedload(Inventory.items).joinedload(Item.metadata_values).joinedload(ItemMetadataValue.definition),
+            joinedload(Inventory.shared_with_users),
+            joinedload(Inventory.shared_with_groups),
         )
     else:
-        query = query.options(joinedload(Inventory.items))
+        query = query.options(
+            joinedload(Inventory.items),
+            joinedload(Inventory.shared_with_users),
+            joinedload(Inventory.shared_with_groups),
+        )
 
     inventories = query.all()
     visible_inventories = [
