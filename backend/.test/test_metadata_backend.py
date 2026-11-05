@@ -2,18 +2,24 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from datetime import datetime, date
 from decimal import Decimal
 
 from main import app
 from database import Base
 from dependencies import get_db
-from models import User, Role, Inventory, MetadataDefinition, ItemMetadataValue, Item, FilterTemplate
+from routes.auth import get_current_user
+from models import User, Role, RoleEnum, Inventory, MetadataDefinition, MetadataDefinitionAssignment, ItemMetadataValue, Item, FilterTemplate
 
 
 # Setup database per i test
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base.metadata.create_all(bind=engine)
@@ -294,6 +300,90 @@ class TestMetadataValidation:
         
         with pytest.raises(Exception):  # IntegrityError per check constraint
             db_session.commit()
+
+
+class TestApplicableDefinitionsAuthorization:
+    """Test autorizzazione per endpoint /metadata/applicable."""
+
+    def test_non_admin_cannot_access_inactive_definitions_via_applicable(self, db_session):
+        admin_role = Role(name=RoleEnum.admin.value)
+        moderator_role = Role(name=RoleEnum.moderator.value)
+        db_session.add_all([admin_role, moderator_role])
+        db_session.commit()
+
+        admin = User(username="admin_user", hashed_password="x", role_id=admin_role.id)
+        moderator = User(username="mod_user", hashed_password="x", role_id=moderator_role.id)
+        db_session.add_all([admin, moderator])
+        db_session.commit()
+
+        inv = Inventory(name="Shared Inv", type="INVENTORY", owner_id=moderator.id, user_ins=moderator.id)
+        db_session.add(inv)
+        db_session.commit()
+
+        active_def = MetadataDefinition(
+            key="active_field",
+            label="Active Field",
+            field_type="TEXT",
+            is_active=True,
+            user_ins=admin.id,
+        )
+        inactive_def = MetadataDefinition(
+            key="inactive_field",
+            label="Inactive Field",
+            field_type="TEXT",
+            is_active=False,
+            user_ins=admin.id,
+        )
+        db_session.add_all([active_def, inactive_def])
+        db_session.commit()
+
+        assign_active = MetadataDefinitionAssignment(
+            definition_id=active_def.id,
+            scope="GLOBAL",
+            user_ins=admin.id,
+        )
+        assign_inactive = MetadataDefinitionAssignment(
+            definition_id=inactive_def.id,
+            scope="GLOBAL",
+            user_ins=admin.id,
+        )
+        db_session.add_all([assign_active, assign_inactive])
+        db_session.commit()
+
+        # Context per simulare utente corrente
+        current_state = {"user": moderator}
+
+        def override_user():
+            return current_state["user"]
+
+        app.dependency_overrides[get_current_user] = override_user
+        app.dependency_overrides[get_db] = lambda: db_session
+        try:
+            # 1. Moderator con include_inactive=True: NON deve vedere la definizione inattiva
+            current_state["user"] = moderator
+            res_mod = client.get(f"/metadata/applicable?inventory_id={inv.id}&include_inactive=true")
+            assert res_mod.status_code == 200
+            keys_mod = [item["key"] for item in res_mod.json()]
+            assert "active_field" in keys_mod
+            assert "inactive_field" not in keys_mod, "Non-admin must not receive inactive definitions"
+
+            # 2. Admin con include_inactive=True: PUÒ vedere sia attive che inattive
+            current_state["user"] = admin
+            res_admin = client.get(f"/metadata/applicable?inventory_id={inv.id}&include_inactive=true")
+            assert res_admin.status_code == 200
+            keys_admin = [item["key"] for item in res_admin.json()]
+            assert "active_field" in keys_admin
+            assert "inactive_field" in keys_admin, "Admin with include_inactive=True should see inactive definitions"
+
+            # 3. Admin con include_inactive=False: vede solo attive
+            res_admin_active = client.get(f"/metadata/applicable?inventory_id={inv.id}&include_inactive=false")
+            assert res_admin_active.status_code == 200
+            keys_admin_active = [item["key"] for item in res_admin_active.json()]
+            assert "active_field" in keys_admin_active
+            assert "inactive_field" not in keys_admin_active
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+            app.dependency_overrides[get_db] = override_get_db
 
 
 if __name__ == "__main__":

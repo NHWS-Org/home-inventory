@@ -755,7 +755,10 @@ def list_applicable_definitions(
     inventory = _get_inventory_or_404(db, inventory_id)
     if not can_access_inventory(user, inventory, action="view"):
         raise HTTPException(status_code=403, detail="Accesso negato")
-    return _resolve_applicable_definitions(db, inventory, include_inactive=include_inactive)
+    # Security: Defense-in-depth to prevent leaking inactive metadata definitions to non-admin users.
+    # Non-admin users are restricted to active definitions, matching GET /metadata/definitions behavior.
+    effective_include_inactive = include_inactive if user.role.name == RoleEnum.admin.value else False
+    return _resolve_applicable_definitions(db, inventory, include_inactive=effective_include_inactive)
 
 
 @router.get("/definitions/{definition_id}", response_model=MetadataDefinitionResponse)
