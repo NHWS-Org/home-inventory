@@ -41,6 +41,11 @@ services:
     build: ./backend
     container_name: inventory-backend
     restart: always
+    healthcheck:
+      interval: 5s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
     environment:
       <<: *common-environment
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
