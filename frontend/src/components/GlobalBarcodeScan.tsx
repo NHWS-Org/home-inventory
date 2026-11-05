@@ -240,8 +240,9 @@ export default function GlobalBarcodeScan() {
 
   const targetSelect = (
     <div className="mb-2">
-      <label className="block text-sm font-medium">Inventario / lista</label>
+      <label htmlFor="barcode-target" className="block text-sm font-medium">Inventario / lista</label>
       <select
+        id="barcode-target"
         className="w-full border rounded p-1 dark:bg-gray-800"
         value={targetKeySel}
         onChange={(e) => {
