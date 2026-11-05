@@ -1,13 +1,16 @@
+x-common-environment: &common-environment
+  TZ: ${TZ:-Europe/Rome}
+
 services:
   postgres:
     image: postgres:18
     container_name: inventory-db
     profiles: ["postgres"]
     environment:
+      <<: *common-environment
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
       POSTGRES_DB: ${POSTGRES_DB:-inventory}
-      TZ: Europe/Rome
     volumes:
       - /home/napalmz/docker-conf/home-inventory/pgdata18:/var/lib/postgresql
     healthcheck:
@@ -21,11 +24,11 @@ services:
     container_name: inventory-mysql
     profiles: ["mysql"]
     environment:
+      <<: *common-environment
       MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-admin}
       MARIADB_USER: ${MYSQL_USER:-admin}
       MARIADB_PASSWORD: ${MYSQL_PASSWORD:-admin}
       MARIADB_DATABASE: ${MYSQL_DATABASE:-inventory}
-      TZ: Europe/Rome
     volumes:
       - mysqldata:/var/lib/mysql
     healthcheck:
@@ -38,7 +41,7 @@ services:
     image: napalmzrpi/home-inventory-backend:latest
     container_name: inventory-backend
     environment:
-      TZ: Europe/Rome
+      <<: *common-environment
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
       DATABASE_URL: ${DATABASE_URL:-}
       FASTAPI_ROOT_PATH: /api
@@ -59,7 +62,7 @@ services:
       disable: true
     restart: unless-stopped
     environment:
-      TZ: Europe/Rome
+      <<: *common-environment
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
       DATABASE_URL: ${DATABASE_URL:-}
     volumes:
@@ -72,7 +75,7 @@ services:
     image: napalmzrpi/home-inventory-frontend:latest
     container_name: inventory-frontend
     environment:
-      TZ: Europe/Rome
+      <<: *common-environment
       BACKEND_BASE_URL: http://backend:8000
     ports:
       - "3000:80"

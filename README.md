@@ -98,6 +98,8 @@ Gli aggiornamenti senza modifiche effettive non creano nuove versioni: una descr
 
 Le differenze equivalenti presenti nello storico precedente non vengono mostrate nell'interfaccia. I record storici e gli snapshot usati per il ripristino non vengono modificati.
 
+La timezone di tutti i servizi, incluso il worker, e configurata una sola volta con `TZ` nel file `.env` della root (default `Europe/Rome`). Entrambi i Compose condividono la configurazione tramite un anchor YAML; una variabile `TZ` esportata nella shell prevale sul file.
+
 ### Notifiche (in sviluppo)
 
 La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). Le prime due fasi aggiungono contratti, tabelle e un worker DB opt-in (profilo Compose `notifications`); non inviano notifiche e non modificano l'interfaccia. Le regole saranno introdotte nella fase 3.
@@ -271,6 +273,8 @@ Checklist entries have a priority from **−2** (very low) to **+2** (very high)
 Updates with no effective changes do not create new versions: a `null` description and an empty string are equivalent, as are numeric metadata values with different formatting but the same value. Creations, deletions, and actual changes are still recorded.
 
 Equivalent differences in existing history are hidden in the interface. Historical records and snapshots used for restoration are not modified.
+
+All services, including the worker, use the `TZ` value configured once in the root `.env` file (default `Europe/Rome`). Both Compose files share it through a YAML anchor; an exported shell `TZ` overrides the file.
 
 ### Notifications (in development)
 

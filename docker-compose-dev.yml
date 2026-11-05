@@ -1,3 +1,6 @@
+x-common-environment: &common-environment
+  TZ: ${TZ:-Europe/Rome}
+
 services:
   postgres:
     image: postgres:18
@@ -5,10 +8,10 @@ services:
     profiles: ["postgres"]
     restart: always
     environment:
+      <<: *common-environment
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
       POSTGRES_DB: ${POSTGRES_DB:-inventory}
-      TZ: Europe/Rome
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
@@ -22,11 +25,11 @@ services:
     profiles: ["mysql"]
     restart: always
     environment:
+      <<: *common-environment
       MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-admin}
       MARIADB_USER: ${MYSQL_USER:-admin}
       MARIADB_PASSWORD: ${MYSQL_PASSWORD:-admin}
       MARIADB_DATABASE: ${MYSQL_DATABASE:-inventory}
-      TZ: Europe/Rome
     volumes:
       - mysqldata:/var/lib/mysql
     healthcheck:
@@ -39,7 +42,7 @@ services:
     container_name: inventory-backend
     restart: always
     environment:
-      TZ: Europe/Rome
+      <<: *common-environment
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
       DATABASE_URL: ${DATABASE_URL:-}
       FASTAPI_ROOT_PATH: /api
@@ -63,6 +66,7 @@ services:
       disable: true
     restart: unless-stopped
     environment:
+      <<: *common-environment
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
       DATABASE_URL: ${DATABASE_URL:-}
     env_file:
@@ -78,7 +82,7 @@ services:
     container_name: inventory-frontend
     restart: always
     environment:
-      TZ: Europe/Rome
+      <<: *common-environment
       BACKEND_BASE_URL: http://backend:8000
       APP_ENV_LABEL: LOCAL
     ports:
