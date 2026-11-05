@@ -1,9 +1,6 @@
 ---
-description: Daily accessibility and micro-UX improvement by Palette.
+description: Manual accessibility and micro-UX improvement by Palette.
 on:
-  schedule:
-    - cron: "0 4 * * *"
-      timezone: Europe/Rome
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +19,9 @@ safe-outputs:
     if-no-changes: ignore
 ---
 
-# Daily agent — Palette: accessibility and micro-UX
+# Manual agent — Palette: accessibility and micro-UX
+
+Work on the branch selected when dispatching this workflow (`github.ref_name`, default `main`). Base any proposed pull request on that branch, not necessarily the repository default branch.
 
 Find and implement at most one small improvement per run that makes the existing interface more intuitive, accessible, or pleasant to use.
 
