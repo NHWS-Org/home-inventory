@@ -15,10 +15,12 @@ from sqlalchemy import (
     UniqueConstraint,
     CheckConstraint,
     JSON,
+    Index,
 )
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base, Session
 from enum import Enum
+from uuid import uuid4
 
 Base = declarative_base()
 PortableString = String().with_variant(Text(), "mysql")
@@ -120,6 +122,64 @@ class DeviceSession(Base):
     revoked_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
+
+################################################
+class NotificationEvent(Base):
+    __tablename__ = "notification_events"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'completed', 'failed')",
+            name="ck_notification_events_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_notification_events_attempts"),
+        Index("ix_notification_events_pending", "status", "available_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    event_key = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid4()))
+    schema_version = Column(Integer, nullable=False, default=1, server_default="1")
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    status = Column(String(16), nullable=False, default="pending", server_default="pending")
+    available_at = Column(DateTime, server_default=func.now(), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+
+
+################################################
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", name="uq_notifications_event_user"),
+        Index("ix_notifications_user_unread", "user_id", "read_at", "id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    event_id = Column(
+        Integer, ForeignKey("notification_events.id", ondelete="CASCADE"), nullable=False,
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    read_at = Column(DateTime, nullable=True)
+
+
+################################################
+class NotificationPreference(Base, LoggingData):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (
+        UniqueConstraint("user_id", "event_type", name="uq_notification_preferences_user_event"),
+        CheckConstraint(
+            "event_type IN ('inventory_shared', 'item_quantity_changed', 'checklist_completed')",
+            name="ck_notification_preferences_event_type",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    event_type = Column(String(32), nullable=False)
+    in_app_enabled = Column(Boolean, nullable=False, default=True, server_default="1")
+    push_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
+    include_own_actions = Column(Boolean, nullable=False, default=False, server_default="0")
 
 ################################################
 class Group(Base, LoggingData):

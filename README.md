@@ -98,6 +98,10 @@ Gli aggiornamenti senza modifiche effettive non creano nuove versioni: una descr
 
 Le differenze equivalenti presenti nello storico precedente non vengono mostrate nell'interfaccia. I record storici e gli snapshot usati per il ripristino non vengono modificati.
 
+### Notifiche (in sviluppo)
+
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 1 aggiunge solo contratti e tabelle; non invia notifiche e non modifica l'interfaccia.
+
 ### Automazioni agentiche (GitHub Copilot)
 
 Tre workflow GitHub Agentic usano Copilot ogni notte: Sentinel alle **02:00**, Bolt alle **03:00** e Palette alle **04:00** (`Europe/Rome`). Puoi avviarli anche manualmente dalla scheda **Actions**. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
@@ -267,6 +271,10 @@ Checklist entries have a priority from **−2** (very low) to **+2** (very high)
 Updates with no effective changes do not create new versions: a `null` description and an empty string are equivalent, as are numeric metadata values with different formatting but the same value. Creations, deletions, and actual changes are still recorded.
 
 Equivalent differences in existing history are hidden in the interface. Historical records and snapshots used for restoration are not modified.
+
+### Notifications (in development)
+
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 1 only adds contracts and tables; it does not send notifications or change the interface.
 
 ### Agentic workflows (GitHub Copilot)
 
