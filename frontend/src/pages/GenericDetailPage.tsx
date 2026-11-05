@@ -1192,15 +1192,17 @@ useEffect(() => {
               {!isChecklist && <option value="quantity">Quantità</option>}
             </select>
             <button
+              type="button"
               onClick={() => {
                 const newOrder = sortOrder === 'asc' ? 'desc' : 'asc';
                 localStorage.setItem('item_sortOrder', newOrder);
                 setSortOrder(newOrder);
               }}
               className="min-h-10 min-w-10 rounded border px-2 sm:min-h-0 sm:min-w-0 sm:py-1"
+              aria-label={sortOrder === 'asc' ? 'Inverti ordine: passa a decrescente' : 'Inverti ordine: passa a crescente'}
               title={`Ordina in ordine ${sortOrder === 'asc' ? 'decrescente' : 'crescente'}`}
             >
-              {sortOrder === 'asc' ? '⬆️' : '⬇️'}
+              <span aria-hidden="true">{sortOrder === 'asc' ? '⬆️' : '⬇️'}</span>
             </button>
             <div className="w-full sm:w-auto">
               <div className="flex items-center gap-1.5 sm:gap-2">
@@ -1227,14 +1229,16 @@ useEffect(() => {
                   <option value="without">🏷️ Senza barcode</option>
                 </select>
                 <button
+                  type="button"
                   onClick={() => {
                     setFilterText('');
                     setBarcodeFilter('all');
                     window.history.replaceState(null, '', location.pathname);
                   }}
+                  aria-label="Cancella filtro"
                   className="min-h-10 min-w-10 rounded bg-gray-300 px-2 py-1 text-gray-700 dark:bg-gray-700 dark:text-gray-300 sm:min-w-0 sm:px-4 sm:py-2"
                 >
-                  <span className="inline sm:hidden">❌</span>
+                  <span className="inline sm:hidden" aria-hidden="true">❌</span>
                   <span className="hidden sm:inline">Cancella filtro</span>
                 </button>
               </div>
