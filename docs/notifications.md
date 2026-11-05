@@ -86,6 +86,72 @@ La migrazione supporta sia DB precedenti sia il bootstrap `create_all` eseguito
 prima di Alembic dall'entrypoint Docker. Il downgrade elimina solo le tre nuove
 tabelle (e i loro dati), non utenti, inventari o sessioni.
 
+## Fase 2: outbox e worker
+
+Branch: `notifications/54-outbox-worker`, PR verso il branch epic #38.
+Nessuna emissione dalle route, regola, nuova UI o notifica push in questa fase.
+
+- `enqueue_event(db, payload, actor_id=...)` aggiunge un evento validato alla
+  sessione del chiamante senza flush o commit autonomo. La chiave evento e un
+  UUID riutilizzabile per identificare duplicati; reinserirla causa un errore
+  di unicita e richiede il rollback del chiamante, non un successo fittizio.
+- Claim atomico tramite UPDATE condizionale; lease con token univoco di 60
+  secondi, recupero dopo crash e fencing dei worker obsoleti. Sono ammesse
+  piu istanze, ma solo una elabora un evento.
+- Elaborazione e completamento nella stessa transazione DB; un errore annulla
+  tutti gli effetti del gestore. Il gestore non deve fare commit/rollback,
+  chiamate di rete o invii esterni: i futuri invii richiederanno record di
+  consegna persistenti separati. La garanzia riguarda gli effetti DB, non
+  l'exactly-once di un provider esterno.
+- Errori temporanei dichiarati e OperationalError DB: massimo 5 tentativi,
+  backoff di 30/60/120/240 secondi. Errori non recuperabili, payload/versioni
+  non validi, tentativi esauriti o eventi scaduti diventano `failed`.
+- Gli eventi creati dal servizio scadono dopo 7 giorni. I record precedenti con
+  scadenza NULL rimangono compatibili. Errori registrati come codici e classe,
+  mai con payload o testi dell'eccezione.
+- La migrazione `b2c3d4e5f6a7` aggiunge lease, scadenza e ultimo errore,
+  rispettando il bootstrap create_all e consentendo downgrade.
+- Il restore svuota inbox/outbox esistenti, anche dell'admin preservato, e non
+  importa gli eventi del backup: nessun replay dopo ripristino. Se il restore
+  fallisce, il rollback preserva la coda precedente.
+
+Il processo worker e separato dall'API e da APScheduler: nessuna istanza
+duplicata causata da uvicorn reload. Il profilo Compose `notifications` e opt-in
+e aspetta il backend healthy prima di partire; il worker non applica migrazioni.
+Per produzione serve un'immagine backend costruita da questa fase, non una
+vecchia immagine `latest` priva del modulo.
+
+**Limite intenzionale:** il gestore regole sara introdotto nella fase 3.
+Ora il worker resta in attesa con coda vuota; un evento inserito manualmente
+viene registrato come errore temporaneo, ritentato e infine fallisce
+esplicitamente. Non viene marcato completato senza elaborazione.
+
+### Test manuali fase 2
+
+Con backup preventivo, usare il branch fase 2 e avviare:
+
+```sh
+docker compose -f docker-compose-dev.yml --profile notifications up --build -d
+docker compose -f docker-compose-dev.yml logs --tail=80 notification-worker
+docker compose -f docker-compose-dev.yml exec notification-worker python -m notification_worker --status
+```
+
+Atteso: migrazione completata dal backend, worker attivo e avviso esplicito
+che le regole non sono ancora abilitate, coda vuota salvo eventi sintetici.
+Verificare desktop/iOS: login, modifica quantita, liste, sessioni profilo,
+backup e restore da 1.5.0. Nessuna differenza visiva o richiesta permessi.
+Riavviare solo il worker e controllare che l'app rimanga funzionante:
+
+```sh
+docker compose -f docker-compose-dev.yml restart notification-worker
+```
+
+I test automatici simulano claim simultanei su SQLite file-backed, doppia
+elaborazione, crash/lease scaduta, fencing, rollback degli effetti, retry
+limitati, scadenza, duplicati e restore. Il DDL viene compilato anche per
+PostgreSQL/MySQL; non equivale a test runtime di concorrenza su questi motori.
+Fermarsi prima della fase 3 per i test e l'approvazione dell'utente.
+
 ## Verifica e stop dopo la fase 1
 
 Test automatici:

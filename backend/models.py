@@ -144,6 +144,10 @@ class NotificationEvent(Base):
     status = Column(String(16), nullable=False, default="pending", server_default="pending")
     available_at = Column(DateTime, server_default=func.now(), nullable=False)
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    lease_token = Column(String(36), nullable=True)
+    leased_until = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    last_error = Column(String(64), nullable=True)
 
 
 ################################################

@@ -165,8 +165,8 @@ def test_duplicate_preference_and_event_key_rejected(engine):
             db.flush()
 
 
-def load_migration():
-    spec = importlib.util.spec_from_file_location("notification_foundations_migration", MIGRATION)
+def load_migration(path=MIGRATION):
+    spec = importlib.util.spec_from_file_location("notification_foundations_migration", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -175,6 +175,9 @@ def load_migration():
 @pytest.mark.parametrize("already_bootstrapped", [False, True])
 def test_migration_upgrade_matches_models_and_downgrade_preserves_users(engine, already_bootstrapped):
     migration = load_migration()
+    worker_migration = load_migration(
+        MIGRATION.parent / "b2c3d4e5f6a7_notification_worker_leases.py",
+    )
     if not already_bootstrapped:
         for name in ("notifications", "notification_preferences", "notification_events"):
             Base.metadata.tables[name].drop(engine)
@@ -186,7 +189,10 @@ def test_migration_upgrade_matches_models_and_downgrade_preserves_users(engine, 
         with Operations.context(context):
             migration.upgrade()
             migration.upgrade()
+            worker_migration.upgrade()
+            worker_migration.upgrade()
             assert compare_metadata(context, Base.metadata) == []
+            worker_migration.downgrade()
             migration.downgrade()
         assert not TABLES.intersection(inspect(connection).get_table_names())
         assert connection.execute(select(User.username)).scalar_one() == "member"
@@ -233,6 +239,8 @@ def test_alembic_cli_bootstrap_upgrade_downgrade(tmp_path, bootstrap_current_mod
         old_engine.dispose()
     run("-m", "alembic", "stamp", "9b0c1d2e3f4a")
     run("-m", "alembic", "upgrade", "head")
+    run("-m", "notification_worker", "--status")
+    run("-m", "notification_worker", "--once")
     run("-m", "alembic", "downgrade", "9b0c1d2e3f4a")
     run("-m", "alembic", "upgrade", "head")
     migrated_engine = create_engine(environment["DATABASE_URL"])
@@ -241,7 +249,7 @@ def test_alembic_cli_bootstrap_upgrade_downgrade(tmp_path, bootstrap_current_mod
         with migrated_engine.connect() as connection:
             assert connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
-            ).scalar_one() == "a0b1c2d3e4f5"
+            ).scalar_one() == "b2c3d4e5f6a7"
     finally:
         migrated_engine.dispose()
 
