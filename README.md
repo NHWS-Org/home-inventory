@@ -100,7 +100,7 @@ Le differenze equivalenti presenti nello storico precedente non vengono mostrate
 
 ### Notifiche (in sviluppo)
 
-La feature e in sviluppo per fasi su `release/1.6.0`: [piano, stato e test manuali](docs/notifications.md). La fase 1 aggiunge solo contratti e tabelle; non invia notifiche e non modifica l'interfaccia.
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 1 aggiunge solo contratti e tabelle; non invia notifiche e non modifica l'interfaccia.
 
 ### Automazioni agentiche (GitHub Copilot)
 
@@ -274,7 +274,7 @@ Equivalent differences in existing history are hidden in the interface. Historic
 
 ### Notifications (in development)
 
-The feature is being developed in gated phases on `release/1.6.0`: [plan, status and manual checks (Italian)](docs/notifications.md). Phase 1 only adds contracts and tables; it does not send notifications or change the interface.
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 1 only adds contracts and tables; it does not send notifications or change the interface.
 
 ### Agentic workflows (GitHub Copilot)
 

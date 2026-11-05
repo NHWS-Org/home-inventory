@@ -1,9 +1,12 @@
 # Notifiche: sviluppo per fasi
 
 Epic: [#38](https://github.com/NHWS-Org/home-inventory/issues/38).
-Tutte le PR sono destinate a `release/1.6.0`, mai direttamente a `main`.
+Tutte le PR delle sub-issue sono destinate al branch dell'epic
+`38-feature-device-notification-on-logged-device`, mai direttamente alla release
+o a `main`. I branch delle fasi successive partono dal branch epic aggiornato.
 Ogni fase si ferma dopo test automatici e PR, in attesa dei test e
-dell'approvazione dell'utente. Il branch iniziale della feature rimane intatto.
+dell'approvazione dell'utente. Solo dopo il completamento e la validazione di
+tutte e sette le fasi, una PR porta il branch epic in `release/1.6.0`.
 
 ## Decisioni approvate
 
