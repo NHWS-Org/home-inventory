@@ -152,6 +152,26 @@ l'amministrazione delle regole usa Swagger, in attesa dell'editor della fase 6.
 
 ### Test manuale fase 3 (desktop e iOS)
 
+Smoke test automatico contro l'istanza avviata (API reali esposte da Swagger):
+
+```sh
+export NOTIFICATION_TEST_USERNAME=admin
+read -rs NOTIFICATION_TEST_PASSWORD
+export NOTIFICATION_TEST_PASSWORD
+backend/.venv/bin/python backend/.test/notification_live.py --api-url http://localhost:3000/api
+unset NOTIFICATION_TEST_PASSWORD NOTIFICATION_TEST_USERNAME
+```
+
+Il comando `read` attende la password senza mostrarla (shell bash/zsh).
+Lo script e opt-in, non entra nella discovery pytest e richiede il worker attivo.
+Crea tre utenti temporanei con password casuali, un inventario e una checklist;
+verifica soglie/riarmo, azioni proprie, preferenze, regole CRUD, sharing,
+revoca, lettura e completamento. Attende fino a 30 secondi per la consegna e
+osserva per almeno 6 secondi i casi senza notifiche. Ripulisce le fixture anche
+in caso di errore e verifica la rimozione; non modifica le preferenze degli
+account esistenti. Restano le normali tracce audit/outbox e la sessione admin
+di test revocata al termine. Non esegue restore distruttivi, test browser o push.
+
 1. Backup preventivo e branch fase 3; ricostruire usando Compose Up da VS Code
    con `COMPOSE_PROFILES=notifications` nel file `.env`, oppure:
 
