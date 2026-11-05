@@ -104,6 +104,8 @@ La timezone di tutti i servizi, incluso il worker, e configurata una sola volta 
 
 La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). Nessuna regola viene preattivata; UI e push non sono ancora disponibili.
 
+Le notifiche quantita accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Anche il completamento checklist attende questa finestra. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
+
 ### Automazioni agentiche (GitHub Copilot)
 
 Tre workflow GitHub Agentic usano Copilot ogni notte: Sentinel alle **02:00**, Bolt alle **03:00** e Palette alle **04:00** (`Europe/Rome`). Puoi avviarli anche manualmente dalla scheda **Actions**. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
@@ -279,6 +281,8 @@ All services, including the worker, use the `TZ` value configured once in the ro
 ### Notifications (in development)
 
 The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). No rules are enabled automatically; UI and push are not available yet.
+
+Quantity notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. Checklist completion also waits for this window. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
 
 ### Agentic workflows (GitHub Copilot)
 

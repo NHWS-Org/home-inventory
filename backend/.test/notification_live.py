@@ -4,12 +4,17 @@ import argparse
 from contextlib import ExitStack
 import json
 import os
+from pathlib import Path
 import secrets
+import sys
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import uuid
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 
 
 class API:
@@ -168,7 +173,9 @@ def run(api: API, username: str, password: str, timeout: float, quiet_window: fl
         unchanged(owner, inventory, 0, "own actions excluded by default")
         preference(quantity_kind)
         update(stock, 5)
+        unchanged(owner, inventory, 0, "recovery settles before new threshold crossing")
         update(stock, 2)
+        check(inbox(owner, inventory) == [], "threshold notification waits for grace period")
         rows = expect_count(owner, inventory, 1, "worker delivers threshold crossing")
         check(
             rows[0]["event"]["previous_quantity"] == 5
@@ -179,6 +186,7 @@ def run(api: API, username: str, password: str, timeout: float, quiet_window: fl
         update(stock, 1)
         unchanged(owner, inventory, 1, "below-threshold decrease and no-op do not duplicate")
         update(stock, 5)
+        unchanged(owner, inventory, 1, "recovery must stabilize before rearming")
         update(stock, 2)
         rows = expect_count(owner, inventory, 2, "recovery rearms threshold")
         notification_id = rows[0]["id"]
@@ -192,15 +200,19 @@ def run(api: API, username: str, password: str, timeout: float, quiet_window: fl
         api.request("PUT", read_path, token=stranger, expected=404)
         check(True, "other account cannot mark someone else's notification read")
         preference(quantity_kind, enabled=False)
-        update(stock, 5)
-        update(stock, 2)
+        muted_stock = item(inventory, "Muted stock", 5)
+        update(muted_stock, 2)
         unchanged(owner, inventory, 2, "disabled inbox preference suppresses delivery")
         preference(quantity_kind)
         api.request("PUT", rule_path, token=owner, body={**payload, "enabled": False})
-        update(stock, 5)
-        update(stock, 2)
+        disabled_stock = item(inventory, "Disabled stock", 5)
+        update(disabled_stock, 2)
         unchanged(owner, inventory, 2, "disabled rule suppresses delivery")
         api.request("PUT", rule_path, token=owner, body=payload)
+        corrected_stock = item(inventory, "Corrected stock", 5)
+        update(corrected_stock, 2)
+        update(corrected_stock, 5)
+        unchanged(owner, inventory, 2, "return to initial quantity cancels notification")
 
         rule(inventory, "inventory_shared", [{"kind": "event_recipient"}])
         share_path = f"/inventory/share/{inventory}/{recipient_name}"
@@ -229,6 +241,10 @@ def run(api: API, username: str, password: str, timeout: float, quiet_window: fl
         update(second, 0)
         update(second, 1)
         expect_count(owner, checklist, 2, "uncheck and recheck emits a new completion")
+        update(first, 0)
+        update(first, 1)
+        update(first, 0)
+        unchanged(owner, checklist, 2, "uncheck during completion grace cancels notification")
         api.request("DELETE", rule_path, token=owner)
         remaining = api.request("GET", f"/notifications/rules/{inventory}", token=owner)
         check(
@@ -244,15 +260,15 @@ def run(api: API, username: str, password: str, timeout: float, quiet_window: fl
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-url", default="http://localhost:3000/api")
-    parser.add_argument("--timeout", type=float, default=30)
-    parser.add_argument("--quiet-window", type=float, default=6)
+    parser.add_argument("--timeout", type=float, default=QUANTITY_MERGE_WINDOW_SECONDS + 15)
+    parser.add_argument("--quiet-window", type=float, default=QUANTITY_MERGE_WINDOW_SECONDS + 4)
     args = parser.parse_args()
     username = os.environ.get("NOTIFICATION_TEST_USERNAME")
     password = os.environ.get("NOTIFICATION_TEST_PASSWORD")
     if not username or not password:
         parser.error("Set NOTIFICATION_TEST_USERNAME and NOTIFICATION_TEST_PASSWORD")
-    if args.timeout <= 0 or args.quiet_window < 6:
-        parser.error("timeout must be positive; quiet-window must be at least 6 seconds")
+    if args.timeout <= QUANTITY_MERGE_WINDOW_SECONDS or args.quiet_window <= QUANTITY_MERGE_WINDOW_SECONDS:
+        parser.error("timeout and quiet-window must exceed the shared quantity grace period")
     run(API(args.api_url), username, password, args.timeout, args.quiet_window)
 
 

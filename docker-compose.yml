@@ -59,7 +59,11 @@ services:
     profiles: ["notifications"]
     entrypoint: ["python", "-m", "notification_worker"]
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "-m", "notification_worker", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
     environment:
       <<: *common-environment

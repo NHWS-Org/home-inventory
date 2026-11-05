@@ -5,10 +5,11 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, object_session
 
 from models import Item, ListAssignment, User
+from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 from schemas import AssignmentResponse, ItemAssignmentSummary
 
 # Finestra entro cui togliere la spunta ripristina lo stock (stessa del merge delle versioni)
-UNDO_WINDOW_SECONDS = 45
+UNDO_WINDOW_SECONDS = QUANTITY_MERGE_WINDOW_SECONDS
 
 
 def _utc_now_naive() -> datetime:

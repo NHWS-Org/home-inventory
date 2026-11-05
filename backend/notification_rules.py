@@ -1,4 +1,5 @@
 from typing import Literal
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,7 +12,8 @@ from notification_contracts import (
     ChecklistCompletedData, InventorySharedData, ItemQuantityChangedData,
     NotificationRuleInput, notification_event_adapter,
 )
-from notification_outbox import enqueue_event
+from notification_outbox import enqueue_event, utcnow
+from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 
 
 def can_receive(user: User, inventory: Inventory) -> bool:
@@ -41,7 +43,10 @@ def emit_share(
         ), actor_id=actor_id)
 
 
-def emit_item_change(db: Session, item: Item, previous: dict, actor_id: int) -> None:
+def emit_item_change(
+    db: Session, item: Item, previous: dict, actor_id: int, *,
+    now: datetime | None = None, merge_previous_at: datetime | None = None,
+) -> None:
     old = previous.get("quantity") or 0
     new = item.quantity or 0
     if old == new or previous["inventory_id"] != item.inventory_id:
@@ -49,20 +54,63 @@ def emit_item_change(db: Session, item: Item, previous: dict, actor_id: int) -> 
     inventory = db.get(Inventory, item.inventory_id)
     if inventory is None:
         return
+    current = now or utcnow()
+    available_at = current + timedelta(seconds=QUANTITY_MERGE_WINDOW_SECONDS)
     if inventory.type == "INVENTORY" and configured(db, inventory.id, "item_quantity_changed"):
-        enqueue_event(db, ItemQuantityChangedData(
-            inventory_id=inventory.id, item_id=item.id, previous_quantity=old, quantity=new,
-        ), actor_id=actor_id)
-    if (
-        inventory.type == "CHECKLIST" and old < 1 <= new
-        and configured(db, inventory.id, "checklist_completed")
-    ):
+        pending = None
+        if merge_previous_at is not None:
+            pending = db.scalar(select(NotificationEvent).where(
+                NotificationEvent.status == "pending",
+                NotificationEvent.attempts == 0,
+                NotificationEvent.actor_id == actor_id,
+                NotificationEvent.payload["event_type"].as_string() == "item_quantity_changed",
+                NotificationEvent.payload["item_id"].as_integer() == item.id,
+                NotificationEvent.payload["inventory_id"].as_integer() == inventory.id,
+                NotificationEvent.available_at == merge_previous_at + timedelta(
+                    seconds=QUANTITY_MERGE_WINDOW_SECONDS,
+                ),
+                NotificationEvent.available_at >= current,
+            ).with_for_update())
+        initial = pending.payload["previous_quantity"] if pending is not None else old
+        if initial == new:
+            if pending is not None:
+                db.delete(pending)
+            return
+        data = ItemQuantityChangedData(
+            inventory_id=inventory.id, item_id=item.id, previous_quantity=initial, quantity=new,
+        )
+        if pending is None:
+            pending = enqueue_event(db, data, actor_id=actor_id, now=current)
+        else:
+            pending.payload = data.model_dump(mode="json")
+        pending.available_at = available_at
+    if inventory.type == "CHECKLIST":
+        pending_completions = db.scalars(select(NotificationEvent).where(
+            NotificationEvent.status == "pending",
+            NotificationEvent.attempts == 0,
+            NotificationEvent.payload["event_type"].as_string() == "checklist_completed",
+            NotificationEvent.payload["inventory_id"].as_integer() == inventory.id,
+            NotificationEvent.available_at >= current,
+        ).with_for_update()).all()
         with db.no_autoflush:
             others = db.scalars(select(Item).where(
                 Item.inventory_id == inventory.id, Item.id != item.id,
             )).all()
-        if all((other.quantity or 0) >= 1 for other in others):
-            enqueue_event(db, ChecklistCompletedData(inventory_id=inventory.id), actor_id=actor_id)
+        complete = new >= 1 and all((other.quantity or 0) >= 1 for other in others)
+        for pending in pending_completions:
+            if complete:
+                pending.available_at = available_at
+            else:
+                db.delete(pending)
+        if (
+            complete and old < 1 <= new and not pending_completions
+            and configured(db, inventory.id, "checklist_completed")
+        ):
+            pending = enqueue_event(
+                db, ChecklistCompletedData(inventory_id=inventory.id),
+                actor_id=actor_id, now=current,
+            )
+            pending.available_at = available_at
 
 
 def group_users(db: Session, group_id: int) -> set[int]:

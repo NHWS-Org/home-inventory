@@ -1,4 +1,5 @@
 import pytest
+from datetime import timedelta
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -18,6 +19,7 @@ from models import (
 )
 from notification_outbox import claim_event, process_claim, utcnow
 from notification_rules import emit_item_change
+from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 from routes.inventory import share_base, share_with_group_base
 from routes.notifications import router
 
@@ -89,8 +91,9 @@ def create_rule(client, inventory=1, **values):
 
 
 def process_all(factory):
-    while (claim := claim_event(factory)) is not None:
-        assert process_claim(factory, claim)
+    now = utcnow() + timedelta(seconds=QUANTITY_MERGE_WINDOW_SECONDS)
+    while (claim := claim_event(factory, now=now)) is not None:
+        assert process_claim(factory, claim, now=now)
 
 
 def quantity_change(factory, old, new, actor=1):
@@ -278,7 +281,7 @@ def test_preference_defaults_and_bad_inputs(setup):
     }).status_code == 422
 
 
-def test_real_item_update_emits_before_audit_merge_and_ignores_noop(setup):
+def test_real_item_update_merges_notifications_with_audit_and_ignores_noop(setup):
     from routes.item import update_item
     from schemas import ItemUpdate
 
@@ -292,7 +295,10 @@ def test_real_item_update_emits_before_audit_merge_and_ignores_noop(setup):
             ), db=db, user=user)
     process_all(factory)
     with factory() as db:
-        assert len(db.scalars(select(NotificationEvent)).all()) == 2
+        records = db.scalars(select(NotificationEvent)).all()
+        assert len(records) == 1
+        assert records[0].payload["previous_quantity"] == 5
+        assert records[0].payload["quantity"] == 1
         assert len(db.scalars(select(Notification)).all()) == 2
 
 
@@ -468,3 +474,149 @@ def test_disabled_rule_does_not_emit_and_restore_removes_rules(setup):
         _restore_backup_rows(db, {}, RestoreRequest(confirm=True), {})
         db.commit()
         assert db.scalars(select(NotificationRule)).all() == []
+
+
+@pytest.mark.parametrize("changes,expected", [
+    ([(0, 2), (10, 1)], (5, 1)),
+    ([(0, 4), (10, 2)], (5, 2)),
+    ([(0, 2), (10, 4)], (5, 4)),
+    ([(0, 2), (10, 5)], None),
+    ([(0, 2), (10, 5), (11, 1)], (5, 1)),
+])
+def test_quantity_grace_matches_audit_net_change(setup, monkeypatch, changes, expected):
+    from models import ItemVersion
+    from routes import item as item_routes
+    from schemas import ItemUpdate
+
+    factory, client, _ = setup
+    create_rule(client)
+    start = utcnow()
+    for offset, quantity in changes:
+        now = start + timedelta(seconds=offset)
+        monkeypatch.setattr(item_routes, "_utc_now_naive", lambda: now)
+        with factory() as db:
+            item_routes.update_item(1, ItemUpdate(
+                name="Rice", description=None, inventory_id=1, quantity=quantity,
+            ), on_insufficient=None, db=db, user=db.get(User, 1))
+    due = now + timedelta(seconds=QUANTITY_MERGE_WINDOW_SECONDS)
+    assert claim_event(factory, now=due - timedelta(microseconds=1)) is None
+    with factory() as db:
+        events = db.scalars(select(NotificationEvent)).all()
+        versions = db.scalars(select(ItemVersion)).all()
+        if expected is None:
+            assert events == versions == []
+        else:
+            assert len(events) == len(versions) == 1
+            assert events[0].available_at == due
+            assert (
+                events[0].payload["previous_quantity"], events[0].payload["quantity"],
+            ) == expected
+    claim = claim_event(factory, now=due)
+    if expected is None:
+        assert claim is None
+    else:
+        assert claim is not None
+        assert process_claim(factory, claim, now=due)
+    with factory() as db:
+        assert len(db.scalars(select(Notification)).all()) == (
+            2 if expected is not None and expected[0] >= 3 > expected[1] else 0
+        )
+
+
+@pytest.mark.parametrize("offset,actor", [
+    (QUANTITY_MERGE_WINDOW_SECONDS + 1, 1),
+    (1, 5),
+])
+def test_quantity_notifications_do_not_merge_separate_audit_windows(
+    setup, monkeypatch, offset, actor,
+):
+    from routes import item as item_routes
+    from schemas import ItemUpdate
+
+    factory, client, _ = setup
+    create_rule(client)
+    start = utcnow()
+    for elapsed, user_id, quantity in [(0, 1, 2), (offset, actor, 1)]:
+        now = start + timedelta(seconds=elapsed)
+        monkeypatch.setattr(item_routes, "_utc_now_naive", lambda: now)
+        with factory() as db:
+            item_routes.update_item(1, ItemUpdate(
+                name="Rice", description=None, inventory_id=1, quantity=quantity,
+            ), on_insufficient=None, db=db, user=db.get(User, user_id))
+    with factory() as db:
+        assert len(db.scalars(select(NotificationEvent)).all()) == 2
+
+
+def test_completion_grace_cancelled_by_uncheck_and_rearmed(setup):
+    factory, client, _ = setup
+    create_rule(client, inventory=2, event_type="checklist_completed", threshold=None)
+    start = utcnow()
+
+    def change(item_id, quantity, offset):
+        with factory.begin() as db:
+            item = db.get(Item, item_id)
+            old = item.quantity
+            item.quantity = quantity
+            emit_item_change(
+                db, item, {"quantity": old, "inventory_id": 2}, 1,
+                now=start + timedelta(seconds=offset),
+            )
+
+    change(2, 1, 0)
+    change(3, 1, 1)
+    assert claim_event(factory, now=start + timedelta(seconds=2)) is None
+    change(2, 0, 2)
+    with factory() as db:
+        assert db.scalars(select(NotificationEvent)).all() == []
+    change(2, 1, 3)
+    due = start + timedelta(seconds=3 + QUANTITY_MERGE_WINDOW_SECONDS)
+    assert claim_event(factory, now=due - timedelta(microseconds=1)) is None
+    claim = claim_event(factory, now=due)
+    assert claim is not None
+    assert process_claim(factory, claim, now=due)
+    with factory() as db:
+        assert len(db.scalars(select(Notification)).all()) == 2
+
+
+def test_quantity_noop_does_not_extend_grace_and_rollback_preserves_event(setup, monkeypatch):
+    from routes import item as item_routes
+    from schemas import ItemUpdate
+
+    factory, client, _ = setup
+    create_rule(client)
+    start = utcnow()
+    monkeypatch.setattr(item_routes, "_utc_now_naive", lambda: start)
+    with factory() as db:
+        item_routes.update_item(1, ItemUpdate(
+            name="Rice", description=None, inventory_id=1, quantity=2,
+        ), on_insufficient=None, db=db, user=db.get(User, 1))
+    later = start + timedelta(seconds=10)
+    monkeypatch.setattr(item_routes, "_utc_now_naive", lambda: later)
+    with factory() as db:
+        item_routes.update_item(1, ItemUpdate(
+            name="Rice", description=None, inventory_id=1, quantity=2,
+        ), on_insufficient=None, db=db, user=db.get(User, 1))
+    with factory() as db:
+        item = db.get(Item, 1)
+        previous = item_routes._snapshot_item(item)
+        item.quantity = 5
+        item_routes._write_item_version(db, item, "UPDATE", db.get(User, 1), previous)
+        db.flush()
+        db.rollback()
+    with factory() as db:
+        record = db.scalars(select(NotificationEvent)).one()
+        assert record.payload["quantity"] == db.get(Item, 1).quantity == 2
+        assert record.available_at == start + timedelta(seconds=QUANTITY_MERGE_WINDOW_SECONDS)
+
+
+def test_quantity_grace_constant_shared_with_history_and_assignment_undo():
+    import assignment_service
+    import notification_rules
+    from routes import item
+
+    assert (
+        item.QUANTITY_MERGE_WINDOW_SECONDS
+        == notification_rules.QUANTITY_MERGE_WINDOW_SECONDS
+        == assignment_service.UNDO_WINDOW_SECONDS
+        == QUANTITY_MERGE_WINDOW_SECONDS
+    )

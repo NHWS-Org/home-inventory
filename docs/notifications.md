@@ -112,13 +112,25 @@ La migrazione `c4d5e6f7a8b9` aggiunge `notification_rules`, con audit
   escluse. Le azioni proprie si includono solo con consenso personale.
 - Quantita: solo INVENTORY, soglia intera; evento corrispondente quando
   `previous_quantity >= threshold > quantity`. Altri cali sotto soglia non
-  avvisano. Dopo recupero almeno alla soglia, un nuovo attraversamento avvisa.
+  avvisano. Le correzioni accorpabili dalla cronologia (stesso item, stesso
+  utente, sole quantita) condividono un unico evento pendente con variazione
+  netta e scadenza mobile: 45 secondi dall'ultima modifica effettiva.
+  Il valore e definito solo in `backend/quantity_changes.py` e importato da
+  cronologia, notifiche e annullamento scarico delle assegnazioni.
+  Tornare al valore iniziale entro la finestra elimina l'evento pendente,
+  come la versione audit; anche un rimbalzo sopra soglia prima della scadenza
+  non produce un falso allarme. Un no-op non prolunga la finestra.
+  Dopo recupero almeno alla soglia stabilizzato per la finestra, un nuovo
+  attraversamento avvisa. Utenti diversi e versioni non accorpabili restano
+  eventi separati, come nella cronologia. Eventi gia elaborati non si ritirano.
 - Completamento: solo CHECKLIST, transizione di una riga da non spuntata a
   spuntata quando tutte le altre righe sono gia spuntate. Una lista vuota,
   creazioni/cancellazioni righe e aggiornamenti senza cambiamenti non generano
-  completamento. Togliere una spunta riabilita una futura transizione.
+  completamento. Anche questo evento attende la stessa finestra di quantita:
+  togliere una spunta prima della scadenza annulla il completamento pendente;
+  ricompletare la lista avvia una nuova finestra.
 - Aggiornamento quantita e assegnazioni (scarico/ripristino stock) emettono
-  eventi prima dell'accorpamento delle versioni audit, nella transazione della
+  eventi coerenti con l'accorpamento delle versioni audit, nella transazione della
   modifica. Anche il rollback di una versione di un item esistente passa da
   questo punto comune. Spostamenti tra contenitori e ricreazioni non vengono
   interpretati come attraversamenti della soglia nel nuovo contenitore.
@@ -133,6 +145,26 @@ La migrazione `c4d5e6f7a8b9` aggiunge `notification_rules`, con audit
 - Il restore svuota anche le regole, non solo inbox/outbox, senza importare
   quelle del backup: richiede riconfigurazione esplicita, senza invii accidentali
   o destinatari non piu validi.
+
+### Monitoraggio worker
+
+Entrambi i Compose eseguono `python -m notification_worker --healthcheck`
+ogni 10 secondi, con timeout 5 secondi, 30 secondi di tolleranza iniziale e
+3 fallimenti prima dello stato unhealthy. Non e un controllo HTTP dell'API:
+verifica PID vivo, heartbeat del ciclo di lavoro aggiornato da non oltre
+120 secondi e query sulla tabella outbox. L'heartbeat e locale al container,
+non condiviso tra repliche; viene scritto atomicamente dopo ogni iterazione
+completata e rimosso all'arresto regolare. La coda vuota e uno stato sano.
+Un worker bloccato non aggiorna l'heartbeat. Il controllo non richiede una
+coda vuota e non misura la consegna push; Docker segnala unhealthy ma non
+riavvia automaticamente un processo ancora vivo per il solo healthcheck.
+
+Nei log sono presenti avvio, ID ed esito delle elaborazioni e codici/classi
+degli errori, senza payload o dati privati. `completed` significa regole
+valutate: possono essere create zero notifiche per preferenze o autorizzazioni.
+`python -m notification_worker --status` mostra i conteggi della coda.
+Per applicare l'healthcheck ricreare il servizio worker; in produzione serve
+anche un'immagine contenente il nuovo comando, non una vecchia `latest`.
 
 ### API fase 3
 
@@ -166,8 +198,11 @@ Il comando `read` attende la password senza mostrarla (shell bash/zsh).
 Lo script e opt-in, non entra nella discovery pytest e richiede il worker attivo.
 Crea tre utenti temporanei con password casuali, un inventario e una checklist;
 verifica soglie/riarmo, azioni proprie, preferenze, regole CRUD, sharing,
-revoca, lettura e completamento. Attende fino a 30 secondi per la consegna e
-osserva per almeno 6 secondi i casi senza notifiche. Ripulisce le fixture anche
+revoca, lettura e completamento. I timeout derivano dalla stessa costante di
+grace: finestra + 15 secondi per la consegna, finestra + 4 per i casi senza
+notifiche. Include ritorno al valore iniziale e annullamento completamento;
+il test completo dura diversi minuti per verificare il tempo reale senza
+abbreviare la finestra. Ripulisce le fixture anche
 in caso di errore e verifica la rimozione; non modifica le preferenze degli
 account esistenti. Restano le normali tracce audit/outbox e la sessione admin
 di test revocata al termine. Non esegue restore distruttivi, test browser o push.
@@ -202,10 +237,15 @@ di test revocata al termine. Non esegue restore distruttivi, test browser o push
    {"in_app_enabled": true, "include_own_actions": true}
    ```
 
-6. Dalla normale interfaccia portare una quantita a 5, poi a 2. Dopo alcuni
-   secondi GET `/notifications` deve contenere un evento con `5 -> 2`.
-   Portarla a 1: non deve aggiungere un avviso. Portarla a 5 e poi a 2:
-   deve comparire un secondo avviso. Ripetere senza cambiamenti: nessun duplicato.
+6. Usare un articolo inizialmente a 5 (oppure portarlo a 5 e attendere la
+   finestra), poi portarlo a 2. Prima di 45 secondi non deve esserci una nuova
+   notifica; dopo 45 secondi dall'ultima modifica, piu il polling worker,
+   GET `/notifications` deve contenere un evento con `5 -> 2`.
+   Portarla a 1: non deve aggiungere un avviso. Portarla a 5, attendere oltre
+   45 secondi, poi a 2 e attendere di nuovo: deve comparire un secondo avviso.
+   Su un altro articolo inizialmente a 5, fare 5 -> 2 -> 5 entro la finestra:
+   dopo la scadenza non deve esserci una notifica ne una versione audit residua.
+   Ripetere senza cambiamenti: nessun duplicato.
 7. PUT `/notifications/{id}/read` deve valorizzare `read_at`. Disattivare la
    preferenza inbox e ripetere il ciclo: nessuna nuova notifica.
 8. Per condivisioni, creare una regola con event_type `inventory_shared`,
@@ -214,8 +254,9 @@ di test revocata al termine. Non esegue restore distruttivi, test browser o push
    di un estraneo; ripetere una condivisione gia esistente non genera duplicati.
 9. Per una checklist di prova, creare regola `checklist_completed`, threshold
    `null`, recipients `[{"kind":"owner"}]`; spuntare tutte le righe con un altro
-   account autorizzato. Avviso solo all'ultima spunta. Togliere/rimettere una
-   spunta abilita un nuovo avviso; la stessa azione senza cambiamento no.
+   account autorizzato. Avviso solo dopo la finestra dall'ultima spunta.
+   Togliere una spunta prima della scadenza deve annullare l'avviso pendente.
+   Ricompletare e attendere abilita un nuovo avviso; un no-op no.
 10. Revocare accesso a un destinatario: le vecchie notifiche relative alla
     risorsa non devono piu comparire; un estraneo non puo leggerle per ID.
 11. Verificare login, sessioni profilo e backup/ripristino 1.5.0 come regressione.
