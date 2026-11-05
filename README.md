@@ -100,7 +100,7 @@ Le differenze equivalenti presenti nello storico precedente non vengono mostrate
 
 ### Notifiche (in sviluppo)
 
-La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 1 aggiunge solo contratti e tabelle; non invia notifiche e non modifica l'interfaccia.
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). Le prime due fasi aggiungono contratti, tabelle e un worker DB opt-in (profilo Compose `notifications`); non inviano notifiche e non modificano l'interfaccia. Le regole saranno introdotte nella fase 3.
 
 ### Automazioni agentiche (GitHub Copilot)
 
@@ -274,7 +274,7 @@ Equivalent differences in existing history are hidden in the interface. Historic
 
 ### Notifications (in development)
 
-The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 1 only adds contracts and tables; it does not send notifications or change the interface.
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). The first two phases add contracts, tables and an opt-in DB worker (Compose profile `notifications`); they do not send notifications or change the interface. Rules arrive in phase 3.
 
 ### Agentic workflows (GitHub Copilot)
 

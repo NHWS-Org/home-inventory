@@ -55,6 +55,24 @@ services:
     volumes:
       - ./backend:/app
 
+  notification-worker:
+    build: ./backend
+    profiles: ["notifications"]
+    entrypoint: ["python", "-m", "notification_worker"]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    environment:
+      DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
+      DATABASE_URL: ${DATABASE_URL:-}
+    env_file:
+      - backend/.env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     container_name: inventory-frontend

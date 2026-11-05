@@ -51,6 +51,23 @@ services:
       - /home/napalmz/docker-conf/home-inventory/data:/app/data
     restart: always
 
+  notification-worker:
+    image: napalmzrpi/home-inventory-backend:latest
+    profiles: ["notifications"]
+    entrypoint: ["python", "-m", "notification_worker"]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Rome
+      DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
+      DATABASE_URL: ${DATABASE_URL:-}
+    volumes:
+      - /home/napalmz/docker-conf/home-inventory/data:/app/data
+    depends_on:
+      backend:
+        condition: service_healthy
+
   frontend:
     image: napalmzrpi/home-inventory-frontend:latest
     container_name: inventory-frontend
