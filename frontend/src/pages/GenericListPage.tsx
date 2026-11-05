@@ -354,13 +354,15 @@ export default function GenericListPage() {
             className="border px-3 py-2 rounded w-full sm:w-96"
           />
           <button
+            type="button"
             onClick={() => {
               setSearchQuery('')
               setSelectedItems([])
             }}
+            aria-label="Cancella filtro"
             className="px-4 py-2 bg-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded"
           >
-            <span className="inline sm:hidden">❌</span>
+            <span className="inline sm:hidden" aria-hidden="true">❌</span>
             <span className="hidden sm:inline">Cancella filtro</span>
           </button>
         </div>
@@ -385,15 +387,17 @@ export default function GenericListPage() {
             <option value="item_count">Numero di oggetti</option>
           </select>
           <button
+            type="button"
             onClick={() => {
               const newOrder = sortOrder === 'asc' ? 'desc' : 'asc';
               localStorage.setItem(isInventory ? 'inventory_sortOrder' : 'checklist_sortOrder', newOrder);
               setSortOrder(newOrder);
             }}
             className="border rounded p-1 px-2"
+            aria-label={sortOrder === 'asc' ? 'Inverti ordine: passa a decrescente' : 'Inverti ordine: passa a crescente'}
             title={`Ordina in ordine ${sortOrder === 'asc' ? 'decrescente' : 'crescente'}`}
           >
-            {sortOrder === 'asc' ? '⬆️' : '⬇️'}
+            <span aria-hidden="true">{sortOrder === 'asc' ? '⬆️' : '⬇️'}</span>
           </button>
         </div>
         {editMode && (
