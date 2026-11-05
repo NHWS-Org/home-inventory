@@ -186,6 +186,30 @@ class NotificationPreference(Base, LoggingData):
     include_own_actions = Column(Boolean, nullable=False, default=False, server_default="0")
 
 ################################################
+class NotificationRule(Base, LoggingData):
+    __tablename__ = "notification_rules"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('inventory_shared', 'item_quantity_changed', 'checklist_completed')",
+            name="ck_notification_rules_event_type",
+        ),
+        CheckConstraint(
+            "(event_type = 'item_quantity_changed' AND threshold IS NOT NULL AND threshold >= 0)"
+            " OR (event_type != 'item_quantity_changed' AND threshold IS NULL)",
+            name="ck_notification_rules_threshold",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    inventory_id = Column(
+        Integer, ForeignKey("inventories.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    event_type = Column(String(32), nullable=False)
+    threshold = Column(Integer, nullable=True)
+    recipients = Column(JSON, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True, server_default="1")
+
+################################################
 class Group(Base, LoggingData):
     __tablename__ = "groups"
 

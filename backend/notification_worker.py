@@ -27,7 +27,7 @@ def main() -> None:
             ).group_by(NotificationEvent.status)).all())
         logger.info("Notification queue counts: %s", counts)
         return
-    logger.warning("Phase 2: rules are not enabled; queued events retry then fail, no external sends")
+    logger.info("Notification rules enabled: database inbox only, no external sends")
     stop = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda _signum, _frame: stop.set())

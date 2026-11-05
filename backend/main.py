@@ -19,6 +19,7 @@ from routes.backup import router as backup_router
 from routes.audit import router as audit_router
 from routes.metadata import router as metadata_router
 from routes.filters import router as filters_router
+from routes.notifications import router as notifications_router
 from fastapi.middleware.cors import CORSMiddleware
 from models import Inventory, Item, User
 from scheduler import start_scheduler
@@ -87,6 +88,7 @@ app.include_router(backup_router, prefix="/backup", tags=["Backups"])
 app.include_router(audit_router, prefix="/audit", tags=["Audit"])
 app.include_router(metadata_router, prefix="/metadata", tags=["Metadata"])
 app.include_router(filters_router, prefix="/filter-templates", tags=["Filter Templates"])
+app.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
 
 @app.get("/")
 def home():

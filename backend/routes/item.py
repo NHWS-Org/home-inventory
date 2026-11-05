@@ -2,9 +2,10 @@ import json
 from typing import Any, List, cast
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, select, update
 from models import User, Item, Inventory, ItemVersion, ItemBarcode
 from assignment_service import apply_check_change, build_assignment_summary, pending_assigned_by_source
+from notification_rules import emit_item_change
 from dependencies import get_db
 from schemas import ItemCreate, ItemUpdate, ItemDelete, ItemMetadataValueResponse, ItemResponse, ItemVersionResponse, VersionBulkDeleteRequest, ItemBarcodeCreate, ItemBarcodeResponse
 from barcode_service import normalize_code
@@ -15,6 +16,14 @@ from datetime import datetime, timezone, timedelta
 
 router = APIRouter()
 QUANTITY_MERGE_WINDOW_SECONDS = 45
+
+
+def _lock_checklist(db: Session, item_id: int) -> None:
+    # Serialize completion transitions across different rows, including on SQLite.
+    db.execute(update(Inventory).where(
+        Inventory.id == select(Item.inventory_id).where(Item.id == item_id).scalar_subquery(),
+        Inventory.type == "CHECKLIST",
+    ).values(data_mod=Inventory.data_mod))
 
 
 def _utc_now_naive() -> datetime:
@@ -63,6 +72,7 @@ def _write_item_version(
     diff: dict = {}
     new_snapshot = None
     if old_snapshot and operation == "UPDATE":
+        emit_item_change(db, item, old_snapshot, user.id)
         new_snapshot = _snapshot_item(item)
         for key, new_val in new_snapshot.items():
             old_val = old_snapshot.get(key)
@@ -276,6 +286,7 @@ def update_item(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    _lock_checklist(db, item_id)
     item = db.query(Item).get(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item non trovato")
@@ -449,6 +460,7 @@ def rollback_item(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    _lock_checklist(db, item_id)
     target = db.query(ItemVersion).filter(
         ItemVersion.item_id == item_id,
         ItemVersion.version_num == version_num,

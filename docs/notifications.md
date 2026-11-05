@@ -86,6 +86,126 @@ La migrazione supporta sia DB precedenti sia il bootstrap `create_all` eseguito
 prima di Alembic dall'entrypoint Docker. Il downgrade elimina solo le tre nuove
 tabelle (e i loro dati), non utenti, inventari o sessioni.
 
+## Fase 3: regole, destinatari ed eventi
+
+Branch `notifications/55-rules-events`, PR verso il branch epic #38.
+Questa fase abilita solo la inbox nel database e API autenticate, non UI o push.
+Nessuna regola viene creata automaticamente: senza configurazione non vengono
+emessi eventi. Il worker ora registra `Notification rules enabled: database
+inbox only, no external sends` invece del warning della fase 2.
+
+La migrazione `c4d5e6f7a8b9` aggiunge `notification_rules`, con audit
+`LoggingData`, FK al contenitore e vincoli sul tipo evento/soglia.
+
+- Solo proprietario/admin possono leggere o modificare le regole del contenitore.
+  Essere moderatore condiviso non basta. I viewer gestiscono le proprie
+  preferenze e leggono solo la propria inbox.
+- Destinatari: owner, participants (proprietario + condivisioni esplicite
+  utenti/gruppi, non tutti gli admin), user/group selezionati, event_recipient
+  per la nuova condivisione. I gruppi selezionati devono essere condivisi con
+  il contenitore; ogni utente finale deve avere ancora accesso alla risorsa.
+- I membri dei gruppi e gli accessi vengono rivalutati all'elaborazione.
+  Utenti bloccati, eliminati o senza accesso non ricevono righe inbox.
+  I controlli di accesso riusano `can_access_inventory`.
+- Una coppia evento/utente produce al massimo una riga anche con piu regole,
+  gruppi sovrapposti o retry. Preferenze mancanti: inbox attiva, azioni proprie
+  escluse. Le azioni proprie si includono solo con consenso personale.
+- Quantita: solo INVENTORY, soglia intera; evento corrispondente quando
+  `previous_quantity >= threshold > quantity`. Altri cali sotto soglia non
+  avvisano. Dopo recupero almeno alla soglia, un nuovo attraversamento avvisa.
+- Completamento: solo CHECKLIST, transizione di una riga da non spuntata a
+  spuntata quando tutte le altre righe sono gia spuntate. Una lista vuota,
+  creazioni/cancellazioni righe e aggiornamenti senza cambiamenti non generano
+  completamento. Togliere una spunta riabilita una futura transizione.
+- Aggiornamento quantita e assegnazioni (scarico/ripristino stock) emettono
+  eventi prima dell'accorpamento delle versioni audit, nella transazione della
+  modifica. Anche il rollback di una versione di un item esistente passa da
+  questo punto comune. Spostamenti tra contenitori e ricreazioni non vengono
+  interpretati come attraversamenti della soglia nel nuovo contenitore.
+- Le modifiche di righe checklist sono serializzate sul contenitore per evitare
+  doppi completamenti simultanei; testato con due sessioni SQLite file-backed.
+- Una regola disabilitata/eliminata o modificata dopo l'evento non elabora
+  quell'evento gia in coda; nessuna nuova regola retroagisce sullo storico.
+- La inbox espone ID e dati del contratto, non nomi privati memorizzati.
+  Accesso rivalutato anche in lettura e marcatura letta; una risorsa non piu
+  accessibile sparisce dalla risposta. Paginazione applicata ai soli risultati
+  autorizzati, con batch DB limitati.
+- Il restore svuota anche le regole, non solo inbox/outbox, senza importare
+  quelle del backup: richiede riconfigurazione esplicita, senza invii accidentali
+  o destinatari non piu validi.
+
+### API fase 3
+
+Percorsi relativi alla base API (dietro nginx: `/api`):
+
+| Metodo | Percorso | Scopo |
+|---|---|---|
+| GET / POST | `/notifications/rules/{inventory_id}` | Elenco / creazione regole |
+| PUT / DELETE | `/notifications/rules/{inventory_id}/{rule_id}` | Modifica completa / eliminazione |
+| GET | `/notifications/preferences` | Preferenze personali con default |
+| PUT | `/notifications/preferences/{event_type}` | Consenso inbox e azioni proprie |
+| GET | `/notifications?limit=50&offset=0` | Inbox personale autorizzata |
+| PUT | `/notifications/{notification_id}/read` | Segna letta una propria notifica accessibile |
+
+Il permesso push non e esposto o attivato da queste API. Per il momento
+l'amministrazione delle regole usa Swagger, in attesa dell'editor della fase 6.
+
+### Test manuale fase 3 (desktop e iOS)
+
+1. Backup preventivo e branch fase 3; ricostruire usando Compose Up da VS Code
+   con `COMPOSE_PROFILES=notifications` nel file `.env`, oppure:
+
+   ```sh
+   docker compose -f docker-compose-dev.yml --profile notifications up --build -d
+   ```
+
+2. Verificare migrazione a `c4d5e6f7a8b9` e nuovo messaggio del worker.
+3. Aprire `http://localhost:3000/api/docs` sul desktop, oppure l'indirizzo LAN
+   del computer su iOS. In **Authorize** fare login con le credenziali usuali.
+   Il worker in fase 3 non richiede HTTPS perche non usa ancora il push.
+4. Su un inventario di prova di cui si e proprietari (ID dalla URL), usare
+   POST `/notifications/rules/{inventory_id}`:
+
+   ```json
+   {
+     "event_type": "item_quantity_changed",
+     "threshold": 3,
+     "recipients": [{"kind": "owner"}],
+     "enabled": true
+   }
+   ```
+
+5. Per provare con lo stesso account, PUT
+   `/notifications/preferences/item_quantity_changed`:
+
+   ```json
+   {"in_app_enabled": true, "include_own_actions": true}
+   ```
+
+6. Dalla normale interfaccia portare una quantita a 5, poi a 2. Dopo alcuni
+   secondi GET `/notifications` deve contenere un evento con `5 -> 2`.
+   Portarla a 1: non deve aggiungere un avviso. Portarla a 5 e poi a 2:
+   deve comparire un secondo avviso. Ripetere senza cambiamenti: nessun duplicato.
+7. PUT `/notifications/{id}/read` deve valorizzare `read_at`. Disattivare la
+   preferenza inbox e ripetere il ciclo: nessuna nuova notifica.
+8. Per condivisioni, creare una regola con event_type `inventory_shared`,
+   threshold `null`, recipients `[{"kind":"event_recipient"}]`; condividere
+   con un altro account. La inbox di quell'account riceve l'evento, non quella
+   di un estraneo; ripetere una condivisione gia esistente non genera duplicati.
+9. Per una checklist di prova, creare regola `checklist_completed`, threshold
+   `null`, recipients `[{"kind":"owner"}]`; spuntare tutte le righe con un altro
+   account autorizzato. Avviso solo all'ultima spunta. Togliere/rimettere una
+   spunta abilita un nuovo avviso; la stessa azione senza cambiamento no.
+10. Revocare accesso a un destinatario: le vecchie notifiche relative alla
+    risorsa non devono piu comparire; un estraneo non puo leggerle per ID.
+11. Verificare login, sessioni profilo e backup/ripristino 1.5.0 come regressione.
+    Il restore elimina le regole di prova; nessun evento del backup viene riprodotto.
+
+Nessuna campanella o notifica OS e attesa: arriveranno nelle fasi successive.
+Non avanzare alla fase 4 e non effettuare merge prima della conferma utente.
+PostgreSQL/MySQL: compilazione DDL verificata; test runtime e concorrenza non
+certificati in questo ambiente.
+
 ## Fase 2: outbox e worker
 
 Branch: `notifications/54-outbox-worker`, PR verso il branch epic #38.
@@ -121,7 +241,7 @@ e aspetta il backend healthy prima di partire; il worker non applica migrazioni.
 Per produzione serve un'immagine backend costruita da questa fase, non una
 vecchia immagine `latest` priva del modulo.
 
-**Limite intenzionale:** il gestore regole sara introdotto nella fase 3.
+**Comportamento della sola fase 2 (superato dalla fase 3):** il gestore regole sara introdotto nella fase 3.
 Ora il worker resta in attesa con coda vuota; un evento inserito manualmente
 viene registrato come errore temporaneo, ritentato e infine fallisce
 esplicitamente. Non viene marcato completato senza elaborazione.

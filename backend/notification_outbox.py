@@ -95,14 +95,16 @@ def claim_event(factory: sessionmaker, *, now: datetime | None = None) -> Claim 
         return Claim(event_id, token) if result.rowcount == 1 else None
 
 
-def rules_not_available(db: Session, event: NotificationEvent) -> None:
-    raise RetryableNotificationError("Rules are introduced in phase 3")
+def apply_rules(db: Session, event: NotificationEvent) -> None:
+    from notification_rules import evaluate_event
+
+    evaluate_event(db, event)
 
 
 def process_claim(
     factory: sessionmaker,
     claim: Claim,
-    handler: Callable[[Session, NotificationEvent], None] = rules_not_available,
+    handler: Callable[[Session, NotificationEvent], None] = apply_rules,
     *,
     now: datetime | None = None,
 ) -> bool:
