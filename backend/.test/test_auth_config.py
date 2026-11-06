@@ -182,8 +182,5 @@ def test_docker_context_excludes_runtime_secrets():
     assert all(value in ignored for value in (".env", ".env.*", "data", "*.key", "*.pem"))
     assert "!.env.example" in ignored
     assert "SECRET_KEY=AUTO" in (backend / ".env.example").read_text()
-    example = (backend / ".env.example").read_text()
-    version = next(line for line in example.splitlines() if line.startswith("API_VERSION="))
-    assert version in (backend / "Dockerfile").read_text()
     workflow = backend.parent / ".github" / "workflows" / "publish-images.yml"
-    assert "backend/.env.example" in workflow.read_text()
+    assert "backend/VERSION" in workflow.read_text()

@@ -221,7 +221,7 @@ Il workflow [publish-images.yml](.github/workflows/publish-images.yml) pubblica 
 | Avvio manuale con canale `dev` (**Actions → Publish Docker images → Run workflow**, da qualsiasi branch) | `dev` e `<versione>-dev` |
 | Avvio manuale con canale `release` | `latest` e `<versione>` |
 
-Le versioni per la pubblicazione sono lette da `API_VERSION` in `backend/.env.example` e da `version` in `frontend/package.json`; il backend nell'immagine mantiene il default `API_VERSION` nel Dockerfile.
+Le versioni per la pubblicazione sono lette da `backend/VERSION` e da `version` in `frontend/package.json`. `backend/VERSION` e anche l'unica fonte della versione API, healthcheck e telemetria: per una nuova release aggiornare quel file e ricostruire l'immagine. La variabile ambiente `API_VERSION` non viene piu utilizzata.
 
 Configurazione necessaria:
 
@@ -436,7 +436,7 @@ The [publish-images.yml](.github/workflows/publish-images.yml) workflow publishe
 | Manual run with `dev` channel (**Actions → Publish Docker images → Run workflow**, from any branch) | `dev` and `<version>-dev` |
 | Manual run with `release` channel | `latest` and `<version>` |
 
-Publishing versions are read from `API_VERSION` in `backend/.env.example` and `version` in `frontend/package.json`; the image's default backend `API_VERSION` is kept in the Dockerfile.
+Publishing versions are read from `backend/VERSION` and `version` in `frontend/package.json`. `backend/VERSION` is also the single source for the API, healthcheck and telemetry version: update it and rebuild the image for a new release. The `API_VERSION` environment variable is no longer used.
 
 Required setup:
 

@@ -81,11 +81,11 @@ def test_default_url_is_used_without_env(db, monkeypatch):
 
 
 def test_payload_contains_only_expected_fields(db, monkeypatch):
-    monkeypatch.setenv("API_VERSION", "1.4.0")
+    monkeypatch.setenv("API_VERSION", "obsolete-env-value")
     payload = telemetry_service.build_payload(db)
 
     assert set(payload) == {"id", "version", "channel", "inventories", "last_activity"}
-    assert payload["version"] == "1.4.0"
+    assert payload["version"] == telemetry_service.API_VERSION
     assert payload["inventories"] == 2  # le checklist non contano
     assert payload["last_activity"] is not None
 

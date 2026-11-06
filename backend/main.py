@@ -1,4 +1,5 @@
 import os
+from app_version import API_VERSION
 from fastapi import FastAPI, Depends
 from contextlib import asynccontextmanager
 import logging
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-api_version = os.getenv("API_VERSION", "unknown")
+api_version = API_VERSION
 
 app = FastAPI(
     lifespan=lifespan
