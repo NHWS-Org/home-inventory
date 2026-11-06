@@ -119,15 +119,15 @@ def group_users(db: Session, group_id: int) -> set[int]:
     )))
 
 
-def evaluate_event(db: Session, record: NotificationEvent) -> None:
+def event_recipients(db: Session, record: NotificationEvent) -> set[int]:
     data = notification_event_adapter.validate_python(record.payload)
     inventory = db.get(Inventory, data.inventory_id)
     if inventory is None:
-        return
+        return set()
     if isinstance(data, ItemQuantityChangedData):
         item = db.get(Item, data.item_id)
         if item is None or item.inventory_id != inventory.id:
-            return
+            return set()
     rules = db.scalars(select(NotificationRule).where(
         NotificationRule.inventory_id == inventory.id,
         NotificationRule.event_type == data.event_type,
@@ -163,6 +163,15 @@ def evaluate_event(db: Session, record: NotificationEvent) -> None:
                     recipients.add(data.recipient_id)
                 else:
                     recipients.update(group_users(db, data.recipient_id))
+    return recipients
+
+
+def evaluate_event(db: Session, record: NotificationEvent) -> None:
+    data = notification_event_adapter.validate_python(record.payload)
+    recipients = event_recipients(db, record)
+    inventory = db.get(Inventory, data.inventory_id)
+    if inventory is None:
+        return
     for user_id in sorted(recipients):
         user = db.get(User, user_id)
         if user is None or not can_receive(user, inventory):
@@ -171,14 +180,17 @@ def evaluate_event(db: Session, record: NotificationEvent) -> None:
             NotificationPreference.user_id == user_id,
             NotificationPreference.event_type == data.event_type,
         ))
-        if preference is not None and not preference.in_app_enabled:
-            continue
         if user_id == record.actor_id and (
             preference is None or not preference.include_own_actions
         ):
             continue
-        existing = db.scalar(select(Notification.id).where(
-            Notification.event_id == record.id, Notification.user_id == user_id,
-        ))
-        if existing is None:
-            db.add(Notification(event_id=record.id, user_id=user_id))
+        if preference is None or preference.in_app_enabled:
+            existing = db.scalar(select(Notification.id).where(
+                Notification.event_id == record.id, Notification.user_id == user_id,
+            ))
+            if existing is None:
+                db.add(Notification(event_id=record.id, user_id=user_id))
+        if preference is not None and preference.push_enabled and preference.data_mod <= record.created_at:
+            from web_push import queue_push
+
+            queue_push(db, record, user_id)

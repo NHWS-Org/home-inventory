@@ -12,6 +12,7 @@ from notification_contracts import (
 )
 from notification_outbox import utcnow
 from notification_rules import can_receive
+from routes.push import router as push_router
 
 router = APIRouter()
 
@@ -115,6 +116,7 @@ def preferences(db: Session = Depends(get_db), user=Depends(get_current_user)):
     return [{
         "event_type": kind.value,
         "in_app_enabled": stored[kind.value].in_app_enabled if kind.value in stored else True,
+        "push_enabled": stored[kind.value].push_enabled if kind.value in stored else False,
         "include_own_actions": stored[kind.value].include_own_actions if kind.value in stored else False,
     } for kind in NotificationEventType]
 
@@ -134,6 +136,7 @@ def set_preference(
         )
         db.add(row)
     row.in_app_enabled = payload.in_app_enabled
+    row.push_enabled = payload.push_enabled
     row.include_own_actions = payload.include_own_actions
     row.user_mod = user.id
     db.commit()
@@ -192,3 +195,6 @@ def read_notification(
         row.read_at = utcnow()
         db.commit()
     return {"id": row.id, "read_at": row.read_at}
+
+
+router.include_router(push_router, prefix="/push")

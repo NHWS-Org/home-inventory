@@ -252,7 +252,10 @@ condivisa tramite anchor YAML.
 
 ### Notifiche (in sviluppo)
 
-La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). Nessuna regola viene preattivata; UI e push non sono ancora disponibili.
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). La fase 4 aggiunge il backend Web Push/VAPID, disabilitato di default e legato alle sessioni. Nessuna regola viene preattivata; consenso browser, service worker e UI arriveranno nelle fasi 5/6. [Configurazione VAPID e limiti del restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni).
+
+Sottoscrizioni e code push transitorie sono escluse dai backup/confronti DB e
+svuotate al restore, per non riattivare consensi o invii obsoleti.
 
 Le notifiche quantita accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Anche il completamento checklist attende questa finestra. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
 
@@ -526,7 +529,10 @@ or `COMPOSE_PROFILES=notifications` in the shell/private root `.env`.
 
 ### Notifications (in development)
 
-The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). No rules are enabled automatically; UI and push are not available yet.
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). Phase 4 adds a session-bound Web Push/VAPID backend, disabled by default. No rules are enabled automatically; browser consent, service worker and UI arrive in phases 5/6. See [VAPID configuration and restore limits (Italian)](docs/notifications.md#fase-4-web-push-backend-e-sessioni).
+
+Transient push subscriptions and delivery queues are excluded from backups/DB
+comparisons and cleared on restore to prevent obsolete consent or send replay.
 
 Quantity notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. Checklist completion also waits for this window. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
 

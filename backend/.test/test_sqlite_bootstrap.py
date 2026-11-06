@@ -58,8 +58,11 @@ def test_sqlite_bootstrap_and_migrations(tmp_path, legacy_schema, starting_revis
         columns = {column["name"]: column for column in inspect(connection).get_columns("inventories")}
         assert columns["type"]["nullable"] is False
         tables = inspect(connection).get_table_names()
-        assert {"security_audit", "notification_events", "notification_rules"}.issubset(tables)
+        assert {
+            "security_audit", "notification_events", "notification_rules",
+            "push_subscriptions", "push_deliveries",
+        }.issubset(tables)
         assert connection.execute(
             text("SELECT version_num FROM alembic_version")
-        ).scalar_one() == "e7f8a9b0c1d2"
+        ).scalar_one() == "f8a9b0c1d2e3"
     engine.dispose()

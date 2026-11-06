@@ -59,6 +59,7 @@ services:
     #  - "8001:8000"
     env_file:
       - .env.dev
+      # Configure optional Web Push/VAPID here; API and worker must use the same key file.
       - path: backend/.env
         required: false
     volumes:

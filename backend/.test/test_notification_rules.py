@@ -273,12 +273,15 @@ def test_deleted_or_disabled_rule_suppresses_queued_event(setup):
 
 def test_preference_defaults_and_bad_inputs(setup):
     _, client, _ = setup
-    assert all(row["in_app_enabled"] and not row["include_own_actions"]
+    assert all(row["in_app_enabled"] and not row["include_own_actions"] and not row["push_enabled"]
                for row in client.get("/notifications/preferences").json())
     assert client.put("/notifications/preferences/unknown", json={}).status_code == 422
     assert client.put("/notifications/preferences/inventory_shared", json={
-        "push_enabled": True,
+        "push_enabled": "true",
     }).status_code == 422
+    assert client.put("/notifications/preferences/inventory_shared", json={
+        "push_enabled": True,
+    }).status_code == 200
 
 
 def test_real_item_update_merges_notifications_with_audit_and_ignores_noop(setup):

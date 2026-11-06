@@ -429,6 +429,8 @@ def _restore_backup_rows(
     metadata: dict[str, Any],
 ) -> None:
     # Never retain runnable outbox work across a restore, including preserved admin rows.
+    _safe_delete_table(db, "push_deliveries")
+    _safe_delete_table(db, "push_subscriptions")
     _safe_delete_table(db, "notifications")
     _safe_delete_table(db, "notification_events")
     _safe_delete_table(db, "notification_rules")

@@ -86,6 +86,173 @@ La migrazione supporta sia DB precedenti sia il bootstrap `create_all` eseguito
 prima di Alembic dall'entrypoint Docker. Il downgrade elimina solo le tre nuove
 tabelle (e i loro dati), non utenti, inventari o sessioni.
 
+## Fase 4: Web Push backend e sessioni
+
+Branch `notifications/56-web-push-backend`, PR verso il branch epic #38.
+La revisione `f8a9b0c1d2e3` aggiunge `push_subscriptions` e `push_deliveries`
+al precedente head unificato `e7f8a9b0c1d2`.
+Questa fase non aggiunge UI, service worker o richiesta permessi al browser:
+sono previsti nelle fasi 5/6. Gli invii reali desktop/iOS restano da verificare.
+
+### Configurazione dell'installazione
+
+Web Push e disabilitato di default. Per abilitarlo, configurare **sia API sia
+worker**, mantenendo attivo il profilo Compose `notifications`:
+
+```dotenv
+WEB_PUSH_ENABLED=true
+WEB_PUSH_VAPID_PRIVATE_KEY_FILE=/app/data/private_key.pem
+WEB_PUSH_VAPID_SUBJECT=mailto:amministratore@example.com
+```
+
+In Dev usare il file privato `backend/.env`, caricato da entrambi i servizi.
+In produzione usare shell/`.env` root: il Compose passa le tre variabili a
+entrambi. Il file PEM deve essere leggibile nello stesso percorso nei due
+container, sul volume persistente condiviso o tramite un mount secret dedicato.
+Non inserire chiavi in `.env.dev`, repository o immagine.
+
+Generare una coppia P-256 **una volta**, prima di abilitare gli invii. Dopo il
+rebuild della nuova immagine, per il volume Dev gia esistente:
+
+```bash
+docker compose -f docker-compose-dev.yml exec backend sh -c \
+  'cd /app/data && test ! -e private_key.pem && test ! -e public_key.pem && umask 077 && vapid --gen'
+```
+
+Il comando rifiuta di sovrascrivere chiavi esistenti; non stampa la chiave
+privata. `public_key.pem` e pubblico; l'API deriva direttamente dal PEM privato
+la `applicationServerKey` in base64url, evitando coppie incoerenti.
+Per produzione adattare il comando al Compose utilizzato.
+Poi configurare le variabili e ricreare API e worker.
+Conservare la chiave privata con permessi restrittivi e in un backup separato
+protetto. L'app non la genera, non la cambia automaticamente e non la salva nel DB.
+Chiave assente/corrotta o configurazione invalida con push abilitato:
+API push `503`, worker non avviabile; niente fallback o chiavi effimere.
+La chiave JWT e indipendente dalla chiave VAPID.
+
+Sostituire il PEM cambia la chiave pubblica e rende inutilizzabili le vecchie
+sottoscrizioni per nuovi invii. I browser devono eliminare la vecchia
+sottoscrizione e richiedere un nuovo consenso/registrazione.
+Disabilitare Web Push cancella gli invii che il worker trova pendenti,
+senza modificare inbox o dati applicativi.
+
+### API e consenso
+
+Tutti gli endpoint sono autenticati, sotto `/notifications/push`:
+
+| Metodo e percorso | Risultato |
+|---|---|
+| GET `/config` | Chiave pubblica, payload generico e TTL; `503` se disabilitato/non configurato |
+| POST `/subscriptions` | Registra/rinnova endpoint per la sessione JWT corrente (`201`) |
+| GET `/subscriptions` | Elenco della sessione corrente, senza endpoint/chiavi |
+| DELETE `/subscriptions/{id}` | Elimina la sottoscrizione della sessione corrente e la relativa coda |
+| GET `/deliveries?limit=50` | Esiti tecnici dell'utente, massimo 100 righe, senza credenziali |
+
+Il POST accetta il JSON della Push API con `endpoint`, `keys.p256dh`,
+`keys.auth`, `expirationTime` opzionale e `consent: true` esplicito.
+Sono validati tipo, lunghezza e curva P-256 delle chiavi. Non accetta user/session ID:
+il backend li ricava dal token. I JWT legacy senza sessione tracciata richiedono
+un nuovo login (`401`). Scadenza massima: scadenza della sessione, ulteriormente
+limitata da `expirationTime` se presente.
+
+La chiave hash dell'endpoint e unica globalmente. Lo stesso endpoint ripetuto
+dalla stessa sessione non duplica righe o invii. Una nuova sessione dello stesso
+utente cambia la generazione e cancella i vecchi invii al controllo pre-send.
+Un endpoint gia associato a un altro account e rifiutato (`409`):
+al cambio account il client deve fare unsubscribe nel browser e creare una
+nuova sottoscrizione, non trasferire endpoint o chiavi del vecchio account.
+Il limite applicativo e 100 sottoscrizioni per utente.
+
+Le preferenze `/notifications/preferences` aggiungono `push_enabled`, **false**
+di default. Serve sia consenso del browser/dispositivo sia consenso per tipo
+evento. Inbox e push sono indipendenti: si puo disattivare la inbox mantenendo
+push attivo. Le azioni proprie restano escluse salvo `include_own_actions`.
+La fase 5 gestira il consenso browser; la fase 6 offrira l'editor preferenze.
+Eventi precedenti al consenso/alla sottoscrizione non producono invii retroattivi.
+Modificare regole/preferenze dopo l'evento invalida i relativi invii pendenti.
+
+### Invii, lifecycle e sicurezza
+
+- La valutazione regole crea la coda push nella stessa transazione della inbox,
+  senza contattare provider. Il worker invia solo dopo il commit dell'evento.
+  Una coppia evento/sottoscrizione produce una sola riga.
+- Prima di **ogni** tentativo si rivalutano sessione attiva/non scaduta,
+  utente non bloccato, account proprietario della sessione, generazione,
+  chiave VAPID, consenso e azioni proprie, regole/destinatari attuali e accesso
+  alla risorsa. Logout, revoca personale/globale e rotazione JWT revocano
+  le sessioni e impediscono nuovi invii. La pulizia delle sessioni elimina
+  sottoscrizioni e code tramite FK cascade.
+- Claim e lease separati dalla outbox eventi. Il controllo e l'invio sono
+  serializzati con revoca/blocco tramite lock DB (write fence su SQLite).
+  L'invio gia iniziato prima della revoca puo comunque essere accettato:
+  non e possibile ritirare con certezza un messaggio gia affidato al provider.
+- Host ammessi esatti: `fcm.googleapis.com`,
+  `updates.push.services.mozilla.com`, `web.push.apple.com`.
+  HTTPS obbligatorio; niente host arbitrari, credenziali URL, porte alternative,
+  redirect o proxy ambientali. Il socket usa solo IP pubblici validati,
+  con DNS pinning e TLS/SNI sul nome originale: nessuna seconda risoluzione
+  puo trasformare una destinazione pubblica in privata. Un nuovo servizio
+  browser richiede modifica/verifica dell'allowlist, non un env permissivo.
+- Cifratura standard `aes128gcm` e VAPID tramite `pywebpush`. Payload sempre
+  generico: titolo `Home Inventory`, testo `Hai una nuova notifica`, percorso
+  interno `/notifications` e tag UUID evento. Non contiene nomi, quantita,
+  checklist o altri contenuti privati. TTL provider 300 secondi; coda massimo
+  24 ore, mai oltre la scadenza dell'evento.
+- `201`/`202` significa **accepted** dal push service, non visualizzata,
+  consegnata al dispositivo o letta. `read_at` resta un dato della inbox.
+  Endpoint `404`/`410`: eliminati insieme a chiavi e coda associata.
+- `429`/`5xx`: backoff 30/60/120/240 secondi, al massimo 5 tentativi;
+  `Retry-After` numerico rispettato fino a un'ora. Altre risposte: failed,
+  senza retry. Redirect non seguiti. Esiti conservati nell'API tecnica.
+- Timeout, errori di rete/DB e crash dopo claim possono avvenire dopo
+  l'accettazione: stato **uncertain**, mai replay automatico del tentativo
+  ambiguo. Dopo lease scaduta la coda non reinvia alla cieca.
+  La deduplicazione lato service worker tramite tag arrivera nella fase 5.
+- I log contengono solo ID tecnici, stato e classe errore, mai endpoint,
+  chiavi, corpo provider o testo di eccezioni di trasporto.
+
+### Backup e restore
+
+Gli archivi `.hibackup` e gli snapshot DB per confronto escludono le tabelle
+transitorie `push_subscriptions` e `push_deliveries`.
+Il restore applicativo svuota sempre entrambe le tabelle prima di
+ripristinare altri dati, anche preservando l'admin e anche se un archivio
+importato contiene righe push. Non ripristina consenso, credenziali endpoint
+o code esterne. Le vecchie outbox notifiche continuano a essere scartate.
+Se un archivio importato contiene comunque dati push, il confronto
+maschera endpoint, p256dh e auth.
+
+Per un **restore fisico** SQLite/PostgreSQL/MySQL o rollback del volume:
+fermare API e worker, ripristinare, applicare le migrazioni e **prima di
+riavviare** eseguire nel medesimo ambiente/configurazione:
+
+```bash
+python -m notification_worker --reset-push
+```
+
+Il comando elimina solo sottoscrizioni e invii push, non inbox o inventari.
+La vecchia outbox eventi puo ricreare inbox ma non invii esterni senza
+sottoscrizioni. Non riavviare worker su una copia fisica senza questo reset.
+Ricopiare un DB/volume senza seguire la procedura non e un restore applicativo
+e non offre la protezione automatica anti-replay.
+
+### Test pre-merge e stop
+
+Test automatici con trasporto mock, DB SQLite con FK, migrazione
+upgrade/downgrade e bootstrap: consenso, sessioni reali JWT, deduplica,
+account swap, accessi/regole/preferenze revocati, scadenze, endpoint morti,
+retry/lease/crash, cifratura VAPID, SSRF/DNS pinning e restore senza replay.
+
+Verifiche utente di questa fase: rebuild/migrazioni, worker healthy con push
+disabilitato e poi con PEM valido, `GET /notifications/push/config`
+autenticato restituisce solo la chiave pubblica; inbox e login precedenti
+restano funzionanti. Un vero endpoint desktop/iOS potra essere registrato
+da client Push API gia disponibili, ma nessun client nuovo e incluso qui.
+I test reali di consenso/display/click richiedono la fase 5 e HTTPS;
+la loro riuscita **non** e certificata dai mock.
+STOP dopo la PR della fase 4 (issue #56): niente merge o fase 5 senza
+validazione dell'utente.
+
 ## Fase 3: regole, destinatari ed eventi
 
 L'integrazione di `release/1.6.0` nel branch della fase 4 conserva le migrazioni
