@@ -330,7 +330,7 @@ const ProfilePage = () => {
       </div>
 
       <section>
-        <h2 className="text-xl font-bold mb-4">Dispositivi connessi</h2>
+        <h2 id="profile-devices-heading" className="text-xl font-bold mb-4">Dispositivi connessi</h2>
         <p className="mb-2 text-sm">Elimina subito solo le tue sessioni scadute o disconnesse, senza disconnettere i dispositivi attivi.</p>
         <button type="button" onClick={handleCleanupSessions} disabled={sessionsBusy}
           className="mb-3 min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">
@@ -341,12 +341,13 @@ const ProfilePage = () => {
         {deviceSessions.length === 0 ? (
           <p className="text-sm text-gray-600 dark:text-gray-300">Nessun dispositivo registrato.</p>
         ) : (
-          <ul className="space-y-3">
+          <ul aria-labelledby="profile-devices-heading" tabIndex={0}
+            className="max-h-80 sm:max-h-96 overflow-y-auto overscroll-contain space-y-3 rounded p-1 focus-visible:outline-2 focus-visible:outline-blue-500">
             {deviceSessions.map((session) => {
               const isExpired = session.is_expired;
               const isRevoked = Boolean(session.revoked_at);
               return (
-                <li key={session.id} className="rounded border border-gray-300 p-3 dark:border-gray-700">
+                <li key={session.id} className="rounded border border-gray-300 p-3 dark:border-gray-700 [overflow-wrap:anywhere]">
                   <p className="font-medium">
                     {[session.device_type, session.browser, session.operating_system].filter(Boolean).join(" · ")}
                   </p>

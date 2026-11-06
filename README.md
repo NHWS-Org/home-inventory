@@ -170,6 +170,8 @@ Per anticipare la pulizia, **Pulisci sessioni scadute / disconnesse** in
 Gestione profilo elimina solo le proprie sessioni terminate; in Sicurezza
 gli admin possono eseguire la stessa pulizia per tutti gli utenti.
 Non richiede password, ignora la retention e non revoca sessioni attive.
+Anche l'elenco dispositivi in Gestione profilo scorre internamente, con
+altezza limitata e titolo/pulsante di pulizia esterni al box.
 
 Le repliche AUTO devono condividere sia il file chiave sia il file lock
 nello stesso volume dati. Login e rotazione sono coordinati e ogni processo
@@ -431,6 +433,8 @@ and security audit records untouched. Deleted sessions disappear from Profile.
 Manual cleanup buttons in Profile (own sessions) and Security (admin, all users)
 immediately delete expired/revoked sessions regardless of retention, without
 password confirmation or logging out active devices.
+The Profile device list also scrolls internally within a bounded height,
+keeping its heading and cleanup button outside the scrollable area.
 
 AUTO replicas must share the key and lock files on persistent storage;
 processes reload atomic key replacements without restarting. Migration
