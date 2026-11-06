@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { loginUrl } from './utils/loginRedirect';
 import {
   User,
   Role,
@@ -65,7 +66,7 @@ api.interceptors.response.use(
         window.location.pathname !== '/login' &&
         window.location.pathname !== '/register'
       ) {
-        window.location.href = '/login';
+        window.location.replace(loginUrl(window.location.pathname + window.location.search + window.location.hash));
       }
     }
     return Promise.reject(error);

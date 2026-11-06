@@ -172,6 +172,11 @@ gli admin possono eseguire la stessa pulizia per tutti gli utenti.
 Non richiede password, ignora la retention e non revoca sessioni attive.
 Anche l'elenco dispositivi in Gestione profilo scorre internamente, con
 altezza limitata e titolo/pulsante di pulizia esterni al box.
+Aprendo un link protetto senza sessione (o con token scaduto), il login
+conserva la pagina richiesta, inclusi query string e frammento, anche dopo
+un aggiornamento della pagina di login o la registrazione. Dopo l'accesso
+si torna a quel percorso; il login diretto torna alla home. Destinazioni
+esterne non sono ammesse e i permessi della pagina restano invariati.
 
 Le repliche AUTO devono condividere sia il file chiave sia il file lock
 nello stesso volume dati. Login e rotazione sono coordinati e ogni processo
@@ -435,6 +440,10 @@ immediately delete expired/revoked sessions regardless of retention, without
 password confirmation or logging out active devices.
 The Profile device list also scrolls internally within a bounded height,
 keeping its heading and cleanup button outside the scrollable area.
+Login redirects from protected links or expired sessions preserve the requested
+path, query and fragment, including across login refresh and registration.
+Direct login defaults to Home. Only internal return paths are accepted;
+page authorization rules still apply.
 
 AUTO replicas must share the key and lock files on persistent storage;
 processes reload atomic key replacements without restarting. Migration

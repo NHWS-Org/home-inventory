@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { loginDestination, loginUrl } from "../utils/loginRedirect";
 import { registerUser, getSetting } from "../api";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -28,7 +30,7 @@ export default function RegisterPage() {
     e.preventDefault();
     try {
       await registerUser(username, password, email);
-      navigate("/login");
+      navigate(loginUrl(loginDestination(location.search)), { replace: true });
     } catch {
       setError("Errore durante la registrazione");
     }
