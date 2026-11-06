@@ -1,6 +1,31 @@
 from sqlalchemy.orm import Session
 from models import User, Role, Group, Setting
 from schemas import UserCreate
+from datetime import datetime, timezone
+import logging
+from fastapi import HTTPException
+from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
+from models import DeviceSession
+
+
+def cleanup_ended_sessions(db: Session, user_id: int | None = None) -> int:
+    query = db.query(DeviceSession).filter(or_(
+        DeviceSession.revoked_at.is_not(None),
+        DeviceSession.expires_at <= datetime.now(timezone.utc).replace(tzinfo=None),
+    ))
+    if user_id is not None:
+        query = query.filter(DeviceSession.user_id == user_id)
+    try:
+        deleted = query.delete(synchronize_session=False)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logging.getLogger(__name__).exception("Errore nella pulizia manuale delle sessioni")
+        raise HTTPException(500, "Pulizia sessioni non riuscita; nessuna eliminazione confermata.") from None
+    logging.getLogger(__name__).info("Pulizia manuale sessioni: %s eliminate; user_id=%s", deleted, user_id)
+    return deleted
+
 
 def get_user(db: Session, user_id: int):
     return db.query(User).filter(User.id == user_id).first()

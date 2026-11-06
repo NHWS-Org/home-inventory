@@ -111,6 +111,10 @@ export async function getSecuritySessions(): Promise<SecuritySession[]> {
   return (await api.get<SecuritySession[]>("/admin/security/sessions")).data;
 }
 
+export async function cleanupSecuritySessions(): Promise<number> {
+  return (await api.delete<{ deleted: number }>("/admin/security/sessions")).data.deleted;
+}
+
 export async function performSecurityAction(action: "revoke-sessions" | "rotate-key", password: string) {
   await api.post(`/admin/security/${action}`, { password, confirm: true });
 }
@@ -148,6 +152,10 @@ export interface DeviceSession {
 export async function getDeviceSessions(): Promise<DeviceSession[]> {
   const response = await api.get<DeviceSession[]>('/auth/sessions');
   return response.data;
+}
+
+export async function cleanupDeviceSessions(): Promise<number> {
+  return (await api.delete<{ deleted: number }>("/auth/sessions")).data.deleted;
 }
 
 export async function revokeDeviceSession(sessionId: number): Promise<void> {

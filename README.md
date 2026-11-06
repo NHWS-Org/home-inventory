@@ -166,6 +166,10 @@ terminate da oltre la finestra, contando dal primo evento tra disconnessione
 e scadenza. Le sessioni ancora attive e l'audit di sicurezza non vengono
 eliminati. La modifica del valore viene letta alla successiva pulizia,
 senza riavvio; le sessioni eliminate spariscono anche da Gestione profilo.
+Per anticipare la pulizia, **Pulisci sessioni scadute / disconnesse** in
+Gestione profilo elimina solo le proprie sessioni terminate; in Sicurezza
+gli admin possono eseguire la stessa pulizia per tutti gli utenti.
+Non richiede password, ignora la retention e non revoca sessioni attive.
 
 Le repliche AUTO devono condividere sia il file chiave sia il file lock
 nello stesso volume dati. Login e rotazione sono coordinati e ogni processo
@@ -424,6 +428,9 @@ about one minute after startup and every 24 hours, independently of backups,
 using the current setting. It deletes sessions whose first termination
 (revocation or expiry) is older than that window, leaving active sessions
 and security audit records untouched. Deleted sessions disappear from Profile.
+Manual cleanup buttons in Profile (own sessions) and Security (admin, all users)
+immediately delete expired/revoked sessions regardless of retention, without
+password confirmation or logging out active devices.
 
 AUTO replicas must share the key and lock files on persistent storage;
 processes reload atomic key replacements without restarting. Migration

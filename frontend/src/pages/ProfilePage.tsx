@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
+import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
 
 const ProfilePage = () => {
@@ -21,6 +21,8 @@ const ProfilePage = () => {
   const [isPasswordError, setIsPasswordError] = useState(false);
   const [deviceSessions, setDeviceSessions] = useState<DeviceSession[]>([]);
   const [sessionMessage, setSessionMessage] = useState("");
+  const [sessionNotice, setSessionNotice] = useState("");
+  const [sessionsBusy, setSessionsBusy] = useState(false);
 
   const emailInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -173,6 +175,10 @@ const ProfilePage = () => {
   };
 
   const handleRevokeSession = async (session: DeviceSession) => {
+    if (sessionsBusy) return;
+    setSessionsBusy(true);
+    setSessionMessage("");
+    setSessionNotice("");
     try {
       await revokeDeviceSession(session.id);
       if (session.is_current) {
@@ -187,6 +193,28 @@ const ProfilePage = () => {
       );
     } catch {
       setSessionMessage("Errore nella disconnessione del dispositivo.");
+    } finally {
+      setSessionsBusy(false);
+    }
+  };
+
+  const handleCleanupSessions = async () => {
+    if (sessionsBusy) return;
+    setSessionsBusy(true);
+    setSessionMessage("");
+    setSessionNotice("");
+    try {
+      const deleted = await cleanupDeviceSessions();
+      setSessionNotice(`Sessioni eliminate: ${deleted}. I dispositivi attivi restano connessi.`);
+      try {
+        setDeviceSessions(await getDeviceSessions());
+      } catch {
+        setSessionMessage("Pulizia completata, ma aggiornamento elenco non riuscito. Ricaricare la pagina.");
+      }
+    } catch {
+      setSessionMessage("Pulizia delle sessioni non riuscita. Riprovare.");
+    } finally {
+      setSessionsBusy(false);
     }
   };
 
@@ -303,7 +331,13 @@ const ProfilePage = () => {
 
       <section>
         <h2 className="text-xl font-bold mb-4">Dispositivi connessi</h2>
-        {sessionMessage && <p className="mb-3 text-sm text-red-600">{sessionMessage}</p>}
+        <p className="mb-2 text-sm">Elimina subito solo le tue sessioni scadute o disconnesse, senza disconnettere i dispositivi attivi.</p>
+        <button type="button" onClick={handleCleanupSessions} disabled={sessionsBusy}
+          className="mb-3 min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">
+          {sessionsBusy ? "Operazione in corso..." : "Pulisci sessioni scadute / disconnesse"}
+        </button>
+        {sessionNotice && <p role="status" className="mb-3 text-sm">{sessionNotice}</p>}
+        {sessionMessage && <p role="alert" className="mb-3 text-sm text-red-600">{sessionMessage}</p>}
         {deviceSessions.length === 0 ? (
           <p className="text-sm text-gray-600 dark:text-gray-300">Nessun dispositivo registrato.</p>
         ) : (
@@ -335,7 +369,8 @@ const ProfilePage = () => {
                     <button
                       type="button"
                       onClick={() => handleRevokeSession(session)}
-                      className="mt-2 min-h-11 rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700"
+                      disabled={sessionsBusy}
+                      className="mt-2 min-h-11 rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 disabled:opacity-50"
                     >
                       Disconnetti dispositivo
                     </button>

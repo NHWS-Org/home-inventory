@@ -15,6 +15,7 @@ from models import DeviceSession, SecurityAudit
 from dependencies import get_current_user, oauth2_scheme, decode_access_token
 from routes.auth import verify_password
 from auth_config import automatic_key_mode, key_lock, rotate_automatic_key
+from crud import cleanup_ended_sessions
 
 logger = logging.getLogger(__name__)
 EXTERNAL_ROTATION_MESSAGE = "Rotazione gestita tramite configurazione dell'installazione"
@@ -83,6 +84,11 @@ def security_sessions(token: str = Depends(oauth2_scheme), db: Session = Depends
         "is_expired": session.expires_at <= now,
         "is_current": session.session_token_id == current_id,
     } for session, username in rows]
+
+
+@router.delete("/security/sessions")
+def cleanup_all_ended_sessions(db: Session = Depends(get_db)):
+    return {"deleted": cleanup_ended_sessions(db)}
 
 
 def perform_security_action(

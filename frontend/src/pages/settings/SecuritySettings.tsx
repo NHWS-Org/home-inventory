@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import {
-  getSecurityAudit, getSecurityStatus, getSecuritySessions, performSecurityAction,
+  cleanupSecuritySessions, getSecurityAudit, getSecurityStatus, getSecuritySessions, performSecurityAction,
   type SecurityAuditEntry, type SecurityStatus, type SecuritySession,
 } from "../../api";
 import { useAuth } from "../../useAuth";
@@ -17,6 +17,7 @@ export default function SecuritySettings() {
   const [sessions, setSessions] = useState<SecuritySession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsError, setSessionsError] = useState("");
+  const [cleanupNotice, setCleanupNotice] = useState("");
   const [action, setAction] = useState<Action | null>(null);
   const [password, setPassword] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -69,6 +70,22 @@ export default function SecuritySettings() {
     setError("");
   }
 
+  async function cleanupSessions() {
+    if (busy || sessionsLoading) return;
+    setBusy(true);
+    setSessionsError("");
+    setCleanupNotice("");
+    try {
+      const deleted = await cleanupSecuritySessions();
+      setCleanupNotice(`Sessioni eliminate: ${deleted}. Tutti i dispositivi attivi restano connessi.`);
+      await refreshSessions();
+    } catch {
+      setSessionsError("Pulizia delle sessioni non riuscita. Riprovare.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!action || !confirmed || busy) return;
@@ -91,7 +108,7 @@ export default function SecuritySettings() {
   return (
     <section className="p-4 space-y-4">
       <h2 className="text-lg font-semibold">Sicurezza dell'installazione</h2>
-      <p>Entrambe le azioni disconnettono tutti gli utenti, incluso questo account. Password e dati restano invariati.</p>
+      <p>La revoca globale e la rotazione della chiave disconnettono tutti gli utenti, incluso questo account. La semplice pulizia no. Password e dati restano invariati.</p>
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 id="security-sessions-heading" className="font-semibold">
@@ -102,6 +119,12 @@ export default function SecuritySettings() {
             {sessionsLoading ? "Caricamento..." : "Aggiorna elenco"}
           </button>
         </div>
+        <button type="button" onClick={cleanupSessions} disabled={busy || sessionsLoading}
+          className="min-h-11 border rounded px-3 py-2 disabled:opacity-50">
+          Pulisci sessioni scadute / disconnesse di tutti gli utenti
+        </button>
+        <p className="text-sm">La pulizia elimina subito solo sessioni scadute o revocate, senza password e senza disconnettere nessuno. Include anche quelle revocate, non mostrate nell'elenco.</p>
+        {cleanupNotice && <p role="status" className="text-sm">{cleanupNotice}</p>}
         <p className="text-sm">La revoca riguarda tutte queste sessioni, anche quelle scadute. L'elenco fotografa lo stato al caricamento; altri accessi possono avvenire nel frattempo.</p>
         <p className="text-sm">Eventuali token precedenti al tracciamento dei dispositivi non sono elencati, ma vengono comunque invalidati.</p>
         {sessionsError && <p role="alert" className="text-red-600">{sessionsError}</p>}

@@ -11,7 +11,7 @@ import uuid
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.security.utils import get_authorization_scheme_param
 from dependencies import get_db, get_current_user, authenticated_user, decode_access_token
-from crud import get_setting, set_setting
+from crud import get_setting, set_setting, cleanup_ended_sessions
 from models import DeviceSession
 from auth_config import get_secret_key, current_secret_key, key_lock, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
@@ -217,6 +217,14 @@ def get_device_sessions(
         }
         for session in sessions
     ]
+
+
+@router.delete("/sessions")
+def cleanup_own_sessions(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return {"deleted": cleanup_ended_sessions(db, user_id=current_user.id)}
 
 
 @router.delete("/sessions/{session_id}")

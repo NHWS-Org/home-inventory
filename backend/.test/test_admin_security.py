@@ -67,6 +67,79 @@ def bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.mark.parametrize("global_cleanup", [False, True])
+def test_manual_cleanup_without_password_preserves_active_tokens_and_audit(security, global_cleanup):
+    factory, client, _ = security
+    admin, viewer = login(client), login(client, "viewer")
+    key = auth_config.current_secret_key()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with factory.begin() as db:
+        for user_id in (1, 2):
+            db.add_all([
+                DeviceSession(
+                    user_id=user_id, session_token_id=f"expired-{user_id}",
+                    expires_at=now - timedelta(seconds=1),
+                ),
+                DeviceSession(
+                    user_id=user_id, session_token_id=f"revoked-{user_id}",
+                    expires_at=now + timedelta(days=1), revoked_at=now,
+                ),
+            ])
+        db.add(SecurityAudit(
+            actor_username="admin", action="rotate_key", outcome="password_rejected", created_at=now,
+        ))
+    path = "/admin/security/sessions" if global_cleanup else "/auth/sessions"
+    actor = admin if global_cleanup else viewer
+    response = client.delete(path, headers=bearer(actor))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"deleted": 4 if global_cleanup else 2}
+    assert client.delete(path, headers=bearer(actor)).json() == {"deleted": 0}
+    for token in (admin, viewer):
+        assert client.get("/protected", headers=bearer(token)).status_code == 200
+    assert auth_config.current_secret_key() == key
+    with factory() as db:
+        sessions = db.scalars(select(DeviceSession)).all()
+        assert len(sessions) == (2 if global_cleanup else 4)
+        if not global_cleanup:
+            assert {s.session_token_id for s in sessions if s.user_id == 1} >= {"expired-1", "revoked-1"}
+        assert db.scalars(select(SecurityAudit)).one().outcome == "password_rejected"
+
+
+def test_manual_cleanup_permissions(security):
+    factory, client, _ = security
+    viewer = login(client, "viewer")
+    for path in ("/auth/sessions", "/admin/security/sessions"):
+        assert client.delete(path).status_code == 401
+    assert client.delete("/admin/security/sessions", headers=bearer(viewer)).status_code == 403
+    with factory.begin() as db:
+        db.get(User, 2).is_blocked = True
+    assert client.delete("/auth/sessions", headers=bearer(viewer)).status_code == 403
+
+
+@pytest.mark.parametrize("path", ["/auth/sessions", "/admin/security/sessions"])
+def test_manual_cleanup_commit_failure_rolls_back(security, monkeypatch, path):
+    from sqlalchemy.exc import OperationalError
+
+    factory, client, _ = security
+    token = login(client)
+    with factory.begin() as db:
+        db.add(DeviceSession(
+            user_id=1, session_token_id="expired",
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1),
+        ))
+
+    def failing_commit(db):
+        raise OperationalError("private database detail", {}, Exception())
+
+    monkeypatch.setattr(factory.class_, "commit", failing_commit)
+    response = client.delete(path, headers=bearer(token))
+    assert response.status_code == 500
+    assert "private" not in response.text
+    with factory() as db:
+        assert len(db.scalars(select(DeviceSession)).all()) == 2
+    assert client.get("/protected", headers=bearer(token)).status_code == 200
+
+
 @pytest.mark.parametrize("endpoint", ["revoke-sessions", "rotate-key"])
 def test_admin_password_and_confirmation_required(security, endpoint):
     factory, client, _ = security
