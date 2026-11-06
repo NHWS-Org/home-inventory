@@ -258,7 +258,7 @@ Le notifiche quantita accorpano le correzioni nella stessa finestra della cronol
 
 ### Automazioni agentiche (GitHub Copilot)
 
-Tre workflow GitHub Agentic usano Copilot ogni notte: Sentinel alle **02:00**, Bolt alle **03:00** e Palette alle **04:00** (`Europe/Rome`). Puoi avviarli anche manualmente dalla scheda **Actions**. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
+Tre workflow GitHub Agentic usano Copilot solo su avvio manuale: Sentinel, Bolt e Palette. Non sono previste esecuzioni schedulate. Dalla scheda **Actions**, scegli il workflow, premi **Run workflow** e seleziona il branch in **Use workflow from** (default `main`). Il branch selezionato viene analizzato ed è la base della PR proposta. Da CLI: `gh workflow run palette.lock.yml --ref release/1.6.0` (sostituisci `palette` con `sentinel` o `bolt`; senza `--ref` viene usato `main`). Il branch deve contenere il workflow. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
 
 Per abilitarli, GitHub Actions deve essere attivo e l'organizzazione deve consentire l'uso di Copilot CLI fatturato all'organizzazione. Le sorgenti sono i file `.md` in `.github/workflows`; dopo averli modificati, rigenera i workflow Actions con `gh aw compile`. Non modificare direttamente i corrispondenti file `.lock.yml` generati.
 
@@ -532,7 +532,7 @@ Quantity notifications coalesce corrections within the same window as history (4
 
 ### Agentic workflows (GitHub Copilot)
 
-Three GitHub Agentic workflows use Copilot each night: Sentinel at **02:00**, Bolt at **03:00**, and Palette at **04:00** (`Europe/Rome`). You can also start them manually from the **Actions** tab. If they find a suitable improvement, they create at most one draft PR; they never merge automatically. Sentinel is restricted to generic preventive hardening and does not search for or publish details about specific vulnerabilities because this repository is public.
+Three GitHub Agentic workflows use Copilot only when manually dispatched: Sentinel, Bolt, and Palette. There are no scheduled runs. From the **Actions** tab, choose the workflow, click **Run workflow**, and select the branch under **Use workflow from** (default `main`). The selected branch is analyzed and used as the base of the proposed PR. From the CLI: `gh workflow run palette.lock.yml --ref release/1.6.0` (replace `palette` with `sentinel` or `bolt`; omitting `--ref` uses `main`). The branch must contain the workflow. If they find a suitable improvement, they create at most one draft PR; they never merge automatically. Sentinel is restricted to generic preventive hardening and does not search for or publish details about specific vulnerabilities because this repository is public.
 
 To enable them, GitHub Actions must be enabled and the organization must allow Copilot CLI usage billed to the organization. The workflow sources are the `.md` files in `.github/workflows`; after editing them, regenerate the Actions workflows with `gh aw compile`. Do not edit the corresponding generated `.lock.yml` files directly.
 
