@@ -52,6 +52,11 @@ nel nuovo ambiente. Per conservare anche i token esistenti, trasferire separatam
 il file chiave JWT mantenendo i permessi `0600`; altrimenti AUTO genera una
 nuova chiave e occorre rifare login, senza perdere le password del DB ripristinato.
 Su un volume nuovo impostare `ADMIN_PASSWORD` prima dell'avvio.
+In Compose Dev inserirla nel file privato `backend/.env` (non versionato).
+Senza password e senza un admin gia presente nel DB, il bootstrap fallisce
+e il backend rimane unhealthy; il worker attende correttamente il backend.
+Il controllo salute backend viene eseguito ogni 5 secondi, con timeout di
+5 secondi, tolleranza iniziale di 60 secondi e 3 tentativi falliti.
 Il file root `.env.dev` e versionato e caricato automaticamente dal Compose Dev,
 anche con Compose Up da VS Code. Contiene solo default pubblici di test:
 SQLite e timezone. Non inserire segreti reali. Per il backend viene caricato
