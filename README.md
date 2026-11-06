@@ -45,7 +45,7 @@ All'avvio il backend mostra il tipo di database e l'URL di destinazione con pass
 
 Il prefisso proxy `FASTAPI_ROOT_PATH` viene passato a Uvicorn dall'entrypoint Docker. Per un avvio locale dietro proxy usa `uvicorn main:app --reload --root-path /api`; senza proxy ometti `--root-path`.
 
-Gli healthcheck Docker mantengono gli intervalli di controllo esistenti, ma non conservano il corpo delle risposte riuscite. Il frontend usa `/health-check`, verificando che `index.html` sia disponibile; il backend mantiene `/system/health-check` (controllo del processo API, non della connessione DB). I controlli riusciti non producono access log; gli errori e le normali richieste restano visibili. Per applicare queste modifiche occorre ricostruire o aggiornare entrambe le immagini e ricreare i container.
+Gli healthcheck Docker non conservano il corpo delle risposte riuscite. Il frontend usa `/health-check`, verificando che `index.html` sia disponibile; il backend mantiene `/system/health-check` (controllo del processo API, non della connessione DB). In Compose Dev il backend viene controllato ogni 5 secondi, con 60 secondi di tolleranza iniziale per bootstrap e migrazioni: il primo controllo riuscito lo rende subito healthy e sblocca il worker, senza attendere la fine della tolleranza. Gli intervalli di produzione restano invariati. I controlli riusciti non producono access log; gli errori e le normali richieste restano visibili. Per applicare le modifiche al Compose Dev basta ricreare il container backend; le modifiche alle immagini richiedono anche ricostruzione o aggiornamento.
 
 Se nei log compare `ModuleNotFoundError: No module named 'database'`, verifica che lo stack non monti una cartella dati su `/app`. Ad esempio, sostituisci `.../home-inventory-dev:/app` con `.../home-inventory-dev:/app/data` e ricrea il container. Se i backup erano nella sottocartella `backups`, il nuovo mount li espone direttamente in `/app/data/backups`. Non occorre modificare il volume PostgreSQL.
 
@@ -102,7 +102,9 @@ La timezone di tutti i servizi, incluso il worker, e configurata una sola volta 
 
 ### Notifiche (in sviluppo)
 
-La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). Le prime due fasi aggiungono contratti, tabelle e un worker DB opt-in (profilo Compose `notifications`); non inviano notifiche e non modificano l'interfaccia. Le regole saranno introdotte nella fase 3.
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). Nessuna regola viene preattivata; UI e push non sono ancora disponibili.
+
+Le notifiche quantita accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Anche il completamento checklist attende questa finestra. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
 
 ### Automazioni agentiche (GitHub Copilot)
 
@@ -221,7 +223,7 @@ At startup, the backend logs the database type and destination URL with the pass
 
 The Docker entrypoint passes the `FASTAPI_ROOT_PATH` proxy prefix to Uvicorn. For local startup behind a proxy, use `uvicorn main:app --reload --root-path /api`; without a proxy, omit `--root-path`.
 
-Docker healthchecks keep their existing intervals but discard successful response bodies. The frontend uses `/health-check`, checking that `index.html` is available; the backend keeps `/system/health-check` (API process liveness, not database connectivity). Successful probes do not produce access logs; errors and normal requests remain visible. Rebuild or update both images and recreate the containers to apply these changes.
+Docker healthchecks discard successful response bodies. The frontend uses `/health-check`, checking that `index.html` is available; the backend keeps `/system/health-check` (API process liveness, not database connectivity). In Compose Dev the backend is checked every 5 seconds, with a 60-second startup grace period for bootstrap and migrations: the first successful probe immediately marks it healthy and unblocks the worker, without waiting for the grace period to end. Production intervals remain unchanged. Successful probes do not produce access logs; errors and normal requests remain visible. Applying the Compose Dev changes only requires recreating the backend container; image changes also require rebuilding or updating images.
 
 If logs show `ModuleNotFoundError: No module named 'database'`, check that the stack does not mount a data directory over `/app`. For example, replace `.../home-inventory-dev:/app` with `.../home-inventory-dev:/app/data` and recreate the container. Existing backups in the `backups` subdirectory will then be available at `/app/data/backups`. Leave the PostgreSQL volume unchanged.
 
@@ -278,7 +280,9 @@ All services, including the worker, use the `TZ` value configured once in the ro
 
 ### Notifications (in development)
 
-The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). The first two phases add contracts, tables and an opt-in DB worker (Compose profile `notifications`); they do not send notifications or change the interface. Rules arrive in phase 3.
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). No rules are enabled automatically; UI and push are not available yet.
+
+Quantity notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. Checklist completion also waits for this window. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
 
 ### Agentic workflows (GitHub Copilot)
 

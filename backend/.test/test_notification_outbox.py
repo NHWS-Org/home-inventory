@@ -180,13 +180,12 @@ def test_duplicate_event_key_rejected_in_transaction(factory):
         enqueue(factory, event_key=key)
 
 
-def test_phase_two_without_rules_retries_explicitly(factory, caplog):
+def test_missing_inventory_completes_without_recipients(factory):
     event_id = enqueue(factory)
     claim = claim_event(factory, now=NOW)
-    assert not process_claim(factory, claim, now=NOW)
-    assert "temporary_processing_error" in caplog.text
+    assert process_claim(factory, claim, now=NOW)
     with factory() as db:
-        assert db.get(NotificationEvent, event_id).status == "pending"
+        assert db.get(NotificationEvent, event_id).status == "completed"
 
 
 def test_restore_discards_pending_events_even_for_preserved_admin(factory):
@@ -239,7 +238,7 @@ def test_worker_migration_downgrade_preserves_events_and_inbox(factory):
         assert len(db.scalars(select(Notification)).all()) == 1
 
 
-def test_worker_once_returns_failure_for_unconfigured_rules(factory, monkeypatch):
+def test_worker_once_processes_missing_inventory_without_sending(factory, monkeypatch):
     import notification_worker
 
     with factory.begin() as db:
@@ -247,9 +246,10 @@ def test_worker_once_returns_failure_for_unconfigured_rules(factory, monkeypatch
     monkeypatch.setattr(notification_worker, "SessionLocal", factory)
     monkeypatch.setattr("sys.argv", ["notification_worker", "--once"])
     monkeypatch.setattr(notification_worker.signal, "signal", lambda *args: None)
-    with pytest.raises(SystemExit) as result:
-        notification_worker.main()
-    assert result.value.code == 1
+    notification_worker.main()
+    with factory() as db:
+        assert db.scalars(select(Notification)).all() == []
+        assert db.scalars(select(NotificationEvent)).one().status == "completed"
 
 
 def test_worker_status_does_not_claim_pending_event(factory, monkeypatch, caplog):

@@ -15,6 +15,7 @@ from models import (
     ItemVersion,
 )
 from assignment_service import build_assignment_summary, pending_assigned_by_source
+from notification_rules import emit_share
 from schemas import InventoryCreate, InventoryResponse, InventoryUpdate, ItemMetadataValueResponse, ItemBarcodeResponse, ItemResponse, UserResponse, InventoryResponseWithItemCount, InventoryVersionResponse, VersionBulkDeleteRequest
 from routes.auth import get_current_user
 from typing import Any, List, cast
@@ -474,6 +475,7 @@ def share_base(
 
     shared = SharedInventory(user_id=target_user.id, inventory_id=inventory_id)
     db.add(shared)
+    emit_share(db, inventory_id, "user", target_user.id, user.id)
     db.commit()
     return {"detail": f"Inventario condiviso con {target_user.username}"}
 
@@ -551,6 +553,7 @@ def share_with_group_base(
 
     shared = SharedInventoryGroup(group_id=group_id, inventory_id=inventory_id)
     db.add(shared)
+    emit_share(db, inventory_id, "group", group_id, user.id)
     db.commit()
     return {"detail": f"Inventario condiviso con il gruppo '{group.name}'"}
 

@@ -2,9 +2,11 @@ import json
 from typing import Any, List, cast
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, select, update
 from models import User, Item, Inventory, ItemVersion, ItemBarcode
 from assignment_service import apply_check_change, build_assignment_summary, pending_assigned_by_source
+from notification_rules import emit_item_change
+from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 from dependencies import get_db
 from schemas import ItemCreate, ItemUpdate, ItemDelete, ItemMetadataValueResponse, ItemResponse, ItemVersionResponse, VersionBulkDeleteRequest, ItemBarcodeCreate, ItemBarcodeResponse
 from barcode_service import normalize_code
@@ -14,7 +16,14 @@ from fastapi import status
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter()
-QUANTITY_MERGE_WINDOW_SECONDS = 45
+
+
+def _lock_checklist(db: Session, item_id: int) -> None:
+    # Serialize completion transitions across different rows, including on SQLite.
+    db.execute(update(Inventory).where(
+        Inventory.id == select(Item.inventory_id).where(Item.id == item_id).scalar_subquery(),
+        Inventory.type == "CHECKLIST",
+    ).values(data_mod=Inventory.data_mod))
 
 
 def _utc_now_naive() -> datetime:
@@ -62,6 +71,7 @@ def _write_item_version(
 ) -> None:
     diff: dict = {}
     new_snapshot = None
+    changed_at = _utc_now_naive()
     if old_snapshot and operation == "UPDATE":
         new_snapshot = _snapshot_item(item)
         for key, new_val in new_snapshot.items():
@@ -105,7 +115,7 @@ def _write_item_version(
                 and last_operation == "UPDATE"
                 and last_changed_by_id == user.id
                 and last_changed_at is not None
-                and last_changed_at >= _utc_now_naive() - timedelta(seconds=QUANTITY_MERGE_WINDOW_SECONDS)
+                and last_changed_at >= changed_at - timedelta(seconds=QUANTITY_MERGE_WINDOW_SECONDS)
             ):
                 try:
                     previous_diff = json.loads(last_diff_raw) if last_diff_raw else {}
@@ -116,12 +126,16 @@ def _write_item_version(
                 if set(previous_diff.keys()) == {"quantity"}:
                     qty_from = previous_diff.get("quantity", {}).get("from", old_snapshot.get("quantity"))
                     qty_to = new_snapshot.get("quantity")
+                    emit_item_change(
+                        db, item, old_snapshot, user.id, now=changed_at,
+                        merge_previous_at=last_changed_at,
+                    )
 
                     # Se qty_from == qty_to, le modifiche si annullano: non registrare nulla
                     # MA solo se siamo ancora entro la finestra di merge (doppio check per sicurezza)
                     if qty_from == qty_to:
                         # Verifica ancora che siamo dentro la finestra (re-check per edge cases)
-                        time_since_last = (_utc_now_naive() - last_changed_at).total_seconds()
+                        time_since_last = (changed_at - last_changed_at).total_seconds()
                         if time_since_last <= QUANTITY_MERGE_WINDOW_SECONDS:
                             # Rimuovi la versione precedente dal db poiché è stata annullata
                             db.delete(last_version)
@@ -133,10 +147,12 @@ def _write_item_version(
                     setattr(last_version, "quantity", item.quantity)
                     setattr(last_version, "priority", item.priority)
                     setattr(last_version, "inventory_id", item.inventory_id)
-                    setattr(last_version, "changed_at", _utc_now_naive())
+                    setattr(last_version, "changed_at", changed_at)
                     setattr(last_version, "changed_by_username", user.username)
                     setattr(last_version, "diff", json.dumps({"quantity": {"from": qty_from, "to": qty_to}}))
                     return
+
+        emit_item_change(db, item, old_snapshot, user.id, now=changed_at)
 
     item_id = cast(int, item.id)
     inventory_id = cast(int, item.inventory_id)
@@ -149,7 +165,7 @@ def _write_item_version(
         priority=item.priority,
         version_num=_next_item_version_num(db, item_id),
         operation=operation,
-        changed_at=_utc_now_naive(),
+        changed_at=changed_at,
         changed_by_id=user.id,
         changed_by_username=user.username,
         diff=json.dumps(diff) if diff else None,
@@ -276,6 +292,7 @@ def update_item(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    _lock_checklist(db, item_id)
     item = db.query(Item).get(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item non trovato")
@@ -449,6 +466,7 @@ def rollback_item(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    _lock_checklist(db, item_id)
     target = db.query(ItemVersion).filter(
         ItemVersion.item_id == item_id,
         ItemVersion.version_num == version_num,
