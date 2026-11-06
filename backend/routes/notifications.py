@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from dependencies import get_current_user, get_db
 from models import (
-    Group, Inventory, Notification, NotificationEvent, NotificationPreference, NotificationRule, User,
+    Group, Inventory, Notification, NotificationEvent, NotificationPreference, NotificationRule,
+    User, UserGroupAssociation,
 )
 from notification_contracts import (
     NotificationEventType, NotificationPreferenceInput, NotificationRuleInput,
@@ -58,6 +59,37 @@ def list_rules(inventory_id: int, db: Session = Depends(get_db), user=Depends(ge
     return [rule_response(rule) for rule in db.scalars(select(NotificationRule).where(
         NotificationRule.inventory_id == inventory_id,
     ).order_by(NotificationRule.id))]
+
+
+@router.get("/rules/{inventory_id}/recipients")
+def rule_recipients(
+    inventory_id: int, db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    inventory = managed_inventory(db, user, inventory_id)
+    group_ids = {share.group_id for share in inventory.shared_with_groups}
+    user_ids = {share.user_id for share in inventory.shared_with_users}
+    if inventory.owner_id is not None:
+        user_ids.add(inventory.owner_id)
+    if group_ids:
+        user_ids.update(db.scalars(select(UserGroupAssociation.user_id).where(
+            UserGroupAssociation.group_id.in_(group_ids),
+        )))
+    users = db.scalars(select(User).where(User.id.in_(user_ids)).order_by(
+        User.username, User.id,
+    )).all() if user_ids else []
+    groups = {
+        share.group_id: share.group.name for share in inventory.shared_with_groups
+    }
+    return {
+        "users": [
+            {"id": recipient.id, "username": recipient.username}
+            for recipient in users if can_receive(recipient, inventory)
+        ],
+        "groups": [
+            {"id": group_id, "name": name}
+            for group_id, name in sorted(groups.items(), key=lambda entry: (entry[1], entry[0]))
+        ],
+    }
 
 
 @router.post("/rules/{inventory_id}", status_code=201)
@@ -143,13 +175,38 @@ def set_preference(
     return {"event_type": event_type.value, **payload.model_dump()}
 
 
-def accessible_notification(db: Session, row: Notification, user: User) -> NotificationEvent | None:
+def accessible_notification_context(
+    db: Session, row: Notification, user: User,
+) -> tuple[NotificationEvent, Inventory] | None:
     record = db.get(NotificationEvent, row.event_id)
     if record is None or record.schema_version != 1:
         return None
     data = notification_event_adapter.validate_python(record.payload)
     inventory = db.get(Inventory, data.inventory_id)
-    return record if inventory is not None and can_receive(user, inventory) else None
+    return (record, inventory) if inventory is not None and can_receive(user, inventory) else None
+
+
+def accessible_notification(db: Session, row: Notification, user: User) -> NotificationEvent | None:
+    context = accessible_notification_context(db, row, user)
+    return context[0] if context is not None else None
+
+
+def accessible_notifications(db: Session, user: User, *, unread_only: bool = False):
+    last_id = None
+    while True:
+        query = select(Notification).where(Notification.user_id == user.id)
+        if unread_only:
+            query = query.where(Notification.read_at.is_(None))
+        if last_id is not None:
+            query = query.where(Notification.id < last_id)
+        rows = db.scalars(query.order_by(Notification.id.desc()).limit(100)).all()
+        if not rows:
+            break
+        last_id = rows[-1].id
+        for row in rows:
+            context = accessible_notification_context(db, row, user)
+            if context is not None:
+                yield row, context[0], context[1]
 
 
 @router.get("")
@@ -159,29 +216,35 @@ def inbox(
 ):
     result = []
     skipped = 0
-    last_id = None
-    while len(result) < limit:
-        query = select(Notification).where(Notification.user_id == user.id)
-        if last_id is not None:
-            query = query.where(Notification.id < last_id)
-        rows = db.scalars(query.order_by(Notification.id.desc()).limit(100)).all()
-        if not rows:
+    for row, record, inventory in accessible_notifications(db, user):
+        if skipped < offset:
+            skipped += 1
+            continue
+        result.append({
+            "id": row.id, "created_at": row.created_at, "read_at": row.read_at,
+            "event": record.payload, "inventory_type": inventory.type,
+            "inventory_name": inventory.name,
+        })
+        if len(result) == limit:
             break
-        last_id = rows[-1].id
-        for row in rows:
-            record = accessible_notification(db, row, user)
-            if record is None:
-                continue
-            if skipped < offset:
-                skipped += 1
-                continue
-            result.append({
-                "id": row.id, "created_at": row.created_at, "read_at": row.read_at,
-                "event": record.payload,
-            })
-            if len(result) == limit:
-                break
     return result
+
+
+@router.get("/unread-count")
+def unread_count(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return {"count": sum(1 for _ in accessible_notifications(db, user, unread_only=True))}
+
+
+@router.put("/read-all")
+def read_all(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    read_at = utcnow()
+    updated = 0
+    for row, _record, _inventory in accessible_notifications(db, user, unread_only=True):
+        row.read_at = read_at
+        updated += 1
+    if updated:
+        db.commit()
+    return {"updated": updated}
 
 
 @router.put("/{notification_id}/read")

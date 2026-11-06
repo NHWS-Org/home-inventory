@@ -251,6 +251,63 @@ da client Push API gia disponibili, ma nessun client nuovo e incluso qui.
 I test reali di consenso/display/click richiedono HTTPS e un browser reale;
 la loro riuscita **non** e certificata dai mock. La fase 4 e completata.
 
+## Fase 6: inbox, preferenze e regole
+
+Branch `notifications/58-inbox-preferences-rule-editor`, PR verso il solo epic.
+La campanella apre **Centro notifiche** e mostra il numero di notifiche non
+lette accessibili all'utente. Il conteggio si aggiorna ogni 30 secondi, al
+ritorno sulla finestra e dopo le operazioni di lettura; un errore non viene
+mostrato come zero. La pagina elenca 50 righe per volta, con **Carica altre**,
+**Aggiorna**, lettura singola e **Segna tutte come lette**. Il comando globale
+riguarda tutte le pagine, non solo quelle caricate.
+
+Le notifiche di contenitori non piu accessibili non vengono elencate,
+conteggiate o modificate dalla lettura massiva. I link usano il tipo del
+contenitore autorizzato dal backend, anche per condivisioni di checklist;
+le route applicative verificano nuovamente i permessi all'apertura.
+Lettura inbox, accettazione provider e visualizzazione push sono dati diversi:
+aprire il contenitore non afferma che il provider abbia consegnato un push.
+
+Nel **Profilo**, le preferenze per ciascun evento controllano inbox, push e
+inclusione delle proprie azioni. Inbox predefinita attiva, push e azioni proprie
+disattivati. Le modifiche richiedono **Salva** per il singolo evento; abilitare
+push qui non richiede permessi al browser e non crea sottoscrizioni.
+
+In ciascun inventario/checklist, **Regole notifiche** e visibile solo a
+proprietario o admin. L'editor guida evento, soglia (solo quantita),
+destinatari autorizzati, attivazione e riepilogo, con creazione/modifica/eliminazione.
+Il canale segue le preferenze personali di ogni destinatario: il contratto
+regole non impone un canale e non forza il consenso altrui. Il link al Profilo
+permette di configurare i propri canali. Non vengono create regole automatiche.
+
+Nuove API autenticate:
+
+- `GET /notifications/unread-count`: `{count}`, solo notifiche accessibili.
+- `PUT /notifications/read-all`: `{updated}`, sola inbox del chiamante.
+- `GET /notifications/rules/{inventory_id}/recipients`: opzioni utenti/gruppi
+  autorizzate, riservate al gestore del contenitore.
+- La inbox include `inventory_type` e `inventory_name` dal contenitore
+  autorizzato, senza affidare al client la decisione sui permessi.
+
+### Validazione prima del merge della fase 6
+
+Eseguire test backend mirati, `cd frontend && npm test`, lint e build.
+La validazione browser con API in-memory verifica la UI, non consegna push.
+Dopo rebuild dei contenitori verificare con dati di prova isolati:
+
+1. Campanella con zero/non-zero, inbox vuota/caricamento/errore e paginazione.
+2. Lettura singola e globale, aggiornamento conteggio e persistenza al reload.
+3. Accesso revocato e account diverso: nessuna esposizione o lettura delle
+   notifiche altrui; link inventario e checklist corretti dopo login.
+4. Preferenze salvate separatamente; nessun prompt push forzato.
+5. Editor proprietario/admin: creazione, modifica, eliminazione, soglia valida,
+   destinatari limitati agli autorizzati; assenza editor per altri utenti.
+6. Layout desktop/mobile, tastiera, nomi accessibili e feedback di errore.
+
+La fase 5 e stata integrata dopo approvazione esplicita; ricezione remota/click
+OS, prompt iniziale e dispositivi iOS/Android restano da validare realmente.
+STOP dopo la PR della fase 6: niente merge senza test/approvazione utente.
+
 ## Fase 5: service worker e consenso browser
 
 Branch `notifications/57-service-worker-consent`, PR verso il branch epic #38.
@@ -263,8 +320,7 @@ frontend (fase 6).
 generici, usa un tag per la deduplicazione del browser e accetta solo
 destinazioni di notifica same-origin; URL esterni o malformati tornano alla home.
 Il percorso push predefinito e `/notifications`, route protetta che conserva la
-destinazione nel login. Fino alla inbox della fase 6 mostra una pagina
-segnaposto con accesso alla gestione push del Profilo.
+destinazione nel login e mostra la inbox dalla fase 6.
 
 In **Profilo > Gestione profilo**, il pannello espone stati distinti per
 supporto browser, HTTPS, installazione iOS, versione minima iOS, permesso

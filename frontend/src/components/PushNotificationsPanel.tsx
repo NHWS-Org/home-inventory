@@ -137,7 +137,7 @@ export default function PushNotificationsPanel() {
       )}
       <p className="text-sm text-gray-600 dark:text-gray-300">
         La scelta vale solo per questo browser. Serve anche il consenso push per il tipo di evento;
-        le preferenze per evento saranno configurabili nella fase successiva.
+        configura le preferenze per evento nella sezione Preferenze notifiche del Profilo.
       </p>
       <div className="flex flex-wrap gap-2">
         {canEnable && (

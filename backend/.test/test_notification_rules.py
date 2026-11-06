@@ -132,6 +132,27 @@ def test_rule_api_owner_admin_only_and_scope_validation(setup):
     assert client.get("/notifications/rules/999").status_code == 404
 
 
+def test_rule_recipient_options_are_limited_to_inventory_scope(setup):
+    _, client, current = setup
+    expected = {
+        "users": [
+            {"id": 5, "username": "editor"},
+            {"id": 1, "username": "owner"},
+            {"id": 2, "username": "viewer"},
+        ],
+        "groups": [{"id": 1, "name": "Family"}],
+    }
+    assert client.get("/notifications/rules/1/recipients").json() == expected
+    checklist_expected = {**expected, "groups": []}
+    assert client.get("/notifications/rules/2/recipients").json() == checklist_expected
+    for user in (2, 3, 5):
+        current[0] = user
+        assert client.get("/notifications/rules/1/recipients").status_code == 403
+    current[0] = 4
+    assert client.get("/notifications/rules/1/recipients").json() == expected
+    assert client.get("/notifications/rules/999/recipients").status_code == 404
+
+
 def test_threshold_transition_rearms_and_deduplicates_rules_groups(setup):
     factory, client, current = setup
     create_rule(client)
@@ -185,6 +206,8 @@ def test_inbox_rechecks_authorization_and_read_ownership(setup):
     process_all(factory)
     current[0] = 5
     row = client.get("/notifications").json()[0]
+    assert row["inventory_type"] == "INVENTORY"
+    assert row["inventory_name"] == "Stock"
     assert client.put(f"/notifications/{row['id']}/read").status_code == 200
     with factory.begin() as db:
         share = db.scalar(select(SharedInventory).where(
@@ -193,6 +216,72 @@ def test_inbox_rechecks_authorization_and_read_ownership(setup):
         db.delete(share)
     assert client.get("/notifications").json() == []
     assert client.put(f"/notifications/{row['id']}/read").status_code == 404
+
+
+def test_unread_count_and_read_all_cover_all_authorized_pages(setup):
+    factory, client, current = setup
+    with factory.begin() as db:
+        db.add(Inventory(id=3, name="Private", type="INVENTORY", owner_id=1))
+        events = [
+            NotificationEvent(
+                payload={
+                    "event_type": "item_quantity_changed", "inventory_id": 1,
+                    "item_id": 1, "previous_quantity": 5, "quantity": 2,
+                },
+            )
+            for _ in range(105)
+        ]
+        db.add_all(events)
+        db.flush()
+        db.add_all([
+            notification
+            for event in events
+            for notification in (
+                Notification(event_id=event.id, user_id=1),
+                Notification(event_id=event.id, user_id=5),
+            )
+        ])
+        private_event = NotificationEvent(payload={
+            "event_type": "checklist_completed", "inventory_id": 3,
+        })
+        db.add(private_event)
+        db.flush()
+        private_notification = Notification(event_id=private_event.id, user_id=5)
+        db.add(private_notification)
+
+    current[0] = 5
+    assert client.get("/notifications/unread-count").json() == {"count": 105}
+    assert client.put("/notifications/read-all").json() == {"updated": 105}
+    assert client.get("/notifications/unread-count").json() == {"count": 0}
+    with factory() as db:
+        assert sum(row.read_at is None for row in db.scalars(
+            select(Notification).where(Notification.user_id == 1),
+        )) == 105
+        assert db.get(Notification, private_notification.id).read_at is None
+
+
+def test_unread_count_and_read_all_hide_revoked_inventory_access(setup):
+    factory, client, current = setup
+    with factory.begin() as db:
+        event = NotificationEvent(payload={
+            "event_type": "item_quantity_changed", "inventory_id": 1,
+            "item_id": 1, "previous_quantity": 5, "quantity": 2,
+        })
+        db.add(event)
+        db.flush()
+        notification = Notification(event_id=event.id, user_id=5)
+        db.add(notification)
+    current[0] = 5
+    assert client.get("/notifications/unread-count").json() == {"count": 1}
+    with factory.begin() as db:
+        share = db.scalar(select(SharedInventory).where(
+            SharedInventory.user_id == 5, SharedInventory.inventory_id == 1,
+        ))
+        db.delete(share)
+    assert client.get("/notifications/unread-count").json() == {"count": 0}
+    assert client.put("/notifications/read-all").json() == {"updated": 0}
+    with factory() as db:
+        assert db.get(Notification, notification.id).read_at is None
 
 
 def test_share_user_and_group_events_no_op_and_transaction(setup):
@@ -273,8 +362,9 @@ def test_deleted_or_disabled_rule_suppresses_queued_event(setup):
 
 def test_preference_defaults_and_bad_inputs(setup):
     _, client, _ = setup
+    defaults = client.get("/notifications/preferences").json()
     assert all(row["in_app_enabled"] and not row["include_own_actions"] and not row["push_enabled"]
-               for row in client.get("/notifications/preferences").json())
+               for row in defaults)
     assert client.put("/notifications/preferences/unknown", json={}).status_code == 422
     assert client.put("/notifications/preferences/inventory_shared", json={
         "push_enabled": "true",
@@ -282,6 +372,7 @@ def test_preference_defaults_and_bad_inputs(setup):
     assert client.put("/notifications/preferences/inventory_shared", json={
         "push_enabled": True,
     }).status_code == 200
+    assert client.get("/notifications/preferences").json()[0]["push_enabled"] is True
 
 
 def test_real_item_update_merges_notifications_with_audit_and_ignores_noop(setup):
@@ -409,6 +500,47 @@ def test_inbox_paginates_authorized_rows_and_never_other_users(setup):
     current[0] = 3
     assert client.get("/notifications").json() == []
     assert client.put(f"/notifications/{first[0]['id']}/read").status_code == 404
+
+
+def test_inbox_offset_pages_authorized_rows_after_large_inaccessible_prefix(setup):
+    factory, client, current = setup
+    with factory.begin() as db:
+        db.add(Inventory(id=3, name="Private", type="INVENTORY", owner_id=1))
+        accessible_events = [
+            NotificationEvent(payload={
+                "event_type": "item_quantity_changed", "inventory_id": 1,
+                "item_id": 1, "previous_quantity": 5, "quantity": 2,
+            })
+            for _ in range(60)
+        ]
+        db.add_all(accessible_events)
+        db.flush()
+        db.add_all([
+            Notification(event_id=event.id, user_id=5)
+            for event in accessible_events
+        ])
+        db.flush()
+        inaccessible_events = [
+            NotificationEvent(payload={
+                "event_type": "checklist_completed", "inventory_id": 3,
+            })
+            for _ in range(60)
+        ]
+        db.add_all(inaccessible_events)
+        db.flush()
+        db.add_all([
+            Notification(event_id=event.id, user_id=5)
+            for event in inaccessible_events
+        ])
+
+    current[0] = 5
+    first_page = client.get("/notifications?limit=50&offset=0").json()
+    second_page = client.get("/notifications?limit=50&offset=50").json()
+    assert len(first_page) == 50
+    assert len(second_page) == 10
+    assert all(row["inventory_name"] == "Stock" for row in first_page + second_page)
+    assert first_page[0]["id"] > first_page[-1]["id"] > second_page[0]["id"]
+    assert len({row["id"] for row in first_page + second_page}) == 60
 
 
 def test_two_concurrent_checklist_updates_emit_one_completion(tmp_path):

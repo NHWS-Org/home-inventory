@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
 import PushNotificationsPanel from "../components/PushNotificationsPanel";
+import NotificationPreferences from "../components/NotificationPreferences";
 import { disablePushForBrowser } from "../utils/pushNotifications";
 import { useAuth } from "../useAuth";
 
@@ -339,6 +340,7 @@ const ProfilePage = () => {
       <section>
         <PushNotificationsPanel />
       </section>
+      <NotificationPreferences />
 
       <section>
         <h2 id="profile-devices-heading" className="text-xl font-bold mb-4">Dispositivi connessi</h2>
