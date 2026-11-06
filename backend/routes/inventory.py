@@ -13,6 +13,7 @@ from models import (
     RoleEnum,
     InventoryVersion,
     ItemVersion,
+    ListAssignment,
 )
 from assignment_service import build_assignment_summary, pending_assigned_by_source
 from schemas import InventoryCreate, InventoryResponse, InventoryUpdate, ItemMetadataValueResponse, ItemBarcodeResponse, ItemResponse, UserResponse, InventoryResponseWithItemCount, InventoryVersionResponse, VersionBulkDeleteRequest
@@ -355,10 +356,31 @@ def delete_inventory_base(
     db.commit()
     return {"detail": "Inventario eliminato"}
 
-def _list_item_assignment_fields(item: Item, assigned_map: dict[int, int]) -> dict:
+def _get_assignment_count_map(db: Session, item_ids: list[int]) -> dict[int, int]:
+    """⚡ Bolt optimization: Ottiene in batch il conteggio delle assegnazioni per sorgente (evita N+1)."""
+    if not item_ids:
+        return {}
+    results = (
+        db.query(ListAssignment.source_item_id, func.count(ListAssignment.id))
+        .filter(ListAssignment.source_item_id.in_(item_ids))
+        .group_by(ListAssignment.source_item_id)
+        .all()
+    )
+    return {source_id: count for source_id, count in results}
+
+def _list_item_assignment_fields(
+    item: Item,
+    assigned_map: dict[int, int],
+    assignment_count_map: dict[int, int] | None = None,
+) -> dict:
     if item.list_assignment is not None:
         return {"assignment": build_assignment_summary(item.list_assignment, assigned_map)}
-    assignment_count = len(item.source_assignments)
+    # ⚡ Bolt optimization: Use precomputed count to avoid lazy loading source_assignments per item (eliminates N+1).
+    assignment_count = (
+        assignment_count_map.get(cast(int, item.id), 0)
+        if assignment_count_map is not None
+        else len(item.source_assignments)
+    )
     assigned = assigned_map.get(item.id, 0)
     if assignment_count or assigned:
         return {
@@ -376,12 +398,16 @@ def list_items_base(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
+    # ⚡ Bolt optimization: Eager load list_assignment -> source_item -> inventory to avoid N+1 queries in checklists.
     inventory = db.query(Inventory).options(
         joinedload(Inventory.items).joinedload(Item.user_ins_rel),
         joinedload(Inventory.items).joinedload(Item.user_mod_rel),
         joinedload(Inventory.items).joinedload(Item.metadata_values).joinedload(ItemMetadataValue.definition),
         joinedload(Inventory.items).joinedload(Item.barcodes),
-        joinedload(Inventory.items).joinedload(Item.list_assignment),
+        joinedload(Inventory.items)
+        .joinedload(Item.list_assignment)
+        .joinedload(ListAssignment.source_item)
+        .joinedload(Item.inventory),
     ).filter_by(id=inventory_id, type=inventory_type).first()
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventario non trovato")
@@ -393,8 +419,11 @@ def list_items_base(
         assigned_map = pending_assigned_by_source(
             db, [i.list_assignment.source_item_id for i in inventory.items if i.list_assignment is not None]
         )
+        assignment_count_map = {}
     else:
         assigned_map = pending_assigned_by_source(db, [i.id for i in inventory.items])
+        # ⚡ Bolt optimization: Pre-fetch assignment counts in a single query to eliminate N+1 queries.
+        assignment_count_map = _get_assignment_count_map(db, item_ids)
     return [
         ItemResponse(
             id=item.id,
@@ -420,7 +449,7 @@ def list_items_base(
                 for value in item.metadata_values
             ],
             version_num=item_version_map.get(item.id, 0),
-            **_list_item_assignment_fields(item, assigned_map),
+            **_list_item_assignment_fields(item, assigned_map, assignment_count_map),
         )
         for item in inventory.items
     ]
