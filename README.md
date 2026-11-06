@@ -136,6 +136,35 @@ riavvio. Con chiave esplicita/file verificare il messaggio di configurazione,
 mai il suo valore. Provare una rotazione soltanto sull'installazione di test:
 il vecchio token deve dare 401 e un nuovo login deve riuscire.
 
+#### Operazioni amministrative di sicurezza
+
+In **Impostazioni > Sicurezza**, solo gli amministratori possono:
+
+- **Revocare tutte le sessioni**, senza cambiare la chiave JWT.
+- **Ruotare la chiave automatica**, sostituendo atomicamente il file AUTO
+  e revocando anche tutte le sessioni.
+
+Sono operazioni separate, entrambe con password corrente e conferma esplicita.
+Tutti gli utenti, incluso chi esegue l'operazione, devono rifare login;
+password e dati non cambiano. Dopo cinque password errate in cinque minuti,
+le conferme sono temporaneamente bloccate. Se la chiave proviene da
+`SECRET_KEY` o `SECRET_KEY_FILE`, la rotazione da UI/API e bloccata con
+**Rotazione gestita tramite configurazione dell'installazione**; la revoca
+resta disponibile.
+
+Le repliche AUTO devono condividere sia il file chiave sia il file lock
+nello stesso volume dati. Login e rotazione sono coordinati e ogni processo
+rilegge la chiave senza richiedere riavvii. Le altre richieste rilevano la
+revoca al successivo controllo di autenticazione.
+
+La migrazione `d6e7f8a9b0c1` aggiunge l'audit tecnico, consultabile nella
+stessa schermata: attore, data UTC, azione, esito e numero di sessioni revocate,
+mai password o chiavi. Non eliminare questo audit: conserva anche il limite
+temporale usato per invalidare i token precedenti. Se la rotazione fallisce
+dopo la revoca, le sessioni restano revocate. Un esito `pending` indica
+un'interruzione o un errore nella conferma finale: verificare i log prima
+di riprovare, senza presumere che la chiave sia rimasta invariata.
+
 Per mantenere o scegliere PostgreSQL, imposta le due variabili e abilita il profilo corrispondente:
 
 ```bash
@@ -361,6 +390,21 @@ across restarts and confirm login with the existing password. Confirm tokens
 survive restart with a stable key; after a deliberate test key rotation, old
 tokens must fail while a new login succeeds. See the [Italian configuration
 examples](#chiave-jwt-e-configurazione-privata) for Docker secrets.
+
+**Settings > Sicurezza** provides two separate admin-only actions: revoke
+all sessions without changing the signing key, and rotate the automatically
+managed key while also revoking every session. Both require the current
+admin password and explicit confirmation; five failed confirmations within
+five minutes temporarily block further attempts. Every user, including the
+caller, must log in again. Passwords and application data are unaffected.
+Externally supplied keys cannot be rotated through the UI/API.
+
+AUTO replicas must share the key and lock files on persistent storage;
+processes reload atomic key replacements without restarting. Migration
+`d6e7f8a9b0c1` adds the security audit displayed on the same page. Keep its
+records, which also enforce revocation of older tokens. Failed rotations
+leave sessions revoked; `pending` means final confirmation was interrupted
+or failed, so check logs before retrying. No keys or passwords are audited.
 
 To keep or select PostgreSQL, set both variables and enable its Compose profile:
 

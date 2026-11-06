@@ -1,14 +1,15 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, SecurityScopes
 from database import SessionLocal, Session
-from models import User, RoleEnum, Role, DeviceSession
+from models import User, RoleEnum, Role, DeviceSession, SecurityAudit
 from crud import get_setting, set_setting
 import jwt
 import os
 import datetime
-from auth_config import get_secret_key, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from auth_config import get_secret_key, current_secret_key, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from sqlalchemy import select, func
 
-SECRET_KEY = get_secret_key()
+get_secret_key()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -62,28 +63,52 @@ def init_roles_and_admin(db: Session):
         role.user_ins = admin_user.id  # 👈 Ora assegniamo l'utente
     db.commit()
 
+def authenticated_user(db: Session, payload: dict) -> User | None:
+    # Integer microseconds retain precision even on databases with second-only DATETIME.
+    cutoff_query = select(func.max(SecurityAudit.revoked_before)).scalar_subquery()
+    result = db.query(User, cutoff_query).filter(User.username == payload.get("sub")).first()
+    if result is None:
+        return None
+    user, cutoff = result
+    if cutoff is not None:
+        issued_at = payload.get("iat")
+        if (
+            type(issued_at) not in (int, float)
+            or issued_at <= cutoff / 1_000_000
+        ):
+            raise HTTPException(status_code=401, detail="Sessione revocata")
+    session_token_id = payload.get("jti")
+    if session_token_id:
+        session = db.query(DeviceSession).filter(
+            DeviceSession.session_token_id == session_token_id,
+            DeviceSession.user_id == user.id,
+        ).first()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        if not session or session.revoked_at or session.expires_at <= now:
+            raise HTTPException(status_code=401, detail="Sessione non valida o revocata")
+    return user
+
+
 # Funzione per ottenere l'utente corrente
+def decode_access_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, current_secret_key(), algorithms=[ALGORITHM])
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token non valido") from None
+
+
 def get_current_user(security_scopes: SecurityScopes,
                      token: str = Depends(oauth2_scheme),
                      db: Session = Depends(get_db)
 ):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = decode_access_token(token)
         username: str = payload.get("sub")
         if username is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token non valido")
-        user = db.query(User).filter(User.username == username).first()
+        user = authenticated_user(db, payload)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Utente non trovato")
-        session_token_id = payload.get("jti")
-        if session_token_id:
-            device_session = db.query(DeviceSession).filter(
-                DeviceSession.session_token_id == session_token_id,
-                DeviceSession.user_id == user.id,
-            ).first()
-            now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-            if not device_session or device_session.revoked_at or device_session.expires_at <= now:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessione non valida o revocata")
         if user.role is None:
             raise HTTPException(status_code=403, detail="Accesso negato: ruolo non assegnato")
         if user.is_blocked:  # ✅ Blocca l'accesso agli utenti disabilitati

@@ -78,6 +78,33 @@ export function createApiInstance() {
 
 export { api };
 
+export interface SecurityStatus {
+  key_mode: "auto" | "external";
+  can_rotate: boolean;
+  rotation_message: string | null;
+}
+
+export interface SecurityAuditEntry {
+  id: number;
+  actor_username: string;
+  action: string;
+  outcome: string;
+  created_at: string;
+  sessions_revoked: number;
+}
+
+export async function getSecurityStatus(): Promise<SecurityStatus> {
+  return (await api.get<SecurityStatus>("/admin/security")).data;
+}
+
+export async function getSecurityAudit(): Promise<SecurityAuditEntry[]> {
+  return (await api.get<SecurityAuditEntry[]>("/admin/security/audit")).data;
+}
+
+export async function performSecurityAction(action: "revoke-sessions" | "rotate-key", password: string) {
+  await api.post(`/admin/security/${action}`, { password, confirm: true });
+}
+
 /* LOGIN UTENTI */
 export async function loginUser(username: string, password: string): Promise<{ access_token: string }> {
   const response = await api.post(

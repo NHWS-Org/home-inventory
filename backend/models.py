@@ -3,6 +3,7 @@ from typing import Any, cast
 from sqlalchemy import (
     Column,
     Integer,
+    BigInteger,
     String,
     DateTime,
     Date,
@@ -122,6 +123,19 @@ class DeviceSession(Base):
     user = relationship("User")
 
 ################################################
+class SecurityAudit(Base):
+    __tablename__ = "security_audit"
+
+    id = Column(Integer, primary_key=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_username = Column(String(255), nullable=False)
+    action = Column(String(32), nullable=False)
+    outcome = Column(String(32), nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
+    revoked_before = Column(BigInteger, nullable=True, index=True)
+    sessions_revoked = Column(Integer, nullable=False, default=0)
+
+
 class Group(Base, LoggingData):
     __tablename__ = "groups"
 

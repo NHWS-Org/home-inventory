@@ -7,11 +7,69 @@ from pathlib import Path
 import secrets
 import stat
 import tempfile
+from contextlib import contextmanager
+import fcntl
 
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 load_dotenv(Path(__file__).with_name(".env"), override=False)
+
+
+def automatic_key_mode() -> bool:
+    return (
+        not os.environ.get("SECRET_KEY_FILE", "").strip()
+        and os.environ.get("SECRET_KEY", "").strip().upper() in ("", "AUTO")
+    )
+
+
+def automatic_key_path() -> Path:
+    return Path(__file__).parent / "data" / "jwt-secret.key"
+
+
+@contextmanager
+def key_lock(*, exclusive: bool = False):
+    """Serialize automatic-key rotation with token issuance across processes."""
+    if not automatic_key_mode():
+        yield
+        return
+    path = automatic_key_path().with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "a") as stream:
+        fcntl.flock(stream, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def current_secret_key() -> str:
+    get_secret_key()
+    if automatic_key_mode():
+        # Never cache an AUTO key: every process observes atomic replacements.
+        return read_secret(automatic_key_path(), private=True)
+    return get_secret_key()
+
+
+def rotate_automatic_key() -> None:
+    """Caller must hold the exclusive key lock."""
+    if not automatic_key_mode():
+        raise RuntimeError("Rotazione gestita tramite configurazione dell'installazione")
+    path = automatic_key_path()
+    read_secret(path, private=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=".jwt-secret-", delete=False,
+    ) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write(secrets.token_urlsafe(64))
+            stream.flush()
+            os.fsync(stream.fileno())
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    logger.warning("Automatic JWT key rotated; key value is never logged.")
 
 
 def validate_secret(value: str) -> str:
@@ -75,7 +133,7 @@ def get_secret_key() -> str:
             result = validate_secret(configured)
             logger.warning("JWT key supplied by configuration; key value is never logged.")
         else:
-            path = Path(__file__).parent / "data" / "jwt-secret.key"
+            path = automatic_key_path()
             result, generated = persistent_secret(path)
             logger.warning(
                 "JWT key %s at %s. Keep this file on persistent storage; "
