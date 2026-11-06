@@ -270,7 +270,10 @@ aprire il contenitore non afferma che il provider abbia consegnato un push.
 
 Nel **Profilo**, le preferenze per ciascun evento controllano inbox, push e
 inclusione delle proprie azioni. Inbox predefinita attiva, push e azioni proprie
-disattivati. Le modifiche richiedono **Salva** per il singolo evento; abilitare
+disattivati. La sezione compatta salva automaticamente ogni tocco su un parametro;
+durante il salvataggio i controlli sono disabilitati per evitare richieste
+concorrenti. In caso di errore viene ripristinato il valore precedente e
+mostrato un messaggio per riprovare. Abilitare
 push qui non richiede permessi al browser e non crea sottoscrizioni.
 
 In ciascun inventario/checklist, **Regole notifiche** e visibile solo a
@@ -299,7 +302,8 @@ Dopo rebuild dei contenitori verificare con dati di prova isolati:
 2. Lettura singola e globale, aggiornamento conteggio e persistenza al reload.
 3. Accesso revocato e account diverso: nessuna esposizione o lettura delle
    notifiche altrui; link inventario e checklist corretti dopo login.
-4. Preferenze salvate separatamente; nessun prompt push forzato.
+4. Preferenze salvate automaticamente a ogni tocco e persistenti al reload;
+   errore con ripristino del valore precedente, nessun prompt push forzato.
 5. Editor proprietario/admin: creazione, modifica, eliminazione, soglia valida,
    destinatari limitati agli autorizzati; assenza editor per altri utenti.
 6. Layout desktop/mobile, tastiera, nomi accessibili e feedback di errore.
