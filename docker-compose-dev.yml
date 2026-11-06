@@ -39,9 +39,6 @@ services:
     container_name: inventory-backend
     restart: always
     environment:
-      TZ: Europe/Rome
-      DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
-      DATABASE_URL: ${DATABASE_URL:-}
       FASTAPI_ROOT_PATH: /api
       SECRET_KEY: ${SECRET_KEY:-AUTO}
       SECRET_KEY_FILE: ${SECRET_KEY_FILE:-}
@@ -55,6 +52,7 @@ services:
     env_file:
       - path: backend/.env
         required: false
+      - .env.dev
     volumes:
       - backenddata:/app/data
 
@@ -63,9 +61,10 @@ services:
     container_name: inventory-frontend
     restart: always
     environment:
-      TZ: Europe/Rome
       BACKEND_BASE_URL: http://backend:8000
       APP_ENV_LABEL: LOCAL
+    env_file:
+      - .env.dev
     ports:
       - "3000:80"
     depends_on:

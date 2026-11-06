@@ -52,6 +52,15 @@ nel nuovo ambiente. Per conservare anche i token esistenti, trasferire separatam
 il file chiave JWT mantenendo i permessi `0600`; altrimenti AUTO genera una
 nuova chiave e occorre rifare login, senza perdere le password del DB ripristinato.
 Su un volume nuovo impostare `ADMIN_PASSWORD` prima dell'avvio.
+Il file root `.env.dev` e versionato e caricato automaticamente dal Compose Dev,
+anche con Compose Up da VS Code. Contiene solo default pubblici di test:
+SQLite e timezone. Non inserire segreti reali. Per il backend viene caricato
+dopo l'opzionale `backend/.env`, quindi i suoi valori DB prevalgono su quel
+file; per cambiare database di test modificare `.env.dev`. Le variabili
+esplicite in `environment` mantengono la precedenza su entrambi i file.
+Questo e un `env_file` dei servizi, non il file di interpolazione Compose:
+`COMPOSE_PROFILES` al suo interno non attiverebbe profili. Sulla release non
+e necessario il profilo `notifications`, il cui worker e sul branch dedicato.
 Il codice backend proviene dall'immagine: dopo modifiche al codice occorre
 ricostruire l'immagine e ricreare il container; il reload non legge i sorgenti host.
 
@@ -67,7 +76,8 @@ Per lo sviluppo locale, `./backend/setup_venv.sh` prepara `backend/.venv` usando
 
 ### Chiave JWT e configurazione privata
 
-I file `.env` reali non sono tracciati; `backend/.dockerignore` esclude env,
+I file `.env` privati non sono tracciati (il pubblico `.env.dev` fa eccezione);
+`backend/.dockerignore` esclude env,
 dati persistenti e file chiave dall'immagine. Per lo sviluppo copiare
 `backend/.env.example` in `backend/.env` e impostare `ADMIN_PASSWORD` prima
 del primo avvio. Il Compose Dev carica questo file opzionale (richiede Docker
@@ -298,6 +308,15 @@ before starting with a new volume.
 Backend code comes from the image: rebuild it and recreate the container after
 code changes; reload does not read host source files.
 
+The root `.env.dev` is tracked and loaded automatically by Compose Dev,
+including VS Code Compose Up. It contains public test defaults only: SQLite
+and timezone, never real secrets. The backend loads it after optional
+`backend/.env`, so its database values win; edit `.env.dev` to change the test
+database. Explicit service `environment` entries still take precedence over
+both files. This is a service `env_file`, not a Compose interpolation file:
+putting `COMPOSE_PROFILES` there does not activate profiles. The release does
+not need the `notifications` profile; its worker remains on the feature branch.
+
 At startup, the backend logs the database type and destination URL with the password masked and query parameters omitted.
 
 The Docker entrypoint passes the `FASTAPI_ROOT_PATH` proxy prefix to Uvicorn. For local startup behind a proxy, use `uvicorn main:app --reload --root-path /api`; without a proxy, omit `--root-path`.
@@ -310,7 +329,8 @@ For local development, `./backend/setup_venv.sh` prepares `backend/.venv` using 
 
 ### JWT key and private configuration
 
-Real `.env` files are untracked and excluded from backend image builds, along
+Private `.env` files are untracked (public `.env.dev` is the exception) and
+excluded from backend image builds, along
 with persistent data and key files. Copy `backend/.env.example` to
 `backend/.env` for development and set `ADMIN_PASSWORD` before creating the
 initial admin. Compose Dev loads that optional file (Compose 2.24+ required).
