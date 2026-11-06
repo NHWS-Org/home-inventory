@@ -1,9 +1,6 @@
 ---
-description: Daily, measured performance improvement by Bolt.
+description: Manual, measured performance improvement by Bolt.
 on:
-  schedule:
-    - cron: "0 3 * * *"
-      timezone: Europe/Rome
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +19,9 @@ safe-outputs:
     if-no-changes: ignore
 ---
 
-# Daily agent — Bolt: performance
+# Manual agent — Bolt: performance
+
+Work on the branch selected when dispatching this workflow (`github.ref_name`, default `main`). Base any proposed pull request on that branch, not necessarily the repository default branch.
 
 Identify and implement at most one small, measurable performance improvement per run. Measure first and optimize second; preserve behavior and readability.
 
