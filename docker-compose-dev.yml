@@ -56,7 +56,7 @@ services:
       - path: backend/.env
         required: false
     volumes:
-      - ./backend/data:/app/data
+      - backenddata:/app/data
 
   frontend:
     build: ./frontend
@@ -72,5 +72,6 @@ services:
       - backend
 
 volumes:
+  backenddata:
   pgdata:
   mysqldata:

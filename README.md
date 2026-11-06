@@ -41,8 +41,17 @@ Il confronto è in sola lettura: non modifica il database o i backup e non esegu
 
 Il volume persistente va montato su `/app/data`, non sull'intera directory `/app`: il codice e i file runtime dell'immagine devono restare visibili. L'entrypoint è installato in `/usr/local/bin` così non viene nascosto da bind mount dell'applicazione.
 
-Anche Compose Dev monta solo i dati: `./backend/data:/app/data`. Database SQLite,
-backup e chiave JWT AUTO restano nella stessa cartella locale usata in precedenza.
+Compose Dev usa il volume nominato `backenddata:/app/data`, come `pgdata` e
+`mysqldata`: SQLite, backup e chiave JWT AUTO sono gestiti da Docker, senza
+creare file dati nel repository. Il volume sopravvive alla ricreazione dei
+container; `docker compose down -v` lo elimina insieme agli altri volumi.
+Il passaggio dal precedente bind mount non copia automaticamente i dati:
+la cartella `backend/data` resta intatta, ma il nuovo volume parte vuoto.
+Prima del cambio salvare un backup applicativo e scaricarlo, poi ripristinarlo
+nel nuovo ambiente. Per conservare anche i token esistenti, trasferire separatamente
+il file chiave JWT mantenendo i permessi `0600`; altrimenti AUTO genera una
+nuova chiave e occorre rifare login, senza perdere le password del DB ripristinato.
+Su un volume nuovo impostare `ADMIN_PASSWORD` prima dell'avvio.
 Il codice backend proviene dall'immagine: dopo modifiche al codice occorre
 ricostruire l'immagine e ricreare il container; il reload non legge i sorgenti host.
 
@@ -275,10 +284,19 @@ Comparison is read-only: it neither modifies the database or backups nor perform
 
 Mount persistent storage at `/app/data`, not over the entire `/app` directory: the image's application code and runtime files must remain visible. The entrypoint is installed in `/usr/local/bin` so application bind mounts cannot hide it.
 
-Compose Dev also mounts only data: `./backend/data:/app/data`. SQLite, backups
-and the AUTO JWT key remain in the same local directory as before. Backend code
-comes from the image: rebuild it and recreate the container after code changes;
-reload does not read host source files.
+Compose Dev uses the named volume `backenddata:/app/data`, like `pgdata` and
+`mysqldata`: Docker manages SQLite, backups and the AUTO JWT key without
+creating data files in the repository. The volume survives container recreation;
+`docker compose down -v` deletes it along with other volumes.
+Switching from the previous bind mount does not copy data automatically:
+`backend/data` is left untouched, but the new volume starts empty. Before
+switching, create and download an application backup, then restore it in the
+new environment. Transfer the JWT key separately with `0600` permissions to
+preserve existing tokens; otherwise AUTO generates a new key and requires
+login again, without losing restored password hashes. Set `ADMIN_PASSWORD`
+before starting with a new volume.
+Backend code comes from the image: rebuild it and recreate the container after
+code changes; reload does not read host source files.
 
 At startup, the backend logs the database type and destination URL with the password masked and query parameters omitted.
 
