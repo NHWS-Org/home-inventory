@@ -6,10 +6,9 @@ from crud import get_setting, set_setting
 import jwt
 import os
 import datetime
+from auth_config import get_secret_key, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+SECRET_KEY = get_secret_key()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -48,6 +47,8 @@ def init_roles_and_admin(db: Session):
 
     admin_user = db.query(User).filter(User.username == admin_username).first()
     if not admin_user:
+        if not admin_password:
+            raise RuntimeError("ADMIN_PASSWORD must be configured when creating the initial admin account.")
         admin_user = User(
             username=admin_username,
             hashed_password=hash_password(admin_password),

@@ -51,6 +51,65 @@ Se nei log compare `ModuleNotFoundError: No module named 'database'`, verifica c
 
 Per lo sviluppo locale, `./backend/setup_venv.sh` prepara `backend/.venv` usando il solo `backend/requirements.txt`, indipendentemente dalla directory da cui viene lanciato. Questo script non viene usato nel container Docker.
 
+### Chiave JWT e configurazione privata
+
+I file `.env` reali non sono tracciati; `backend/.dockerignore` esclude env,
+dati persistenti e file chiave dall'immagine. Per lo sviluppo copiare
+`backend/.env.example` in `backend/.env` e impostare `ADMIN_PASSWORD` prima
+del primo avvio. Il Compose Dev carica questo file opzionale (richiede Docker
+Compose 2.24+); i valori `SECRET_KEY` e `SECRET_KEY_FILE` del servizio sono
+invece configurati dalla shell o dal `.env` della root, con default `AUTO`
+e vuoto. Per produzione impostare `ADMIN_PASSWORD` nella shell/`.env` root
+solo per creare l'admin iniziale; non modifica password di account esistenti.
+
+- `SECRET_KEY=AUTO` o assente: genera una chiave casuale in
+  `/app/data/jwt-secret.key` (in locale `backend/data/jwt-secret.key`), con
+  permessi `0600`; ai riavvii la riutilizza. La creazione e atomica anche
+  con richieste concorrenti. Conservare il volume dati anche con PostgreSQL/MySQL.
+- `SECRET_KEY` esplicita: usa quella, almeno 32 byte; generarla casualmente,
+  ad esempio con `openssl rand -hex 64`, e conservarla fuori da Git.
+- `SECRET_KEY_FILE`: legge un file montato, ad esempio un Docker secret.
+  Non impostare contemporaneamente una `SECRET_KEY` esplicita; `AUTO` e
+  compatibile con `SECRET_KEY_FILE`. Errori di file/configurazione bloccano
+  l'avvio senza ripiegare su chiavi temporanee.
+- I log indicano generazione, riutilizzo o configurazione esterna, mai la
+  chiave. Non copiare segreti in log, ticket o screenshot.
+
+Esempio Docker secret (da aggiungere al Compose, con il file fuori dal repository):
+
+```yaml
+services:
+  backend:
+    environment:
+      SECRET_KEY: AUTO
+      SECRET_KEY_FILE: /run/secrets/jwt_key
+    secrets:
+      - jwt_key
+secrets:
+  jwt_key:
+    file: /percorso/privato/jwt-key.txt
+```
+
+Le variabili gia presenti nell'ambiente prevalgono su `load_dotenv`.
+Tutte le repliche API devono usare la stessa chiave, tramite file/secret
+condiviso o configurazione esplicita. Perdita del file AUTO o rotazione
+invalida i token e richiede un nuovo login, **non cancella password o dati**.
+I backup applicativi del DB non includono il file chiave: proteggerlo e
+gestirlo separatamente; un restore DB non lo sovrascrive.
+Le vecchie chiavi distribuite su Git/immagini vanno considerate esposte:
+ricostruire le immagini e ruotarle. La rimozione attuale non riscrive la
+cronologia Git ne cancella le immagini gia pubblicate.
+Il file locale `backend/.env` preesistente viene conservato ma ignorato da
+Git: per avvio Python diretto una vecchia `SECRET_KEY` li presente continua
+a prevalere su AUTO; sostituirla con `AUTO` o con una nuova chiave privata.
+
+Test dopo ricostruzione e ricreazione del backend: verificare nei log
+`generated` al primo avvio AUTO e `reused` al successivo, rifare login con
+la password esistente e controllare che il token resti valido dopo il
+riavvio. Con chiave esplicita/file verificare il messaggio di configurazione,
+mai il suo valore. Provare una rotazione soltanto sull'installazione di test:
+il vecchio token deve dare 401 e un nuovo login deve riuscire.
+
 Per mantenere o scegliere PostgreSQL, imposta le due variabili e abilita il profilo corrispondente:
 
 ```bash
@@ -148,7 +207,7 @@ Il workflow [publish-images.yml](.github/workflows/publish-images.yml) pubblica 
 | Avvio manuale con canale `dev` (**Actions → Publish Docker images → Run workflow**, da qualsiasi branch) | `dev` e `<versione>-dev` |
 | Avvio manuale con canale `release` | `latest` e `<versione>` |
 
-Le versioni sono lette da `API_VERSION` in `backend/.env` e da `version` in `frontend/package.json`.
+Le versioni per la pubblicazione sono lette da `API_VERSION` in `backend/.env.example` e da `version` in `frontend/package.json`; il backend nell'immagine mantiene il default `API_VERSION` nel Dockerfile.
 
 Configurazione necessaria:
 
@@ -220,6 +279,37 @@ Docker healthchecks keep their existing intervals but discard successful respons
 If logs show `ModuleNotFoundError: No module named 'database'`, check that the stack does not mount a data directory over `/app`. For example, replace `.../home-inventory-dev:/app` with `.../home-inventory-dev:/app/data` and recreate the container. Existing backups in the `backups` subdirectory will then be available at `/app/data/backups`. Leave the PostgreSQL volume unchanged.
 
 For local development, `./backend/setup_venv.sh` prepares `backend/.venv` using only `backend/requirements.txt`, regardless of the directory it is launched from. Docker containers do not use this script.
+
+### JWT key and private configuration
+
+Real `.env` files are untracked and excluded from backend image builds, along
+with persistent data and key files. Copy `backend/.env.example` to
+`backend/.env` for development and set `ADMIN_PASSWORD` before creating the
+initial admin. Compose Dev loads that optional file (Compose 2.24+ required).
+Both Compose files take `SECRET_KEY` and `SECRET_KEY_FILE` from the shell or
+root `.env`, defaulting to `AUTO` and empty. Production takes the initial
+`ADMIN_PASSWORD` from the shell/root `.env`; existing passwords are unchanged.
+
+With `SECRET_KEY=AUTO` or no key configured, a random installation key is
+atomically stored at `/app/data/jwt-secret.key` with owner-only permissions
+and reused on restart. Keep this volume persistent, including when using an
+external database. Alternatively provide a random `SECRET_KEY` of at least
+32 bytes, or mount a Docker secret and set `SECRET_KEY_FILE` to its path
+(leave `SECRET_KEY=AUTO` in that case). Invalid configuration fails startup,
+without temporary-key fallbacks. Logs show the source/mode, never the key.
+
+All API replicas must share a key. Losing or rotating it invalidates tokens
+but does not affect password hashes or application data. Database backups do
+not include this file: manage it separately. Previous keys published in Git
+or images are exposed and must be rotated; this change does not rewrite
+history or remove old images. Existing local env files remain on disk:
+replace their old key with AUTO or a new private key for direct Python runs.
+
+After rebuilding/recreating the backend, check `generated` then `reused`
+across restarts and confirm login with the existing password. Confirm tokens
+survive restart with a stable key; after a deliberate test key rotation, old
+tokens must fail while a new login succeeds. See the [Italian configuration
+examples](#chiave-jwt-e-configurazione-privata) for Docker secrets.
 
 To keep or select PostgreSQL, set both variables and enable its Compose profile:
 
@@ -318,7 +408,7 @@ The [publish-images.yml](.github/workflows/publish-images.yml) workflow publishe
 | Manual run with `dev` channel (**Actions → Publish Docker images → Run workflow**, from any branch) | `dev` and `<version>-dev` |
 | Manual run with `release` channel | `latest` and `<version>` |
 
-Versions are read from `API_VERSION` in `backend/.env` and `version` in `frontend/package.json`.
+Publishing versions are read from `API_VERSION` in `backend/.env.example` and `version` in `frontend/package.json`; the image's default backend `API_VERSION` is kept in the Dockerfile.
 
 Required setup:
 

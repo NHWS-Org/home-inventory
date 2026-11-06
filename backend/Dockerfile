@@ -7,6 +7,7 @@ LABEL org.opencontainers.image.source="https://github.com/NHWS-Org/home-inventor
 
 # Imposta le variabili d'ambiente
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV ALGORITHM=HS256 ACCESS_TOKEN_EXPIRE_MINUTES=14400 API_VERSION=1.6.0
 
 # Install curl
 RUN apt-get update && apt-get install -y --no-install-recommends curl \

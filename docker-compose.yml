@@ -42,6 +42,9 @@ services:
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
       DATABASE_URL: ${DATABASE_URL:-}
       FASTAPI_ROOT_PATH: /api
+      SECRET_KEY: ${SECRET_KEY:-AUTO}
+      SECRET_KEY_FILE: ${SECRET_KEY_FILE:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       GOOGLE_BOOKS_API_KEY: your_api_key_here
       # Disabilita la ricerca di codici a barre tramite API esterne
       # BARCODE_LOOKUP_ENABLED: "false"

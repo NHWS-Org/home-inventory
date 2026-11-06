@@ -10,18 +10,14 @@ import re
 import uuid
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.security.utils import get_authorization_scheme_param
-from dotenv import load_dotenv
 from dependencies import get_db, get_current_user
 from crud import get_setting, set_setting
 from models import DeviceSession
-
-load_dotenv()
+from auth_config import get_secret_key, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+SECRET_KEY = get_secret_key()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")

@@ -44,7 +44,7 @@ jobs:
         env:
           INPUT_CHANNEL: ${{ inputs.channel }}
         run: |
-          backend_version="$(grep '^API_VERSION=' backend/.env | cut -d '=' -f2)"
+          backend_version="$(grep '^API_VERSION=' backend/.env.example | cut -d '=' -f2)"
           frontend_version="$(node -p "require('./frontend/package.json').version")"
 
           # Il push su main pubblica sempre la release; "dev" solo da avvio manuale
