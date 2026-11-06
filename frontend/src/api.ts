@@ -101,6 +101,16 @@ export async function getSecurityAudit(): Promise<SecurityAuditEntry[]> {
   return (await api.get<SecurityAuditEntry[]>("/admin/security/audit")).data;
 }
 
+export interface SecuritySession extends Pick<DeviceSession,
+  "id" | "device_type" | "browser" | "operating_system" |
+  "created_at" | "expires_at" | "is_expired" | "is_current"> {
+  username: string;
+}
+
+export async function getSecuritySessions(): Promise<SecuritySession[]> {
+  return (await api.get<SecuritySession[]>("/admin/security/sessions")).data;
+}
+
 export async function performSecurityAction(action: "revoke-sessions" | "rotate-key", password: string) {
   await api.post(`/admin/security/${action}`, { password, confirm: true });
 }

@@ -204,9 +204,53 @@ def test_failed_rotation_audited_and_fails_closed(security, monkeypatch):
 def test_blocked_admin_and_viewer_cannot_access_security(security):
     _, client, _ = security
     viewer = login(client, "viewer")
-    for path in ("/admin/security", "/admin/security/audit"):
+    for path in ("/admin/security", "/admin/security/audit", "/admin/security/sessions"):
+        assert client.get(path).status_code == 401
         assert client.get(path, headers=bearer(viewer)).status_code == 403
     assert client.post("/auth/login", data={"username": "blocked", "password": PASSWORD}).status_code == 403
+
+
+def test_admin_session_list_shows_global_revocation_scope_without_secrets(security):
+    factory, client, _ = security
+    admin = login(client)
+    viewer = login(client, "viewer")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with factory.begin() as db:
+        db.add_all([
+            DeviceSession(
+                session_token_id="expired-private-token-id", user_id=2,
+                device_type="Mobile", browser="Safari", operating_system="iOS",
+                created_at=now - timedelta(days=2), expires_at=now - timedelta(days=1),
+            ),
+            DeviceSession(
+                session_token_id="revoked-private-token-id", user_id=2,
+                created_at=now - timedelta(days=3), expires_at=now + timedelta(days=1),
+                revoked_at=now,
+            ),
+        ])
+    response = client.get("/admin/security/sessions", headers=bearer(admin))
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 3
+    assert [entry["username"] for entry in entries].count("viewer") == 2
+    assert sum(entry["is_current"] for entry in entries) == 1
+    assert next(entry for entry in entries if entry["is_current"])["username"] == "admin"
+    expired = next(entry for entry in entries if entry["is_expired"])
+    assert expired["browser"] == "Safari" and expired["operating_system"] == "iOS"
+    assert entries[-1] == expired
+    assert set(expired) == {
+        "id", "username", "device_type", "browser", "operating_system",
+        "created_at", "expires_at", "is_expired", "is_current",
+    }
+    assert "private-token" not in response.text and admin not in response.text and viewer not in response.text
+    assert client.post("/admin/security/revoke-sessions", headers=bearer(admin), json={
+        "password": PASSWORD, "confirm": True,
+    }).status_code == 200
+    with factory() as db:
+        assert db.scalars(select(SecurityAudit)).one().sessions_revoked == len(entries)
+    fresh = login(client)
+    remaining = client.get("/admin/security/sessions", headers=bearer(fresh)).json()
+    assert len(remaining) == 1 and remaining[0]["is_current"]
 
 
 def test_password_confirmation_attempts_are_bounded_and_audited(security):

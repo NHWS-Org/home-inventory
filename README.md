@@ -145,6 +145,12 @@ In **Impostazioni > Sicurezza**, solo gli amministratori possono:
   e revocando anche tutte le sessioni.
 
 Sono operazioni separate, entrambe con password corrente e conferma esplicita.
+Prima della revoca, la stessa schermata mostra le sessioni non ancora revocate
+di tutti gli utenti in un box scorrevole adatto anche al mobile, con dispositivo,
+accesso, scadenza e indicazione della sessione corrente. Le sessioni scadute
+sono distinguibili ma incluse, come nella revoca globale. Usare **Aggiorna elenco**
+per rileggere lo stato; eventuali token legacy non tracciati non sono elencati,
+ma vengono comunque invalidati.
 Tutti gli utenti, incluso chi esegue l'operazione, devono rifare login;
 password e dati non cambiano. Dopo cinque password errate in cinque minuti,
 le conferme sono temporaneamente bloccate. Se la chiave proviene da
@@ -397,6 +403,10 @@ managed key while also revoking every session. Both require the current
 admin password and explicit confirmation; five failed confirmations within
 five minutes temporarily block further attempts. Every user, including the
 caller, must log in again. Passwords and application data are unaffected.
+The same page lists all users' unrevoked sessions in a mobile-friendly
+scrollable box, including expired sessions and a current-session marker.
+Refresh the list to check recent logins; untracked legacy tokens are not listed
+but are also invalidated by global revocation.
 Externally supplied keys cannot be rotated through the UI/API.
 
 AUTO replicas must share the key and lock files on persistent storage;

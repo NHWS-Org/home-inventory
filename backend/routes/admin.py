@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from models import DeviceSession, SecurityAudit
-from dependencies import get_current_user, oauth2_scheme
+from dependencies import get_current_user, oauth2_scheme, decode_access_token
 from routes.auth import verify_password
 from auth_config import automatic_key_mode, key_lock, rotate_automatic_key
 
@@ -64,6 +64,25 @@ def security_audit(limit: int = Query(50, ge=1, le=100), db: Session = Depends(g
         "outcome": row.outcome, "created_at": row.created_at,
         "sessions_revoked": row.sessions_revoked,
     } for row in rows]
+
+
+@router.get("/security/sessions")
+def security_sessions(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    current_id = decode_access_token(token).get("jti")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = db.execute(select(DeviceSession, User.username).join(
+        User, DeviceSession.user_id == User.id,
+    ).where(
+        DeviceSession.revoked_at.is_(None),
+    ).order_by(DeviceSession.created_at.desc(), DeviceSession.id.desc()))
+    return [{
+        "id": session.id, "username": username,
+        "device_type": session.device_type, "browser": session.browser,
+        "operating_system": session.operating_system,
+        "created_at": session.created_at, "expires_at": session.expires_at,
+        "is_expired": session.expires_at <= now,
+        "is_current": session.session_token_id == current_id,
+    } for session, username in rows]
 
 
 def perform_security_action(
