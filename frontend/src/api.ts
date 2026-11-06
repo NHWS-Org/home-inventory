@@ -163,6 +163,41 @@ export async function revokeDeviceSession(sessionId: number): Promise<void> {
   await api.delete(`/auth/sessions/${sessionId}`);
 }
 
+export interface PushConfiguration {
+  public_key: string;
+  payload_mode: "generic";
+  ttl_seconds: number;
+}
+
+export interface PushSubscriptionRecord {
+  id: number;
+  created_at: string;
+  expires_at: string;
+}
+
+export async function getPushConfiguration(): Promise<PushConfiguration> {
+  return (await api.get<PushConfiguration>("/notifications/push/config")).data;
+}
+
+export async function getPushSubscriptions(): Promise<PushSubscriptionRecord[]> {
+  return (await api.get<PushSubscriptionRecord[]>("/notifications/push/subscriptions")).data;
+}
+
+export async function savePushSubscription(subscription: PushSubscriptionJSON): Promise<{
+  id: number;
+  expires_at: string;
+  payload_mode: "generic";
+}> {
+  return (await api.post("/notifications/push/subscriptions", {
+    ...subscription,
+    consent: true,
+  })).data;
+}
+
+export async function deletePushSubscription(subscriptionId: number): Promise<void> {
+  await api.delete(`/notifications/push/subscriptions/${subscriptionId}`);
+}
+
 /* REGISTRAZIONE UTENTI */
 export async function registerUser(username: string, password: string, email: string): Promise<void> {
   await api.post("/auth/register", {

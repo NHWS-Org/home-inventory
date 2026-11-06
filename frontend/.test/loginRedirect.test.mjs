@@ -13,7 +13,12 @@ const { safeReturnPath, loginUrl, loginDestination } = await server.ssrLoadModul
 const { api } = await server.ssrLoadModule('/src/api.ts');
 
 test('login preserves protected paths including QR parameters and fragments', () => {
-  for (const path of ['/profile', '/inventories/42?item=7&name=caff%C3%A8#details', '/checklists/12?barcode=123']) {
+  for (const path of [
+    '/profile',
+    '/inventories/42?item=7&name=caff%C3%A8#details',
+    '/checklists/12?barcode=123',
+    '/notifications?source=push',
+  ]) {
     const url = loginUrl(path);
     assert.equal(new URL(url, 'https://app.invalid').pathname, '/login');
     assert.equal(loginDestination(new URL(url, 'https://app.invalid').search), path);

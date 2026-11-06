@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { loginDestination } from '../utils/loginRedirect'
 import { FiEye, FiEyeOff, FiLoader } from 'react-icons/fi'
-import { loginUser, getUserInfo } from '../api'
+import { loginUser, getUserInfo, logoutApi } from '../api'
 import { useAuth } from '../useAuth'
 import { User } from '../types'
+import { disablePushForBrowser } from '../utils/pushNotifications'
 
 function LoginPage() {
   const navigate = useNavigate()
@@ -15,13 +16,30 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const { setUser } = useAuth()
+  const { user, setUser } = useAuth()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setIsLoading(true)
     try {
+      if (user) {
+        try {
+          await disablePushForBrowser(user.username)
+        } catch (cleanupError) {
+          console.error("Browser push cleanup failed during account switch.", cleanupError)
+        }
+        try {
+          await logoutApi()
+        } catch {
+          if (localStorage.getItem('access_token')) {
+            throw new Error('Impossibile chiudere la sessione precedente. Riprova prima di cambiare account.')
+          }
+        } finally {
+          localStorage.removeItem('access_token')
+          setUser(null)
+        }
+      }
       const data = await loginUser(username, password)
       localStorage.setItem('access_token', data.access_token)
       const userInfo = await getUserInfo()

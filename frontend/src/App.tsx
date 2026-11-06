@@ -11,6 +11,7 @@ const WelcomePage       = lazy(() => import('./pages/WelcomePage'))
 const LoginPage         = lazy(() => import('./pages/LoginPage'))
 const RegisterPage      = lazy(() => import('./pages/RegisterPage'))
 const ProfilePage       = lazy(() => import('./pages/ProfilePage'))
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'))
 const SettingsPage      = lazy(() => import('./pages/SettingsPage'))
 const AboutPage         = lazy(() => import('./pages/AboutPage'))
 const GenericListPage   = lazy(() => import('./pages/GenericListPage'))
@@ -73,6 +74,11 @@ function App() {
           <Route path="/profile" element={
             <ProtectedRoute>
               <ProfilePage />
+            </ProtectedRoute>
+          } />
+          <Route path="/notifications" element={
+            <ProtectedRoute>
+              <NotificationsPage />
             </ProtectedRoute>
           } />
           <Route path="/settings" element={

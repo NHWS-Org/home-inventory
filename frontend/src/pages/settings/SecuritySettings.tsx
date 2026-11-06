@@ -6,11 +6,12 @@ import {
   type SecurityAuditEntry, type SecurityStatus, type SecuritySession,
 } from "../../api";
 import { useAuth } from "../../useAuth";
+import { disablePushForBrowser } from "../../utils/pushNotifications";
 
 type Action = "revoke-sessions" | "rotate-key";
 
 export default function SecuritySettings() {
-  const { setUser } = useAuth();
+  const { user, setUser } = useAuth();
   const navigate = useNavigate();
   const [status, setStatus] = useState<SecurityStatus | null>(null);
   const [audit, setAudit] = useState<SecurityAuditEntry[]>([]);
@@ -92,6 +93,7 @@ export default function SecuritySettings() {
     setBusy(true);
     setError("");
     try {
+      if (user?.username) await disablePushForBrowser(user.username);
       await performSecurityAction(action, password);
       localStorage.removeItem("access_token");
       setUser(null);
