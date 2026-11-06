@@ -56,7 +56,7 @@ services:
       - path: backend/.env
         required: false
     volumes:
-      - ./backend:/app
+      - ./backend/data:/app/data
 
   frontend:
     build: ./frontend

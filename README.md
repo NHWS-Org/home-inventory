@@ -41,6 +41,11 @@ Il confronto è in sola lettura: non modifica il database o i backup e non esegu
 
 Il volume persistente va montato su `/app/data`, non sull'intera directory `/app`: il codice e i file runtime dell'immagine devono restare visibili. L'entrypoint è installato in `/usr/local/bin` così non viene nascosto da bind mount dell'applicazione.
 
+Anche Compose Dev monta solo i dati: `./backend/data:/app/data`. Database SQLite,
+backup e chiave JWT AUTO restano nella stessa cartella locale usata in precedenza.
+Il codice backend proviene dall'immagine: dopo modifiche al codice occorre
+ricostruire l'immagine e ricreare il container; il reload non legge i sorgenti host.
+
 All'avvio il backend mostra il tipo di database e l'URL di destinazione con password mascherata e parametri query esclusi.
 
 Il prefisso proxy `FASTAPI_ROOT_PATH` viene passato a Uvicorn dall'entrypoint Docker. Per un avvio locale dietro proxy usa `uvicorn main:app --reload --root-path /api`; senza proxy ometti `--root-path`.
@@ -269,6 +274,11 @@ Administrators can compare data on the **Backup** page:
 Comparison is read-only: it neither modifies the database or backups nor performs a restore. Different Alembic revisions can be compared when their tables are recognized; restore compatibility checks are unchanged. The current database is read again for each page or filter change, so concurrent updates can change results.
 
 Mount persistent storage at `/app/data`, not over the entire `/app` directory: the image's application code and runtime files must remain visible. The entrypoint is installed in `/usr/local/bin` so application bind mounts cannot hide it.
+
+Compose Dev also mounts only data: `./backend/data:/app/data`. SQLite, backups
+and the AUTO JWT key remain in the same local directory as before. Backend code
+comes from the image: rebuild it and recreate the container after code changes;
+reload does not read host source files.
 
 At startup, the backend logs the database type and destination URL with the password masked and query parameters omitted.
 
