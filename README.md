@@ -158,6 +158,15 @@ le conferme sono temporaneamente bloccate. Se la chiave proviene da
 **Rotazione gestita tramite configurazione dell'installazione**; la revoca
 resta disponibile.
 
+Il setting protetto `DEVICE_SESSION_RETENTION_DAYS` viene creato automaticamente
+con default **30 giorni**, modificabile in **Impostazioni > Generale > Parametri
+protetti** (intero positivo). La pulizia parte circa un minuto dopo l'avvio
+e si ripete ogni 24 ore, anche senza backup automatici: elimina le sessioni
+terminate da oltre la finestra, contando dal primo evento tra disconnessione
+e scadenza. Le sessioni ancora attive e l'audit di sicurezza non vengono
+eliminati. La modifica del valore viene letta alla successiva pulizia,
+senza riavvio; le sessioni eliminate spariscono anche da Gestione profilo.
+
 Le repliche AUTO devono condividere sia il file chiave sia il file lock
 nello stesso volume dati. Login e rotazione sono coordinati e ogni processo
 rilegge la chiave senza richiedere riavvii. Le altre richieste rilevano la
@@ -408,6 +417,13 @@ scrollable box, including expired sessions and a current-session marker.
 Refresh the list to check recent logins; untracked legacy tokens are not listed
 but are also invalidated by global revocation.
 Externally supplied keys cannot be rotated through the UI/API.
+
+The protected `DEVICE_SESSION_RETENTION_DAYS` setting is created automatically
+with a default of **30 days** and accepts positive integer values. Cleanup runs
+about one minute after startup and every 24 hours, independently of backups,
+using the current setting. It deletes sessions whose first termination
+(revocation or expiry) is older than that window, leaving active sessions
+and security audit records untouched. Deleted sessions disappear from Profile.
 
 AUTO replicas must share the key and lock files on persistent storage;
 processes reload atomic key replacements without restarting. Migration

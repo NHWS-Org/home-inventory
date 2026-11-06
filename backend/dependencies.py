@@ -138,7 +138,12 @@ def initialize_settings(db: Session):
         "BACKUP_LAST_RUN": None,
         "UI_RECENT_ITEMS_LIMIT": "10",
         "AUDIT_RETENTION_DAYS": "90",  # giorni prima di pulire le versioni storiche
+        "DEVICE_SESSION_RETENTION_DAYS": "30",
     }
     for key, value in defaults.items():
-        if get_setting(db, key) is None:
+        setting = get_setting(db, key)
+        if setting is None:
             set_setting(db, key, value, True)  # ✅ Proteggiamo le impostazioni di default
+        elif key == "DEVICE_SESSION_RETENTION_DAYS" and not setting.protected:
+            setting.protected = True
+            db.commit()

@@ -159,7 +159,7 @@ def test_scheduler_registers_telemetry_job_when_backups_disabled(db, monkeypatch
     monkeypatch.setattr(db, "close", lambda: None)
     try:
         scheduler.start_scheduler()
-        assert [job.id for job in scheduler.scheduler.get_jobs()] == ["telemetry_job"]
+        assert {job.id for job in scheduler.scheduler.get_jobs()} == {"telemetry_job", "device_session_cleanup_job"}
         assert scheduler.scheduler.running
     finally:
         scheduler.scheduler.remove_all_jobs()
@@ -173,8 +173,14 @@ def test_scheduler_has_no_telemetry_job_by_default(db, monkeypatch):
     monkeypatch.delenv("TELEMETRY_ENABLED", raising=False)
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
     monkeypatch.setattr(db, "close", lambda: None)
-    scheduler.start_scheduler()
-    assert scheduler.scheduler.get_jobs() == []
+    try:
+        scheduler.start_scheduler()
+        assert [job.id for job in scheduler.scheduler.get_jobs()] == ["device_session_cleanup_job"]
+        assert scheduler.scheduler.running
+    finally:
+        scheduler.scheduler.remove_all_jobs()
+        if scheduler.scheduler.running:
+            scheduler.scheduler.shutdown(wait=False)
 
 
 PUBLIC_STATS = {
