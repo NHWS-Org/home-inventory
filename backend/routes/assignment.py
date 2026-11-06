@@ -85,7 +85,8 @@ def list_assignments_by_source(item_id: int, db: Session = Depends(get_db), user
 @router.patch("/{assignment_id}", response_model=AssignmentResponse)
 def update_assignment(assignment_id: int, payload: AssignmentUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
     assignment = _get_assignment(db, assignment_id)
-    if not can_access_item(user, assignment.list_item, action="edit"):
+    # Security: Verify permissions on both the checklist row (edit) and source inventory item (view)
+    if not can_access_item(user, assignment.list_item, action="edit") or not can_access_item(user, assignment.source_item, action="view"):
         raise HTTPException(status_code=403, detail="Accesso negato")
     _ensure_qty_within_stock(payload.qty, assignment.source_item, db, assignment=assignment)
     assignment.qty = payload.qty
@@ -98,7 +99,8 @@ def update_assignment(assignment_id: int, payload: AssignmentUpdate, db: Session
 @router.delete("/{assignment_id}")
 def delete_assignment(assignment_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     assignment = _get_assignment(db, assignment_id)
-    if not can_access_item(user, assignment.list_item, action="edit"):
+    # Security: Verify permissions on both the checklist row (edit) and source inventory item (view)
+    if not can_access_item(user, assignment.list_item, action="edit") or not can_access_item(user, assignment.source_item, action="view"):
         raise HTTPException(status_code=403, detail="Accesso negato")
     db.delete(assignment)
     db.commit()
