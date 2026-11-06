@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
+import PushNotificationsPanel from "../components/PushNotificationsPanel";
+import { disablePushForBrowser } from "../utils/pushNotifications";
+import { useAuth } from "../useAuth";
 
 const ProfilePage = () => {
+  const { user } = useAuth();
   const location = useLocation();
   const previousPath = (location.state as { from?: string } | null)?.from;
   const returnPath = previousPath?.startsWith("/") && !previousPath.startsWith("/profile") ? previousPath : "/";
@@ -180,6 +184,9 @@ const ProfilePage = () => {
     setSessionMessage("");
     setSessionNotice("");
     try {
+      if (session.is_current && user?.username) {
+        await disablePushForBrowser(user.username);
+      }
       await revokeDeviceSession(session.id);
       if (session.is_current) {
         localStorage.removeItem("access_token");
@@ -328,6 +335,10 @@ const ProfilePage = () => {
           </p>
         )}
       </div>
+
+      <section>
+        <PushNotificationsPanel />
+      </section>
 
       <section>
         <h2 id="profile-devices-heading" className="text-xl font-bold mb-4">Dispositivi connessi</h2>

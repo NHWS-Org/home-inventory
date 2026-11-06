@@ -248,10 +248,77 @@ disabilitato e poi con PEM valido, `GET /notifications/push/config`
 autenticato restituisce solo la chiave pubblica; inbox e login precedenti
 restano funzionanti. Un vero endpoint desktop/iOS potra essere registrato
 da client Push API gia disponibili, ma nessun client nuovo e incluso qui.
-I test reali di consenso/display/click richiedono la fase 5 e HTTPS;
-la loro riuscita **non** e certificata dai mock.
-STOP dopo la PR della fase 4 (issue #56): niente merge o fase 5 senza
-validazione dell'utente.
+I test reali di consenso/display/click richiedono HTTPS e un browser reale;
+la loro riuscita **non** e certificata dai mock. La fase 4 e completata.
+
+## Fase 5: service worker e consenso browser
+
+Branch `notifications/57-service-worker-consent`, PR verso il branch epic #38.
+Questa fase aggiunge il consenso per browser nella pagina Profilo e il client
+Web Push, senza attivare preferenze per tipo di evento o aggiungere l'inbox
+frontend (fase 6).
+
+`frontend/public/push-sw.js` e intenzionalmente minimo: non registra un handler
+`fetch`, non usa Cache Storage e non legge API o dati autenticati. Mostra payload
+generici, usa un tag per la deduplicazione del browser e accetta solo
+destinazioni di notifica same-origin; URL esterni o malformati tornano alla home.
+Il percorso push predefinito e `/notifications`, route protetta che conserva la
+destinazione nel login. Fino alla inbox della fase 6 mostra una pagina
+segnaposto con accesso alla gestione push del Profilo.
+
+In **Profilo > Gestione profilo**, il pannello espone stati distinti per
+supporto browser, HTTPS, installazione iOS, versione minima iOS, permesso
+negato, servizio disabilitato, consenso mancante, sottoscrizione scaduta,
+attiva o errore. La richiesta permessi parte solo dal pulsante di attivazione,
+prima di qualunque chiamata asincrona. Attivazione e disattivazione riguardano
+solo il browser corrente e la sessione autenticata; l'API non riceve identita
+utente/sessione dal client. Logout, cambio account, revoca della sessione
+corrente e revoca globale provano a cancellare prima il record server e poi
+annullano la sottoscrizione locale. Un errore di cleanup al logout viene
+registrato, ma non impedisce di chiudere la sessione.
+
+Quando cambia la chiave VAPID o la sottoscrizione browser/server e scaduta,
+il client elimina l'eventuale record server precedente prima della nuova
+registrazione. La UI non permette di abilitare se l'installazione ha Web Push
+disabilitato o il browser nega il permesso. Il pulsante di prova mostra una
+notifica **locale** tramite il service worker: non invia al provider e non
+certifica la consegna push.
+
+Per iOS/iPadOS serve 16.4 o successivo: aprire il sito in Safari, usare
+**Condividi > Aggiungi alla schermata Home**, aprire l'icona installata e
+accettare il permesso con il pulsante nel profilo. Desktop e iOS richiedono
+HTTPS; `localhost` e ammesso per lo sviluppo. Le notifiche di sistema dipendono
+anche dalle impostazioni e dalle modalita Focus del dispositivo.
+
+### Test e validazione fase 5
+
+Test automatici frontend (nessun permesso reale o provider):
+
+```bash
+cd frontend
+npm test
+npm run lint
+npm run build
+```
+
+Prima dell'integrazione verificare anche manualmente su almeno un browser
+desktop e, se disponibile, iOS/iPadOS:
+
+1. In Profilo verificare stato iniziale e attivare dal gesto esplicito; accettare
+   il permesso e controllare che lo stato diventi attivo.
+2. Usare **Mostra notifica di prova**; verificare visualizzazione e click. Il
+   test e locale e non attesta un invio dal backend.
+3. Disattivare, ricaricare e verificare che la sottoscrizione non risulti attiva.
+4. Verificare logout e cambio account: il browser non deve conservare una
+   sottoscrizione collegata all'account precedente.
+5. In iOS/iPadOS provare solo da app aggiunta alla schermata Home. Verificare
+   separatamente un vero invio dal backend dopo il consenso, senza includere
+   contenuti privati nel payload.
+6. Verificare che il worker non intercetti fetch/API e che un URL di click
+   esterno non lasci il dominio.
+
+I test mock non sostituiscono la verifica utente desktop/iOS. Non integrare
+questa PR in release/main finche tali verifiche non sono confermate.
 
 ## Fase 3: regole, destinatari ed eventi
 
