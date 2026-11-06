@@ -10,18 +10,14 @@ import re
 import uuid
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.security.utils import get_authorization_scheme_param
-from dotenv import load_dotenv
-from dependencies import get_db, get_current_user
-from crud import get_setting, set_setting
+from dependencies import get_db, get_current_user, authenticated_user, decode_access_token
+from crud import get_setting, set_setting, cleanup_ended_sessions
 from models import DeviceSession
-
-load_dotenv()
+from auth_config import get_secret_key, current_secret_key, key_lock, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+get_secret_key()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
@@ -32,11 +28,18 @@ def hash_password(password: str):
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
-def create_access_token(data: dict, expires_delta: int = ACCESS_TOKEN_EXPIRE_MINUTES):
-    expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=expires_delta)
+def _encode_access_token(data: dict, expires_delta: int):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expire = now + datetime.timedelta(minutes=expires_delta)
     to_encode = data.copy()
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    to_encode.update({"exp": expire, "iat": now.timestamp()})
+    return jwt.encode(to_encode, current_secret_key(), algorithm=ALGORITHM), expire
+
+
+def create_access_token(data: dict, expires_delta: int = ACCESS_TOKEN_EXPIRE_MINUTES):
+    with key_lock():
+        token, _ = _encode_access_token(data, expires_delta)
+        return token
 
 
 def _device_details(user_agent: str) -> tuple[str, str, str]:
@@ -141,28 +144,29 @@ def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Utente bloccato. Accesso negato.")
     
     session_token_id = str(uuid.uuid4())
-    token = create_access_token({"sub": user.username, "jti": session_token_id})
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    expires_at = datetime.datetime.fromtimestamp(payload["exp"], datetime.timezone.utc).replace(tzinfo=None)
     user_agent = request.headers.get("user-agent", "")
     device_type, browser, operating_system = _device_details(user_agent)
     region = request.headers.get("cf-ipcountry", "").upper()
     if not re.fullmatch(r"[A-Z]{2}", region):
         region = None
-    device_session = DeviceSession(
-        session_token_id=session_token_id,
-        user_id=user.id,
-        device_type=device_type,
-        browser=browser,
-        operating_system=operating_system,
-        user_agent=user_agent[:2048] or None,
-        language=request.headers.get("accept-language", "")[:64] or None,
-        timezone=request.headers.get("x-client-timezone", "")[:64] or None,
-        region=region,
-        expires_at=expires_at,
-    )
-    db.add(device_session)
-    db.commit()
+    with key_lock():
+        token, expire = _encode_access_token(
+            {"sub": user.username, "jti": session_token_id}, ACCESS_TOKEN_EXPIRE_MINUTES,
+        )
+        device_session = DeviceSession(
+            session_token_id=session_token_id,
+            user_id=user.id,
+            device_type=device_type,
+            browser=browser,
+            operating_system=operating_system,
+            user_agent=user_agent[:2048] or None,
+            language=request.headers.get("accept-language", "")[:64] or None,
+            timezone=request.headers.get("x-client-timezone", "")[:64] or None,
+            region=region,
+            expires_at=expire.replace(tzinfo=None),
+        )
+        db.add(device_session)
+        db.commit()
     return {"access_token": token, "token_type": "bearer"}
 
 #############################################################################
@@ -173,7 +177,7 @@ def logout(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    payload = decode_access_token(token)
     session_token_id = payload.get("jti")
     if session_token_id:
         device_session = db.query(DeviceSession).filter(
@@ -192,7 +196,7 @@ def get_device_sessions(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    session_token_id = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM]).get("jti")
+    session_token_id = decode_access_token(token).get("jti")
     sessions = db.query(DeviceSession).filter(
         DeviceSession.user_id == current_user.id,
     ).order_by(DeviceSession.created_at.desc()).all()
@@ -213,6 +217,14 @@ def get_device_sessions(
         }
         for session in sessions
     ]
+
+
+@router.delete("/sessions")
+def cleanup_own_sessions(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return {"deleted": cleanup_ended_sessions(db, user_id=current_user.id)}
 
 
 @router.delete("/sessions/{session_id}")
@@ -244,12 +256,12 @@ def get_current_user_info(request: Request, db: Session = Depends(get_db)):
 
     if token:
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, current_secret_key(), algorithms=[ALGORITHM])
             username: str = payload.get("sub")
             if not username:
                 raise jwt.InvalidTokenError()
         except jwt.InvalidTokenError:
-            username = None
+            raise HTTPException(status_code=401, detail="Token non valido") from None
     else:
         username = None
 
@@ -268,7 +280,7 @@ def get_current_user_info(request: Request, db: Session = Depends(get_db)):
             "data_mod": None
         }
 
-    user = db.query(User).filter(User.username == username).first()
+    user = authenticated_user(db, payload)
 
     if not user or user.is_blocked:
         return {

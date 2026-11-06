@@ -9,6 +9,7 @@ const MetadataDefinitionsPage = lazy(() => import("./settings/MetadataDefinition
 const BackupManagementPage = lazy(() => import("./settings/BackupManagementPage"));
 const BarcodeManagementPage = lazy(() => import("./settings/BarcodeManagementPage"));
 const AuditLogPage = lazy(() => import("./settings/AuditLogPage"));
+const SecuritySettings = lazy(() => import("./settings/SecuritySettings"));
 
 interface TabItem {
   name: string;
@@ -25,6 +26,7 @@ export default function SettingsPage() {
     { name: "Metadati", Component: MetadataDefinitionsPage },
     { name: "Backup", Component: BackupManagementPage },
     { name: "Barcode", Component: BarcodeManagementPage, adminOnly: true },
+    { name: "Sicurezza", Component: SecuritySettings, adminOnly: true },
     { name: "Audit", Component: AuditLogPage },
   ].filter((tab) => !tab.adminOnly || user?.role?.name === 'admin');
   const [activeTab, setActiveTab] = useState("Generale");

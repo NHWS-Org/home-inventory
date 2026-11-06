@@ -81,11 +81,11 @@ def test_default_url_is_used_without_env(db, monkeypatch):
 
 
 def test_payload_contains_only_expected_fields(db, monkeypatch):
-    monkeypatch.setenv("API_VERSION", "1.4.0")
+    monkeypatch.setenv("API_VERSION", "obsolete-env-value")
     payload = telemetry_service.build_payload(db)
 
     assert set(payload) == {"id", "version", "channel", "inventories", "last_activity"}
-    assert payload["version"] == "1.4.0"
+    assert payload["version"] == telemetry_service.API_VERSION
     assert payload["inventories"] == 2  # le checklist non contano
     assert payload["last_activity"] is not None
 
@@ -159,7 +159,7 @@ def test_scheduler_registers_telemetry_job_when_backups_disabled(db, monkeypatch
     monkeypatch.setattr(db, "close", lambda: None)
     try:
         scheduler.start_scheduler()
-        assert [job.id for job in scheduler.scheduler.get_jobs()] == ["telemetry_job"]
+        assert {job.id for job in scheduler.scheduler.get_jobs()} == {"telemetry_job", "device_session_cleanup_job"}
         assert scheduler.scheduler.running
     finally:
         scheduler.scheduler.remove_all_jobs()
@@ -173,8 +173,14 @@ def test_scheduler_has_no_telemetry_job_by_default(db, monkeypatch):
     monkeypatch.delenv("TELEMETRY_ENABLED", raising=False)
     monkeypatch.setattr(scheduler, "SessionLocal", lambda: db)
     monkeypatch.setattr(db, "close", lambda: None)
-    scheduler.start_scheduler()
-    assert scheduler.scheduler.get_jobs() == []
+    try:
+        scheduler.start_scheduler()
+        assert [job.id for job in scheduler.scheduler.get_jobs()] == ["device_session_cleanup_job"]
+        assert scheduler.scheduler.running
+    finally:
+        scheduler.scheduler.remove_all_jobs()
+        if scheduler.scheduler.running:
+            scheduler.scheduler.shutdown(wait=False)
 
 
 PUBLIC_STATS = {

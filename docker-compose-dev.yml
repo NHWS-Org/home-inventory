@@ -47,10 +47,9 @@ services:
       start_period: 60s
       retries: 3
     environment:
-      <<: *common-environment
-      DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
-      DATABASE_URL: ${DATABASE_URL:-}
       FASTAPI_ROOT_PATH: /api
+      SECRET_KEY: ${SECRET_KEY:-AUTO}
+      SECRET_KEY_FILE: ${SECRET_KEY_FILE:-}
       GOOGLE_BOOKS_API_KEY: your_api_key_here
       # Disabilita la ricerca di codici a barre tramite API esterne
       # BARCODE_LOOKUP_ENABLED: "false"
@@ -59,9 +58,11 @@ services:
     #ports:
     #  - "8001:8000"
     env_file:
-      - backend/.env
+      - .env.dev
+      - path: backend/.env
+        required: false
     volumes:
-      - ./backend:/app
+      - backenddata:/app/data
 
   notification-worker:
     build: ./backend
@@ -74,14 +75,12 @@ services:
       start_period: 30s
       retries: 3
     restart: unless-stopped
-    environment:
-      <<: *common-environment
-      DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
-      DATABASE_URL: ${DATABASE_URL:-}
     env_file:
-      - backend/.env
+      - .env.dev
+      - path: backend/.env
+        required: false
     volumes:
-      - ./backend:/app
+      - backenddata:/app/data
     depends_on:
       backend:
         condition: service_healthy
@@ -91,14 +90,16 @@ services:
     container_name: inventory-frontend
     restart: always
     environment:
-      <<: *common-environment
       BACKEND_BASE_URL: http://backend:8000
       APP_ENV_LABEL: LOCAL
+    env_file:
+      - .env.dev
     ports:
       - "3000:80"
     depends_on:
       - backend
 
 volumes:
+  backenddata:
   pgdata:
   mysqldata:

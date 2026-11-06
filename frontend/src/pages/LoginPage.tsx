@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { loginDestination } from '../utils/loginRedirect'
 import { FiEye, FiEyeOff, FiLoader } from 'react-icons/fi'
 import { loginUser, getUserInfo } from '../api'
 import { useAuth } from '../useAuth'
@@ -7,6 +8,8 @@ import { User } from '../types'
 
 function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const destination = loginDestination(location.search)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -27,7 +30,7 @@ function LoginPage() {
       } else {
         console.error('Formato utente non valido ricevuto da getUserInfo:', userInfo)
       }
-      navigate('/')
+      navigate(destination, { replace: true })
     } catch (err: unknown) {
       setIsLoading(false)
       localStorage.removeItem('access_token');
@@ -108,7 +111,7 @@ function LoginPage() {
           )}
         </button>
         <p className="text-sm mt-4 text-center">
-          Non hai un account? <a href="/register" className="text-blue-600 hover:underline">Registrati</a>
+          Non hai un account? <a href={destination === '/' ? '/register' : `/register?${new URLSearchParams({ returnTo: destination })}`} className="text-blue-600 hover:underline">Registrati</a>
         </p>
       </form>
     </div>

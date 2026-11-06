@@ -88,6 +88,14 @@ tabelle (e i loro dati), non utenti, inventari o sessioni.
 
 ## Fase 3: regole, destinatari ed eventi
 
+L'integrazione di `release/1.6.0` nel branch della fase 4 conserva le migrazioni
+notifiche e sicurezza: la revisione merge `e7f8a9b0c1d2` unifica
+`c4d5e6f7a8b9` e `d6e7f8a9b0c1`. Eseguire `alembic upgrade head` anche
+su DB gia aggiornati a una delle due revisioni.
+In Compose Dev backend e worker condividono `backenddata:/app/data` e la
+gerarchia `.env.dev`, poi l'opzionale `backend/.env`; il codice proviene
+dall'immagine e richiede rebuild. I file `.env` privati non sono versionati.
+
 Branch `notifications/55-rules-events`, PR verso il branch epic #38.
 Questa fase abilita solo la inbox nel database e API autenticate, non UI o push.
 Nessuna regola viene creata automaticamente: senza configurazione non vengono

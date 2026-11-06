@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -21,6 +22,16 @@ class SettingUpdate(BaseModel):
 # Endpoint per impostare e leggere le impostazioni
 @router.post("/settings")
 def update_setting(data: SettingUpdate, db: Session = Depends(get_db)):
+    if data.key == "DEVICE_SESSION_RETENTION_DAYS":
+        try:
+            days = int(data.value)
+            if days <= 0:
+                raise ValueError()
+            datetime.now(timezone.utc) - timedelta(days=days)
+        except (ValueError, OverflowError):
+            raise HTTPException(
+                status_code=422, detail="DEVICE_SESSION_RETENTION_DAYS deve essere un numero intero positivo di giorni valido.",
+            ) from None
     crud_settings.set_setting(db, data.key, data.value)
     return {"message": f"Impostazione {data.key} aggiornata"}
 

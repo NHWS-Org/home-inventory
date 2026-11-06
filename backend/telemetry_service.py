@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from crud import get_setting, set_setting
 from models import Inventory, Item
+from app_version import API_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ def _channel() -> str:
 def build_payload(db: Session) -> dict:
     return {
         "id": get_instance_id(db),
-        "version": os.getenv("API_VERSION", "unknown"),
+        "version": API_VERSION,
         "channel": _channel(),
         "inventories": db.query(Inventory).filter(Inventory.type == "INVENTORY").count(),
         "last_activity": _last_activity(db),
