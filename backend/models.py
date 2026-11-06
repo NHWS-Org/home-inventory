@@ -3,6 +3,7 @@ from typing import Any, cast
 from sqlalchemy import (
     Column,
     Integer,
+    BigInteger,
     String,
     DateTime,
     Date,
@@ -168,6 +169,53 @@ class Notification(Base):
 
 
 ################################################
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (Index("ix_push_subscriptions_user_session", "user_id", "session_id"),)
+
+    id = Column(Integer, primary_key=True)
+    endpoint_hash = Column(String(64), nullable=False, unique=True)
+    endpoint = Column(Text, nullable=False)
+    p256dh = Column(String(128), nullable=False)
+    auth = Column(String(32), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(Integer, ForeignKey("device_sessions.id", ondelete="CASCADE"), nullable=False)
+    generation = Column(String(36), nullable=False)
+    vapid_fingerprint = Column(String(64), nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class PushDelivery(Base):
+    __tablename__ = "push_deliveries"
+    __table_args__ = (
+        UniqueConstraint("event_id", "subscription_id", name="uq_push_delivery_event_subscription"),
+        CheckConstraint(
+            "status IN ('pending', 'sending', 'accepted', 'cancelled', 'failed', 'uncertain')",
+            name="ck_push_delivery_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_push_delivery_attempts"),
+        Index("ix_push_delivery_pending", "status", "available_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    event_id = Column(Integer, ForeignKey("notification_events.id", ondelete="CASCADE"), nullable=False)
+    subscription_id = Column(
+        Integer, ForeignKey("push_subscriptions.id", ondelete="CASCADE"), nullable=False,
+    )
+    generation = Column(String(36), nullable=False)
+    status = Column(String(16), nullable=False, default="pending", server_default="pending")
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime, nullable=False)
+    available_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    lease_token = Column(String(36), nullable=True)
+    leased_until = Column(DateTime, nullable=True)
+    accepted_at = Column(DateTime, nullable=True)
+    last_error = Column(String(64), nullable=True)
+
+
 class NotificationPreference(Base, LoggingData):
     __tablename__ = "notification_preferences"
     __table_args__ = (
@@ -210,6 +258,19 @@ class NotificationRule(Base, LoggingData):
     enabled = Column(Boolean, nullable=False, default=True, server_default="1")
 
 ################################################
+class SecurityAudit(Base):
+    __tablename__ = "security_audit"
+
+    id = Column(Integer, primary_key=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_username = Column(String(255), nullable=False)
+    action = Column(String(32), nullable=False)
+    outcome = Column(String(32), nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
+    revoked_before = Column(BigInteger, nullable=True, index=True)
+    sessions_revoked = Column(Integer, nullable=False, default=0)
+
+
 class Group(Base, LoggingData):
     __tablename__ = "groups"
 

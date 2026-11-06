@@ -1,6 +1,7 @@
 // src/components/ProtectedRoute.tsx
 import { useAuth } from "../useAuth";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
+import { loginUrl } from "../utils/loginRedirect";
 import Spinner from "../components/Spinner";
 
 interface ProtectedRouteProps {
@@ -10,13 +11,14 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
   const { user, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return <Spinner />;
   }
 
   if (user === null) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginUrl(location.pathname + location.search + location.hash)} replace />;
   }
 
   if (requireAdmin && user.role?.name !== "admin") {

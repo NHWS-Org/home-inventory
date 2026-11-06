@@ -1,9 +1,6 @@
 ---
-description: Daily preventive security hardening by Sentinel.
+description: Manual preventive security hardening by Sentinel.
 on:
-  schedule:
-    - cron: "0 2 * * *"
-      timezone: Europe/Rome
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +19,9 @@ safe-outputs:
     if-no-changes: ignore
 ---
 
-# Daily agent — Sentinel: preventive security hardening
+# Manual agent — Sentinel: preventive security hardening
+
+Work on the branch selected when dispatching this workflow (`github.ref_name`, default `main`). Base any proposed pull request on that branch, not necessarily the repository default branch.
 
 Make at most one small, preventive security enhancement per run. This repository is public: workflow logs and pull requests are public too.
 

@@ -120,6 +120,8 @@ def _database_tables(db: Session) -> list[tuple[Any, list[Any]]]:
     inspector = inspect(connection)
     tables: list[tuple[Any, list[Any]]] = []
     for table in Base.metadata.tables.values():
+        if table.name in {"push_subscriptions", "push_deliveries"}:
+            continue
         if not inspector.has_table(table.name):
             continue
         available_columns = {

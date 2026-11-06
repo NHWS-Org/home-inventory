@@ -56,7 +56,10 @@ def _public_value(value: Any) -> Any:
 
 def _field_value(table: str, field: str, value: Any) -> Any:
     # Settings can contain arbitrary credentials under names not known to the app.
-    if SENSITIVE_FIELD.search(field) or (table == "settings" and field == "value"):
+    if (
+        SENSITIVE_FIELD.search(field) or (table == "settings" and field == "value")
+        or table == "push_subscriptions" and field in {"endpoint", "p256dh", "auth"}
+    ):
         return REDACTED
     return _public_value(value)
 

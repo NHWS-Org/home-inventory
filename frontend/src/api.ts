@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { loginUrl } from './utils/loginRedirect';
 import {
   User,
   Role,
@@ -65,7 +66,7 @@ api.interceptors.response.use(
         window.location.pathname !== '/login' &&
         window.location.pathname !== '/register'
       ) {
-        window.location.href = '/login';
+        window.location.replace(loginUrl(window.location.pathname + window.location.search + window.location.hash));
       }
     }
     return Promise.reject(error);
@@ -77,6 +78,47 @@ export function createApiInstance() {
 }
 
 export { api };
+
+export interface SecurityStatus {
+  key_mode: "auto" | "external";
+  can_rotate: boolean;
+  rotation_message: string | null;
+}
+
+export interface SecurityAuditEntry {
+  id: number;
+  actor_username: string;
+  action: string;
+  outcome: string;
+  created_at: string;
+  sessions_revoked: number;
+}
+
+export async function getSecurityStatus(): Promise<SecurityStatus> {
+  return (await api.get<SecurityStatus>("/admin/security")).data;
+}
+
+export async function getSecurityAudit(): Promise<SecurityAuditEntry[]> {
+  return (await api.get<SecurityAuditEntry[]>("/admin/security/audit")).data;
+}
+
+export interface SecuritySession extends Pick<DeviceSession,
+  "id" | "device_type" | "browser" | "operating_system" |
+  "created_at" | "expires_at" | "is_expired" | "is_current"> {
+  username: string;
+}
+
+export async function getSecuritySessions(): Promise<SecuritySession[]> {
+  return (await api.get<SecuritySession[]>("/admin/security/sessions")).data;
+}
+
+export async function cleanupSecuritySessions(): Promise<number> {
+  return (await api.delete<{ deleted: number }>("/admin/security/sessions")).data.deleted;
+}
+
+export async function performSecurityAction(action: "revoke-sessions" | "rotate-key", password: string) {
+  await api.post(`/admin/security/${action}`, { password, confirm: true });
+}
 
 /* LOGIN UTENTI */
 export async function loginUser(username: string, password: string): Promise<{ access_token: string }> {
@@ -111,6 +153,10 @@ export interface DeviceSession {
 export async function getDeviceSessions(): Promise<DeviceSession[]> {
   const response = await api.get<DeviceSession[]>('/auth/sessions');
   return response.data;
+}
+
+export async function cleanupDeviceSessions(): Promise<number> {
+  return (await api.delete<{ deleted: number }>("/auth/sessions")).data.deleted;
 }
 
 export async function revokeDeviceSession(sessionId: number): Promise<void> {

@@ -7,7 +7,9 @@ from datetime import datetime, timezone, timedelta
 from crud import get_setting, set_setting
 import logging
 import traceback
-from models import ItemVersion, InventoryVersion, Item, Inventory
+from models import ItemVersion, InventoryVersion, Item, Inventory, DeviceSession
+from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 from telemetry_service import send_telemetry, telemetry_enabled
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,29 @@ def cleanup_old_audit_versions():
     finally:
         db.close()
 
+
+def cleanup_old_device_sessions():
+    db = SessionLocal()
+    try:
+        setting = get_setting(db, "DEVICE_SESSION_RETENTION_DAYS")
+        retention_days = int(setting.value) if setting else 30
+        if retention_days <= 0:
+            raise ValueError("DEVICE_SESSION_RETENTION_DAYS must be positive")
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=retention_days)
+        deleted = db.query(DeviceSession).filter(or_(
+            DeviceSession.revoked_at < cutoff,
+            DeviceSession.expires_at < cutoff,
+        )).delete(synchronize_session=False)
+        db.commit()
+        if deleted:
+            logger.info("Pulizia sessioni: %s sessioni terminate da oltre %s giorni eliminate", deleted, retention_days)
+    except (ValueError, TypeError, OverflowError, SQLAlchemyError):
+        db.rollback()
+        logger.exception("Errore nella pulizia sessioni; nessuna eliminazione confermata")
+    finally:
+        db.close()
+
+
 def scheduled_backup():
     logger.info("Backup automatico avviato...")
     db = SessionLocal()
@@ -123,6 +148,13 @@ def start_scheduler():
         interval_minutes = _setting_int(db, "BACKUP_INTERVAL_MINUTES", 0)
 
         scheduler.remove_all_jobs()
+        scheduler.add_job(
+            cleanup_old_device_sessions,
+            trigger=IntervalTrigger(hours=24),
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+            id="device_session_cleanup_job",
+            replace_existing=True,
+        )
         _schedule_telemetry()
 
         if frequency == "none":

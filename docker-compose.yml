@@ -25,7 +25,7 @@ services:
     profiles: ["mysql"]
     environment:
       <<: *common-environment
-      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-admin}
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Adminr00tpwd}
       MARIADB_USER: ${MYSQL_USER:-admin}
       MARIADB_PASSWORD: ${MYSQL_PASSWORD:-admin}
       MARIADB_DATABASE: ${MYSQL_DATABASE:-inventory}
@@ -45,6 +45,12 @@ services:
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
       DATABASE_URL: ${DATABASE_URL:-}
       FASTAPI_ROOT_PATH: /api
+      SECRET_KEY: ${SECRET_KEY:-AUTO}
+      SECRET_KEY_FILE: ${SECRET_KEY_FILE:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      WEB_PUSH_ENABLED: ${WEB_PUSH_ENABLED:-false}
+      WEB_PUSH_VAPID_PRIVATE_KEY_FILE: ${WEB_PUSH_VAPID_PRIVATE_KEY_FILE:-}
+      WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
       GOOGLE_BOOKS_API_KEY: your_api_key_here
       # Disabilita la ricerca di codici a barre tramite API esterne
       # BARCODE_LOOKUP_ENABLED: "false"
@@ -69,6 +75,9 @@ services:
       <<: *common-environment
       DATABASE_TYPE: ${DATABASE_TYPE:-SQLITE}
       DATABASE_URL: ${DATABASE_URL:-}
+      WEB_PUSH_ENABLED: ${WEB_PUSH_ENABLED:-false}
+      WEB_PUSH_VAPID_PRIVATE_KEY_FILE: ${WEB_PUSH_VAPID_PRIVATE_KEY_FILE:-}
+      WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
     volumes:
       - /home/napalmz/docker-conf/home-inventory/data:/app/data
     depends_on:

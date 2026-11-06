@@ -82,4 +82,5 @@ class NotificationPreferenceInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     in_app_enabled: bool = True
+    push_enabled: bool = False
     include_own_actions: bool = False

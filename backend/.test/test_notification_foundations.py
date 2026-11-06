@@ -249,7 +249,7 @@ def test_alembic_cli_bootstrap_upgrade_downgrade(tmp_path, bootstrap_current_mod
         with migrated_engine.connect() as connection:
             assert connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
-            ).scalar_one() == "c4d5e6f7a8b9"
+            ).scalar_one() == "f8a9b0c1d2e3"
     finally:
         migrated_engine.dispose()
 

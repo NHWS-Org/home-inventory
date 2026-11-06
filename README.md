@@ -41,6 +41,38 @@ Il confronto è in sola lettura: non modifica il database o i backup e non esegu
 
 Il volume persistente va montato su `/app/data`, non sull'intera directory `/app`: il codice e i file runtime dell'immagine devono restare visibili. L'entrypoint è installato in `/usr/local/bin` così non viene nascosto da bind mount dell'applicazione.
 
+Compose Dev usa il volume nominato `backenddata:/app/data`, come `pgdata` e
+`mysqldata`: SQLite, backup e chiave JWT AUTO sono gestiti da Docker, senza
+creare file dati nel repository. Il volume sopravvive alla ricreazione dei
+container; `docker compose down -v` lo elimina insieme agli altri volumi.
+Il passaggio dal precedente bind mount non copia automaticamente i dati:
+la cartella `backend/data` resta intatta, ma il nuovo volume parte vuoto.
+Prima del cambio salvare un backup applicativo e scaricarlo, poi ripristinarlo
+nel nuovo ambiente. Per conservare anche i token esistenti, trasferire separatamente
+il file chiave JWT mantenendo i permessi `0600`; altrimenti AUTO genera una
+nuova chiave e occorre rifare login, senza perdere le password del DB ripristinato.
+Su un volume nuovo impostare `ADMIN_PASSWORD` prima dell'avvio.
+In Compose Dev inserirla nel file privato `backend/.env` (non versionato).
+Senza password e senza un admin gia presente nel DB, il bootstrap fallisce
+e il backend rimane unhealthy; il worker attende correttamente il backend.
+Il controllo salute backend viene eseguito ogni 5 secondi, con timeout di
+5 secondi, tolleranza iniziale di 60 secondi e 3 tentativi falliti.
+Il file root `.env.dev` e versionato e caricato automaticamente dal Compose Dev,
+anche con Compose Up da VS Code. Contiene solo default pubblici di test:
+SQLite e timezone. Non inserire segreti reali. Per il backend viene caricato
+ `backend/.env`: i default globali vengono quindi
+sovrascritti dai valori specifici del backend, se presenti. Per cambiare
+database solo localmente usare `backend/.env`, mantenendo coerenti
+`DATABASE_TYPE` e `DATABASE_URL`. Le variabili
+esplicite in `environment` mantengono la precedenza su entrambi i file.
+Questo e un `env_file` dei servizi, non il file di interpolazione Compose:
+`COMPOSE_PROFILES` al suo interno non attiverebbe profili. Su questo branch
+il worker si abilita con `--profile notifications` oppure `COMPOSE_PROFILES=notifications`
+nella shell o nel `.env` root privato, conservato localmente ma non versionato.
+Backend e worker caricano gli stessi env file e condividono `backenddata:/app/data`.
+Il codice backend proviene dall'immagine: dopo modifiche al codice occorre
+ricostruire l'immagine e ricreare il container; il reload non legge i sorgenti host.
+
 All'avvio il backend mostra il tipo di database e l'URL di destinazione con password mascherata e parametri query esclusi.
 
 Il prefisso proxy `FASTAPI_ROOT_PATH` viene passato a Uvicorn dall'entrypoint Docker. Per un avvio locale dietro proxy usa `uvicorn main:app --reload --root-path /api`; senza proxy ometti `--root-path`.
@@ -50,6 +82,121 @@ Gli healthcheck Docker non conservano il corpo delle risposte riuscite. Il front
 Se nei log compare `ModuleNotFoundError: No module named 'database'`, verifica che lo stack non monti una cartella dati su `/app`. Ad esempio, sostituisci `.../home-inventory-dev:/app` con `.../home-inventory-dev:/app/data` e ricrea il container. Se i backup erano nella sottocartella `backups`, il nuovo mount li espone direttamente in `/app/data/backups`. Non occorre modificare il volume PostgreSQL.
 
 Per lo sviluppo locale, `./backend/setup_venv.sh` prepara `backend/.venv` usando il solo `backend/requirements.txt`, indipendentemente dalla directory da cui viene lanciato. Questo script non viene usato nel container Docker.
+
+### Chiave JWT e configurazione privata
+
+I file `.env` privati non sono tracciati (il pubblico `.env.dev` fa eccezione);
+`backend/.dockerignore` esclude env,
+dati persistenti e file chiave dall'immagine. Per lo sviluppo copiare
+`backend/.env.example` in `backend/.env` e impostare `ADMIN_PASSWORD` prima
+del primo avvio. Il Compose Dev carica questo file opzionale (richiede Docker
+Compose 2.24+); i valori `SECRET_KEY` e `SECRET_KEY_FILE` del servizio sono
+invece configurati dalla shell o dal `.env` della root, con default `AUTO`
+e vuoto. Per produzione impostare `ADMIN_PASSWORD` nella shell/`.env` root
+solo per creare l'admin iniziale; non modifica password di account esistenti.
+
+- `SECRET_KEY=AUTO` o assente: genera una chiave casuale in
+  `/app/data/jwt-secret.key` (in locale `backend/data/jwt-secret.key`), con
+  permessi `0600`; ai riavvii la riutilizza. La creazione e atomica anche
+  con richieste concorrenti. Conservare il volume dati anche con PostgreSQL/MySQL.
+- `SECRET_KEY` esplicita: usa quella, almeno 32 byte; generarla casualmente,
+  ad esempio con `openssl rand -hex 64`, e conservarla fuori da Git.
+- `SECRET_KEY_FILE`: legge un file montato, ad esempio un Docker secret.
+  Non impostare contemporaneamente una `SECRET_KEY` esplicita; `AUTO` e
+  compatibile con `SECRET_KEY_FILE`. Errori di file/configurazione bloccano
+  l'avvio senza ripiegare su chiavi temporanee.
+- I log indicano generazione, riutilizzo o configurazione esterna, mai la
+  chiave. Non copiare segreti in log, ticket o screenshot.
+
+Esempio Docker secret (da aggiungere al Compose, con il file fuori dal repository):
+
+```yaml
+services:
+  backend:
+    environment:
+      SECRET_KEY: AUTO
+      SECRET_KEY_FILE: /run/secrets/jwt_key
+    secrets:
+      - jwt_key
+secrets:
+  jwt_key:
+    file: /percorso/privato/jwt-key.txt
+```
+
+Le variabili gia presenti nell'ambiente prevalgono su `load_dotenv`.
+Tutte le repliche API devono usare la stessa chiave, tramite file/secret
+condiviso o configurazione esplicita. Perdita del file AUTO o rotazione
+invalida i token e richiede un nuovo login, **non cancella password o dati**.
+I backup applicativi del DB non includono il file chiave: proteggerlo e
+gestirlo separatamente; un restore DB non lo sovrascrive.
+Le vecchie chiavi distribuite su Git/immagini vanno considerate esposte:
+ricostruire le immagini e ruotarle. La rimozione attuale non riscrive la
+cronologia Git ne cancella le immagini gia pubblicate.
+Il file locale `backend/.env` preesistente viene conservato ma ignorato da
+Git: per avvio Python diretto una vecchia `SECRET_KEY` li presente continua
+a prevalere su AUTO; sostituirla con `AUTO` o con una nuova chiave privata.
+
+Test dopo ricostruzione e ricreazione del backend: verificare nei log
+`generated` al primo avvio AUTO e `reused` al successivo, rifare login con
+la password esistente e controllare che il token resti valido dopo il
+riavvio. Con chiave esplicita/file verificare il messaggio di configurazione,
+mai il suo valore. Provare una rotazione soltanto sull'installazione di test:
+il vecchio token deve dare 401 e un nuovo login deve riuscire.
+
+#### Operazioni amministrative di sicurezza
+
+In **Impostazioni > Sicurezza**, solo gli amministratori possono:
+
+- **Revocare tutte le sessioni**, senza cambiare la chiave JWT.
+- **Ruotare la chiave automatica**, sostituendo atomicamente il file AUTO
+  e revocando anche tutte le sessioni.
+
+Sono operazioni separate, entrambe con password corrente e conferma esplicita.
+Prima della revoca, la stessa schermata mostra le sessioni non ancora revocate
+di tutti gli utenti in un box scorrevole adatto anche al mobile, con dispositivo,
+accesso, scadenza e indicazione della sessione corrente. Le sessioni scadute
+sono distinguibili ma incluse, come nella revoca globale. Usare **Aggiorna elenco**
+per rileggere lo stato; eventuali token legacy non tracciati non sono elencati,
+ma vengono comunque invalidati.
+Tutti gli utenti, incluso chi esegue l'operazione, devono rifare login;
+password e dati non cambiano. Dopo cinque password errate in cinque minuti,
+le conferme sono temporaneamente bloccate. Se la chiave proviene da
+`SECRET_KEY` o `SECRET_KEY_FILE`, la rotazione da UI/API e bloccata con
+**Rotazione gestita tramite configurazione dell'installazione**; la revoca
+resta disponibile.
+
+Il setting protetto `DEVICE_SESSION_RETENTION_DAYS` viene creato automaticamente
+con default **30 giorni**, modificabile in **Impostazioni > Generale > Parametri
+protetti** (intero positivo). La pulizia parte circa un minuto dopo l'avvio
+e si ripete ogni 24 ore, anche senza backup automatici: elimina le sessioni
+terminate da oltre la finestra, contando dal primo evento tra disconnessione
+e scadenza. Le sessioni ancora attive e l'audit di sicurezza non vengono
+eliminati. La modifica del valore viene letta alla successiva pulizia,
+senza riavvio; le sessioni eliminate spariscono anche da Gestione profilo.
+Per anticipare la pulizia, **Pulisci sessioni scadute / disconnesse** in
+Gestione profilo elimina solo le proprie sessioni terminate; in Sicurezza
+gli admin possono eseguire la stessa pulizia per tutti gli utenti.
+Non richiede password, ignora la retention e non revoca sessioni attive.
+Anche l'elenco dispositivi in Gestione profilo scorre internamente, con
+altezza limitata e titolo/pulsante di pulizia esterni al box.
+Aprendo un link protetto senza sessione (o con token scaduto), il login
+conserva la pagina richiesta, inclusi query string e frammento, anche dopo
+un aggiornamento della pagina di login o la registrazione. Dopo l'accesso
+si torna a quel percorso; il login diretto torna alla home. Destinazioni
+esterne non sono ammesse e i permessi della pagina restano invariati.
+
+Le repliche AUTO devono condividere sia il file chiave sia il file lock
+nello stesso volume dati. Login e rotazione sono coordinati e ogni processo
+rilegge la chiave senza richiedere riavvii. Le altre richieste rilevano la
+revoca al successivo controllo di autenticazione.
+
+La migrazione `d6e7f8a9b0c1` aggiunge l'audit tecnico, consultabile nella
+stessa schermata: attore, data UTC, azione, esito e numero di sessioni revocate,
+mai password o chiavi. Non eliminare questo audit: conserva anche il limite
+temporale usato per invalidare i token precedenti. Se la rotazione fallisce
+dopo la revoca, le sessioni restano revocate. Un esito `pending` indica
+un'interruzione o un errore nella conferma finale: verificare i log prima
+di riprovare, senza presumere che la chiave sia rimasta invariata.
 
 Per mantenere o scegliere PostgreSQL, imposta le due variabili e abilita il profilo corrispondente:
 
@@ -98,17 +245,23 @@ Gli aggiornamenti senza modifiche effettive non creano nuove versioni: una descr
 
 Le differenze equivalenti presenti nello storico precedente non vengono mostrate nell'interfaccia. I record storici e gli snapshot usati per il ripristino non vengono modificati.
 
-La timezone di tutti i servizi, incluso il worker, e configurata una sola volta con `TZ` nel file `.env` della root (default `Europe/Rome`). Entrambi i Compose condividono la configurazione tramite un anchor YAML; una variabile `TZ` esportata nella shell prevale sul file.
+In Compose Dev backend, worker e frontend leggono `TZ` da `.env.dev`; il file
+opzionale `backend/.env` prevale per backend e worker. In produzione la timezone
+di tutti i servizi viene da `TZ` nella shell/`.env` root (default `Europe/Rome`),
+condivisa tramite anchor YAML.
 
 ### Notifiche (in sviluppo)
 
-La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). Nessuna regola viene preattivata; UI e push non sono ancora disponibili.
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). La fase 4 aggiunge il backend Web Push/VAPID, disabilitato di default e legato alle sessioni. Nessuna regola viene preattivata; consenso browser, service worker e UI arriveranno nelle fasi 5/6. [Configurazione VAPID e limiti del restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni).
+
+Sottoscrizioni e code push transitorie sono escluse dai backup/confronti DB e
+svuotate al restore, per non riattivare consensi o invii obsoleti.
 
 Le notifiche quantita accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Anche il completamento checklist attende questa finestra. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
 
 ### Automazioni agentiche (GitHub Copilot)
 
-Tre workflow GitHub Agentic usano Copilot ogni notte: Sentinel alle **02:00**, Bolt alle **03:00** e Palette alle **04:00** (`Europe/Rome`). Puoi avviarli anche manualmente dalla scheda **Actions**. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
+Tre workflow GitHub Agentic usano Copilot solo su avvio manuale: Sentinel, Bolt e Palette. Non sono previste esecuzioni schedulate. Dalla scheda **Actions**, scegli il workflow, premi **Run workflow** e seleziona il branch in **Use workflow from** (default `main`). Il branch selezionato viene analizzato ed è la base della PR proposta. Da CLI: `gh workflow run palette.lock.yml --ref release/1.6.0` (sostituisci `palette` con `sentinel` o `bolt`; senza `--ref` viene usato `main`). Il branch deve contenere il workflow. Se trovano un intervento adatto, creano al massimo una PR in bozza; non effettuano merge automatici. Sentinel è limitato a hardening preventivo generico e non cerca né pubblica dettagli su vulnerabilità specifiche, perché il repository è pubblico.
 
 Per abilitarli, GitHub Actions deve essere attivo e l'organizzazione deve consentire l'uso di Copilot CLI fatturato all'organizzazione. Le sorgenti sono i file `.md` in `.github/workflows`; dopo averli modificati, rigenera i workflow Actions con `gh aw compile`. Non modificare direttamente i corrispondenti file `.lock.yml` generati.
 
@@ -156,7 +309,7 @@ Il workflow [publish-images.yml](.github/workflows/publish-images.yml) pubblica 
 | Avvio manuale con canale `dev` (**Actions → Publish Docker images → Run workflow**, da qualsiasi branch) | `dev` e `<versione>-dev` |
 | Avvio manuale con canale `release` | `latest` e `<versione>` |
 
-Le versioni sono lette da `API_VERSION` in `backend/.env` e da `version` in `frontend/package.json`.
+Le versioni per la pubblicazione sono lette da `backend/VERSION` e da `version` in `frontend/package.json`. `backend/VERSION` e anche l'unica fonte della versione API, healthcheck e telemetria: per una nuova release aggiornare quel file e ricostruire l'immagine. La variabile ambiente `API_VERSION` non viene piu utilizzata.
 
 Configurazione necessaria:
 
@@ -219,6 +372,31 @@ Comparison is read-only: it neither modifies the database or backups nor perform
 
 Mount persistent storage at `/app/data`, not over the entire `/app` directory: the image's application code and runtime files must remain visible. The entrypoint is installed in `/usr/local/bin` so application bind mounts cannot hide it.
 
+Compose Dev uses the named volume `backenddata:/app/data`, like `pgdata` and
+`mysqldata`: Docker manages SQLite, backups and the AUTO JWT key without
+creating data files in the repository. The volume survives container recreation;
+`docker compose down -v` deletes it along with other volumes.
+Switching from the previous bind mount does not copy data automatically:
+`backend/data` is left untouched, but the new volume starts empty. Before
+switching, create and download an application backup, then restore it in the
+new environment. Transfer the JWT key separately with `0600` permissions to
+preserve existing tokens; otherwise AUTO generates a new key and requires
+login again, without losing restored password hashes. Set `ADMIN_PASSWORD`
+before starting with a new volume.
+Backend code comes from the image: rebuild it and recreate the container after
+code changes; reload does not read host source files.
+
+The root `.env.dev` is tracked and loaded automatically by Compose Dev,
+including VS Code Compose Up. It contains public test defaults only: SQLite
+and timezone, never real secrets. The backend loads it before optional
+`backend/.env`, whose backend-specific values override the global defaults.
+Use `backend/.env` for local database overrides, keeping `DATABASE_TYPE` and
+`DATABASE_URL` consistent. Explicit service `environment` entries still take precedence over
+both files. This is a service `env_file`, not a Compose interpolation file:
+putting `COMPOSE_PROFILES` there does not activate profiles. On this branch,
+enable the worker through `--profile notifications` or the shell/private root
+`.env`. Backend and worker load the same env files and share the data volume.
+
 At startup, the backend logs the database type and destination URL with the password masked and query parameters omitted.
 
 The Docker entrypoint passes the `FASTAPI_ROOT_PATH` proxy prefix to Uvicorn. For local startup behind a proxy, use `uvicorn main:app --reload --root-path /api`; without a proxy, omit `--root-path`.
@@ -228,6 +406,73 @@ Docker healthchecks discard successful response bodies. The frontend uses `/heal
 If logs show `ModuleNotFoundError: No module named 'database'`, check that the stack does not mount a data directory over `/app`. For example, replace `.../home-inventory-dev:/app` with `.../home-inventory-dev:/app/data` and recreate the container. Existing backups in the `backups` subdirectory will then be available at `/app/data/backups`. Leave the PostgreSQL volume unchanged.
 
 For local development, `./backend/setup_venv.sh` prepares `backend/.venv` using only `backend/requirements.txt`, regardless of the directory it is launched from. Docker containers do not use this script.
+
+### JWT key and private configuration
+
+Private `.env` files are untracked (public `.env.dev` is the exception) and
+excluded from backend image builds, along
+with persistent data and key files. Copy `backend/.env.example` to
+`backend/.env` for development and set `ADMIN_PASSWORD` before creating the
+initial admin. Compose Dev loads that optional file (Compose 2.24+ required).
+Both Compose files take `SECRET_KEY` and `SECRET_KEY_FILE` from the shell or
+root `.env`, defaulting to `AUTO` and empty. Production takes the initial
+`ADMIN_PASSWORD` from the shell/root `.env`; existing passwords are unchanged.
+
+With `SECRET_KEY=AUTO` or no key configured, a random installation key is
+atomically stored at `/app/data/jwt-secret.key` with owner-only permissions
+and reused on restart. Keep this volume persistent, including when using an
+external database. Alternatively provide a random `SECRET_KEY` of at least
+32 bytes, or mount a Docker secret and set `SECRET_KEY_FILE` to its path
+(leave `SECRET_KEY=AUTO` in that case). Invalid configuration fails startup,
+without temporary-key fallbacks. Logs show the source/mode, never the key.
+
+All API replicas must share a key. Losing or rotating it invalidates tokens
+but does not affect password hashes or application data. Database backups do
+not include this file: manage it separately. Previous keys published in Git
+or images are exposed and must be rotated; this change does not rewrite
+history or remove old images. Existing local env files remain on disk:
+replace their old key with AUTO or a new private key for direct Python runs.
+
+After rebuilding/recreating the backend, check `generated` then `reused`
+across restarts and confirm login with the existing password. Confirm tokens
+survive restart with a stable key; after a deliberate test key rotation, old
+tokens must fail while a new login succeeds. See the [Italian configuration
+examples](#chiave-jwt-e-configurazione-privata) for Docker secrets.
+
+**Settings > Sicurezza** provides two separate admin-only actions: revoke
+all sessions without changing the signing key, and rotate the automatically
+managed key while also revoking every session. Both require the current
+admin password and explicit confirmation; five failed confirmations within
+five minutes temporarily block further attempts. Every user, including the
+caller, must log in again. Passwords and application data are unaffected.
+The same page lists all users' unrevoked sessions in a mobile-friendly
+scrollable box, including expired sessions and a current-session marker.
+Refresh the list to check recent logins; untracked legacy tokens are not listed
+but are also invalidated by global revocation.
+Externally supplied keys cannot be rotated through the UI/API.
+
+The protected `DEVICE_SESSION_RETENTION_DAYS` setting is created automatically
+with a default of **30 days** and accepts positive integer values. Cleanup runs
+about one minute after startup and every 24 hours, independently of backups,
+using the current setting. It deletes sessions whose first termination
+(revocation or expiry) is older than that window, leaving active sessions
+and security audit records untouched. Deleted sessions disappear from Profile.
+Manual cleanup buttons in Profile (own sessions) and Security (admin, all users)
+immediately delete expired/revoked sessions regardless of retention, without
+password confirmation or logging out active devices.
+The Profile device list also scrolls internally within a bounded height,
+keeping its heading and cleanup button outside the scrollable area.
+Login redirects from protected links or expired sessions preserve the requested
+path, query and fragment, including across login refresh and registration.
+Direct login defaults to Home. Only internal return paths are accepted;
+page authorization rules still apply.
+
+AUTO replicas must share the key and lock files on persistent storage;
+processes reload atomic key replacements without restarting. Migration
+`d6e7f8a9b0c1` adds the security audit displayed on the same page. Keep its
+records, which also enforce revocation of older tokens. Failed rotations
+leave sessions revoked; `pending` means final confirmation was interrupted
+or failed, so check logs before retrying. No keys or passwords are audited.
 
 To keep or select PostgreSQL, set both variables and enable its Compose profile:
 
@@ -276,17 +521,24 @@ Updates with no effective changes do not create new versions: a `null` descripti
 
 Equivalent differences in existing history are hidden in the interface. Historical records and snapshots used for restoration are not modified.
 
-All services, including the worker, use the `TZ` value configured once in the root `.env` file (default `Europe/Rome`). Both Compose files share it through a YAML anchor; an exported shell `TZ` overrides the file.
+Compose Dev loads `TZ` from `.env.dev`; optional `backend/.env` overrides it
+for both backend and worker, which share `backenddata:/app/data`. Production
+shares shell/root `.env` timezone configuration through a YAML anchor
+(default `Europe/Rome`). Enable the worker with `--profile notifications`
+or `COMPOSE_PROFILES=notifications` in the shell/private root `.env`.
 
 ### Notifications (in development)
 
-The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). No rules are enabled automatically; UI and push are not available yet.
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). Phase 4 adds a session-bound Web Push/VAPID backend, disabled by default. No rules are enabled automatically; browser consent, service worker and UI arrive in phases 5/6. See [VAPID configuration and restore limits (Italian)](docs/notifications.md#fase-4-web-push-backend-e-sessioni).
+
+Transient push subscriptions and delivery queues are excluded from backups/DB
+comparisons and cleared on restore to prevent obsolete consent or send replay.
 
 Quantity notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. Checklist completion also waits for this window. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
 
 ### Agentic workflows (GitHub Copilot)
 
-Three GitHub Agentic workflows use Copilot each night: Sentinel at **02:00**, Bolt at **03:00**, and Palette at **04:00** (`Europe/Rome`). You can also start them manually from the **Actions** tab. If they find a suitable improvement, they create at most one draft PR; they never merge automatically. Sentinel is restricted to generic preventive hardening and does not search for or publish details about specific vulnerabilities because this repository is public.
+Three GitHub Agentic workflows use Copilot only when manually dispatched: Sentinel, Bolt, and Palette. There are no scheduled runs. From the **Actions** tab, choose the workflow, click **Run workflow**, and select the branch under **Use workflow from** (default `main`). The selected branch is analyzed and used as the base of the proposed PR. From the CLI: `gh workflow run palette.lock.yml --ref release/1.6.0` (replace `palette` with `sentinel` or `bolt`; omitting `--ref` uses `main`). The branch must contain the workflow. If they find a suitable improvement, they create at most one draft PR; they never merge automatically. Sentinel is restricted to generic preventive hardening and does not search for or publish details about specific vulnerabilities because this repository is public.
 
 To enable them, GitHub Actions must be enabled and the organization must allow Copilot CLI usage billed to the organization. The workflow sources are the `.md` files in `.github/workflows`; after editing them, regenerate the Actions workflows with `gh aw compile`. Do not edit the corresponding generated `.lock.yml` files directly.
 
@@ -334,7 +586,7 @@ The [publish-images.yml](.github/workflows/publish-images.yml) workflow publishe
 | Manual run with `dev` channel (**Actions → Publish Docker images → Run workflow**, from any branch) | `dev` and `<version>-dev` |
 | Manual run with `release` channel | `latest` and `<version>` |
 
-Versions are read from `API_VERSION` in `backend/.env` and `version` in `frontend/package.json`.
+Publishing versions are read from `backend/VERSION` and `version` in `frontend/package.json`. `backend/VERSION` is also the single source for the API, healthcheck and telemetry version: update it and rebuild the image for a new release. The `API_VERSION` environment variable is no longer used.
 
 Required setup:
 

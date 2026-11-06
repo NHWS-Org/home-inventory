@@ -75,7 +75,9 @@ def test_identical_current_database_includes_empty_tables_and_does_not_write(com
     result = response.json()
     assert result["total_changes"] == 0
     assert result["changes"] == []
-    assert {row["table"] for row in result["tables"]} == set(Base.metadata.tables)
+    assert {row["table"] for row in result["tables"]} == (
+        set(Base.metadata.tables) - {"push_subscriptions", "push_deliveries"}
+    )
     assert result["before"]["filename"] == "before.hibackup"
     assert result["after"]["filename"] is None
     with Session(engine) as db:

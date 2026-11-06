@@ -14,8 +14,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from database import SessionLocal
-from models import NotificationEvent
+from models import NotificationEvent, PushDelivery, PushSubscription
 from notification_outbox import LEASE_SECONDS, claim_event, process_claim
+from push_config import load_push_config
+from web_push import claim_push, process_push
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "home-inventory-notification-worker.json"
@@ -41,6 +43,7 @@ def check_health(factory=SessionLocal, path: Path = HEARTBEAT_PATH) -> bool:
         os.kill(pid, 0)
         with factory() as db:
             db.execute(select(NotificationEvent.id).limit(1))
+            db.execute(select(PushDelivery.id).limit(1))
     except (OSError, ValueError, KeyError, TypeError, SQLAlchemyError) as exc:
         logger.error("Notification worker healthcheck failed (%s)", type(exc).__name__)
         return False
@@ -53,18 +56,30 @@ def main() -> None:
     mode.add_argument("--once", action="store_true", help="Process at most one event and exit")
     mode.add_argument("--status", action="store_true", help="Report queue counts without processing")
     mode.add_argument("--healthcheck", action="store_true", help="Check worker heartbeat and database")
+    mode.add_argument("--reset-push", action="store_true", help="Discard subscriptions and push work after an offline database restore")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     if args.healthcheck:
         raise SystemExit(0 if check_health() else 1)
+    if args.reset_push:
+        with SessionLocal.begin() as db:
+            deliveries = db.query(PushDelivery).delete()
+            subscriptions = db.query(PushSubscription).delete()
+        logger.warning("Web Push reset: %s deliveries, %s subscriptions removed", deliveries, subscriptions)
+        return
     if args.status:
         with SessionLocal() as db:
             counts = dict(db.execute(select(
                 NotificationEvent.status, func.count(),
             ).group_by(NotificationEvent.status)).all())
+            push_counts = dict(db.execute(select(
+                PushDelivery.status, func.count(),
+            ).group_by(PushDelivery.status)).all())
         logger.info("Notification queue counts: %s", counts)
+        logger.info("Web Push queue counts: %s", push_counts)
         return
-    logger.info("Notification rules enabled: database inbox only, no external sends")
+    config = load_push_config()
+    logger.info("Notification rules enabled; Web Push %s", "enabled" if config else "disabled")
     stop = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda _signum, _frame: stop.set())
@@ -80,10 +95,14 @@ def main() -> None:
                 )
                 if args.once and not succeeded:
                     raise SystemExit(1)
+            push_claim = claim_push(SessionLocal)
+            if push_claim is not None:
+                if not process_push(SessionLocal, push_claim) and args.once:
+                    raise SystemExit(1)
             write_heartbeat()
             if args.once:
                 return
-            if claim is None:
+            if claim is None and push_claim is None:
                 stop.wait(2)
     finally:
         HEARTBEAT_PATH.unlink(missing_ok=True)
