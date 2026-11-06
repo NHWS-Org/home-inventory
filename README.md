@@ -55,8 +55,10 @@ Su un volume nuovo impostare `ADMIN_PASSWORD` prima dell'avvio.
 Il file root `.env.dev` e versionato e caricato automaticamente dal Compose Dev,
 anche con Compose Up da VS Code. Contiene solo default pubblici di test:
 SQLite e timezone. Non inserire segreti reali. Per il backend viene caricato
-dopo l'opzionale `backend/.env`, quindi i suoi valori DB prevalgono su quel
-file; per cambiare database di test modificare `.env.dev`. Le variabili
+prima dell'opzionale `backend/.env`: i default globali vengono quindi
+sovrascritti dai valori specifici del backend, se presenti. Per cambiare
+database solo localmente usare `backend/.env`, mantenendo coerenti
+`DATABASE_TYPE` e `DATABASE_URL`. Le variabili
 esplicite in `environment` mantengono la precedenza su entrambi i file.
 Questo e un `env_file` dei servizi, non il file di interpolazione Compose:
 `COMPOSE_PROFILES` al suo interno non attiverebbe profili. Sulla release non
@@ -310,9 +312,10 @@ code changes; reload does not read host source files.
 
 The root `.env.dev` is tracked and loaded automatically by Compose Dev,
 including VS Code Compose Up. It contains public test defaults only: SQLite
-and timezone, never real secrets. The backend loads it after optional
-`backend/.env`, so its database values win; edit `.env.dev` to change the test
-database. Explicit service `environment` entries still take precedence over
+and timezone, never real secrets. The backend loads it before optional
+`backend/.env`, whose backend-specific values override the global defaults.
+Use `backend/.env` for local database overrides, keeping `DATABASE_TYPE` and
+`DATABASE_URL` consistent. Explicit service `environment` entries still take precedence over
 both files. This is a service `env_file`, not a Compose interpolation file:
 putting `COMPOSE_PROFILES` there does not activate profiles. The release does
 not need the `notifications` profile; its worker remains on the feature branch.
