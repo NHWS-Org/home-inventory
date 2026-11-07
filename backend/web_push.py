@@ -26,7 +26,7 @@ from urllib3.exceptions import NewConnectionError
 from urllib3.util.connection import create_connection
 
 from models import (
-    DeviceSession, Item, NotificationEvent, NotificationPreference,
+    DeviceSession, Item, Notification, NotificationEvent, NotificationPreference,
     PushDelivery, PushSubscription, User,
 )
 from notification_contracts import notification_event_adapter
@@ -368,7 +368,13 @@ def process_push(
                     delivery.last_error = "no_longer_authorized"
                 else:
                     event = db.get(NotificationEvent, delivery.event_id)
-                    result = sender(subscription, config, notification_push_payload(db, event))
+                    payload = notification_push_payload(db, event)
+                    if db.scalar(select(Notification.id).where(
+                        Notification.event_id == event.id,
+                        Notification.user_id == subscription.user_id,
+                    )) is not None:
+                        payload["url"] += f"?notification_event={event.event_key}"
+                    result = sender(subscription, config, payload)
                     if result.status_code in (201, 202):
                         delivery.status = "accepted"
                         delivery.accepted_at = utcnow()

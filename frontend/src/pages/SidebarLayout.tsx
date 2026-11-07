@@ -4,6 +4,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom'
 import { Dialog } from '@headlessui/react'
 import GlobalBarcodeScan from '../components/GlobalBarcodeScan'
 import NotificationBell from '../components/NotificationBell'
+import NotificationClickReader from '../components/NotificationClickReader'
 import { useAuth } from '../useAuth'
 import { getApiVersion } from '../api'
 import { FiLogOut, FiCompass, FiBox, FiCheckSquare, FiSettings, FiLogIn, FiUser, FiSun, FiMoon, FiMonitor, FiInfo } from 'react-icons/fi'
@@ -231,6 +232,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       </div>
       {/* Contenuto */}
       <div className={`ml-0 w-full flex-1 overflow-auto px-4 pb-28 dark:bg-gray-900 dark:text-white sm:px-6 md:p-6 ${isItemDetail ? 'pt-40 md:pt-6' : 'pt-16 md:pt-6'}`}>
+        <NotificationClickReader />
         {location.pathname.startsWith('/settings') && <h1 className="mb-5 hidden text-2xl font-bold md:block">Impostazioni</h1>}
         {children}
       </div>

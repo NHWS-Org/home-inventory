@@ -60,6 +60,9 @@ export async function getUnreadCount(): Promise<number> {
 export async function markNotificationRead(id: number): Promise<void> {
   await api.put(`/notifications/${id}/read`);
 }
+export async function markNotificationEventRead(eventKey: string): Promise<void> {
+  await api.put(`/notifications/events/${encodeURIComponent(eventKey)}/read`);
+}
 export async function markAllNotificationsRead(): Promise<void> {
   await api.put("/notifications/read-all");
 }

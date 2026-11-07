@@ -300,6 +300,29 @@ def test_inbox_orders_by_action_time_before_pagination_not_delivery_id(setup):
     assert len({r["id"] for r in first + second}) == 3
 
 
+def test_banner_event_read_is_owner_scoped_idempotent_and_checks_access(setup):
+    factory, client, current = setup
+    patch_item(client, 1, quantity=6)
+    settle(factory)
+    with factory() as db:
+        key = db.scalar(select(NotificationEvent.event_key))
+    current[0] = 3
+    assert client.put(f"/notifications/events/{key}/read").status_code == 404
+    current[0] = 5
+    first = client.put(f"/notifications/events/{key}/read")
+    assert first.status_code == 200
+    assert first.json()["read_at"] is not None
+    assert client.put(f"/notifications/events/{key}/read").json() == first.json()
+    assert client.get("/notifications/unread-count").json() == {"count": 0}
+    current[0] = 4
+    assert client.get("/notifications/unread-count").json() == {"count": 1}
+    with factory.begin() as db:
+        db.query(SharedInventory).filter_by(inventory_id=1, user_id=5).delete()
+    current[0] = 5
+    assert client.put(f"/notifications/events/{key}/read").status_code == 404
+    assert client.put("/notifications/events/not-a-uuid/read").status_code == 422
+
+
 @pytest.mark.parametrize("resource", ["inventory", "item"])
 def test_old_event_does_not_attach_to_recreated_resource(setup, resource):
     factory, client, current = setup

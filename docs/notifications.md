@@ -72,6 +72,13 @@ notifiche/code associate: il riutilizzo degli ID SQLite non ricollega vecchi
 avvisi a nuove risorse. Anche gli eventi preesistenti vengono esclusi se la
 risorsa corrente e stata creata dopo l'evento.
 Aprire un contenitore non segna automaticamente la notifica come letta.
+Il click su un banner push, invece, apre la risorsa con l'UUID evento nel link:
+dopo autenticazione l'app segna come letta solo la notifica di quell'evento
+appartenente all'utente corrente e aggiorna la campanella. Il parametro viene
+rimosso dopo il successo; login conserva la destinazione. Account diverso,
+accesso revocato o errore di rete non marcano altre notifiche e mostrano errore
+con possibilita di riprovare. Il worker non accede a token o API autenticate.
+Con solo push e inbox disattivata non c'e una riga inbox da segnare come letta.
 Lo stato letto riguarda la inbox, non certifica consegna o visualizzazione push.
 Le righe compatte mostrano icona inventario/lista, nome, elemento e azione
 (quantita con delta firmato, spunta, titolo/descrizione aggiornati), data/ora
@@ -93,6 +100,7 @@ Tutti gli endpoint sono autenticati e limitati all'utente del token:
 | GET | `/notifications?limit=50&offset=0` | Inbox autorizzata con tipo/nome contenitore |
 | GET | `/notifications/unread-count` | `{count}` |
 | PUT | `/notifications/{id}/read` | Lettura singola |
+| PUT | `/notifications/events/{event_key}/read` | Lettura dell'evento del banner, solo propria inbox |
 | PUT | `/notifications/read-all` | `{updated}`, tutte le pagine autorizzate |
 | GET | `/notifications/preferences` | Preferenze personali dei tre eventi |
 | PUT | `/notifications/preferences/{event_type}` | Canali e azioni proprie |

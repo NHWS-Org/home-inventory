@@ -40,8 +40,10 @@ test('inbox client preserves pagination and sends scoped read requests', async (
     assert.equal(await notifications.getUnreadCount(), 6);
     await notifications.markNotificationRead(12);
     await notifications.markAllNotificationsRead();
+    await notifications.markNotificationEventRead('event-key');
     assert.deepEqual(requests.slice(2).map(r => [r.method, r.url]), [
       ['put', '/notifications/12/read'], ['put', '/notifications/read-all'],
+      ['put', '/notifications/events/event-key/read'],
     ]);
   } finally {
     api.defaults.adapter = oldAdapter;

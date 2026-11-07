@@ -249,6 +249,7 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
         lambda *args: calls.append(args) or push.SendResult(201),
     )
     assert len(calls) == 1
+    assert "notification_event=" not in calls[0][2]["url"]
     assert delivery(setup, delivery_id).status == "accepted"
     assert delivery(setup, delivery_id).accepted_at is not None
     assert not push.process_push(setup.factory, claim, lambda *args: pytest.fail("Duplicate send"))
@@ -415,6 +416,18 @@ def test_lease_expiring_while_waiting_for_authorization_never_sends(setup, monke
         setup.factory, claim, lambda *args: pytest.fail("Expired lease sent"),
     )
     assert delivery(setup, delivery_id).status == "cancelled"
+
+
+def test_push_click_link_identifies_only_recipients_inbox_event(setup):
+    _, _, event_id = queued(setup)
+    with setup.factory() as db:
+        key = db.get(NotificationEvent, event_id).event_key
+    calls = []
+    assert push.process_push(
+        setup.factory, push.claim_push(setup.factory),
+        lambda *args: calls.append(args) or push.SendResult(201),
+    )
+    assert calls[0][2]["url"] == f"/checklists/1?notification_event={key}"
 
 
 def test_standard_encryption_vapid_detailed_payload_and_transport_safety(setup, monkeypatch):

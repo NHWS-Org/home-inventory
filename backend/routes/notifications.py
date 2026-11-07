@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -128,6 +129,18 @@ def read_all(db: Session = Depends(get_db), user=Depends(get_current_user)):
     if updated:
         db.commit()
     return {"updated": updated}
+
+
+@router.put("/events/{event_key}/read")
+def read_event_notification(
+    event_key: UUID, db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    row = db.scalar(select(Notification).join(
+        NotificationEvent, NotificationEvent.id == Notification.event_id,
+    ).where(Notification.user_id == user.id, NotificationEvent.event_key == str(event_key)))
+    if row is None:
+        raise HTTPException(404, "Notifica non trovata")
+    return read_notification(row.id, db, user)
 
 
 @router.put("/{notification_id}/read")
