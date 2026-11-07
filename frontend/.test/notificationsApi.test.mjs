@@ -10,6 +10,16 @@ after(() => server.close());
 const notifications = await server.ssrLoadModule('/src/notificationsApi.ts');
 const { api } = await server.ssrLoadModule('/src/api.ts');
 
+test('compact actions show signed deltas, checks, historical text and legacy labels', () => {
+  assert.equal(notifications.notificationAction({inventory_type:'INVENTORY', event:{event_type:'item_quantity_changed', previous_quantity:2,quantity:3}}), 'Quantità: +1');
+  assert.equal(notifications.notificationAction({inventory_type:'INVENTORY', event:{event_type:'item_quantity_changed', previous_quantity:5,quantity:2}}), 'Quantità: -3');
+  assert.equal(notifications.notificationAction({inventory_type:'CHECKLIST', event:{event_type:'item_quantity_changed', previous_quantity:1,quantity:0}}), 'Spunta: da completare');
+  assert.equal(notifications.notificationAction({event:{event_type:'item_updated',changed_fields:['description','name'],details:{description:'xxx',name:'yyy'}}}), 'Descrizione: xxx · Titolo: yyy');
+  assert.equal(notifications.notificationAction({event:{event_type:'item_updated',changed_fields:['barcodes']}}), 'Barcode: modificato');
+  assert.equal(notifications.notificationDate({action_at:'2026-11-07T01:00:00+01:00'}).toISOString(), '2026-11-07T00:00:00.000Z');
+  assert.equal(notifications.notificationDate({created_at:'2026-11-07T00:00:00'}).toISOString(), '2026-11-07T00:00:00.000Z');
+});
+
 test('notification deep links use the authorized inventory type', () => {
   assert.equal(notifications.notificationLink({ inventory_type: 'CHECKLIST', event: { inventory_id: 7 } }), '/checklists/7');
   assert.equal(notifications.notificationLink({ inventory_type: 'INVENTORY', event: { inventory_id: 8 } }), '/inventories/8');

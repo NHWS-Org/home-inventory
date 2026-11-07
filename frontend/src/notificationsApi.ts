@@ -9,11 +9,12 @@ export interface NotificationPreference {
 }
 export type InboxEvent =
   | { event_type: "item_quantity_changed"; inventory_id: number; item_id: number; previous_quantity: number; quantity: number }
-  | { event_type: "item_updated"; inventory_id: number; item_id: number; changed_fields: string[] }
-  | { event_type: "inventory_updated"; inventory_id: number; changed_fields: string[] };
+  | { event_type: "item_updated"; inventory_id: number; item_id: number; changed_fields: string[]; details?: Record<string, string | number | null> }
+  | { event_type: "inventory_updated"; inventory_id: number; changed_fields: string[]; details?: Record<string, string | number | null> };
 export interface InboxNotification {
   id: number;
   created_at: string;
+  action_at?: string;
   read_at: string | null;
   inventory_type: "INVENTORY" | "CHECKLIST";
   inventory_name: string;
@@ -28,6 +29,27 @@ export const notificationLabels: Record<NotificationEventType, string> = {
 export function notificationLink(row: InboxNotification): string {
   const path = row.inventory_type === "CHECKLIST" ? "checklists" : "inventories";
   return `/${path}/${row.event.inventory_id}`;
+}
+export function notificationAction(row: InboxNotification): string {
+  const event = row.event;
+  if (event.event_type === "item_quantity_changed") {
+    if (row.inventory_type === "CHECKLIST") return event.quantity >= 1 ? "Spunta: completato" : "Spunta: da completare";
+    const delta = event.quantity - event.previous_quantity;
+    return `Quantità: ${delta > 0 ? "+" : ""}${delta}`;
+  }
+  const labels: Record<string, string> = {
+    name: "Titolo", description: "Descrizione", priority: "Priorità", inventory_id: "Inventario/lista",
+    barcodes: "Barcode", metadata: "Metadati", assignment: "Assegnazione", assignments: "Assegnazioni",
+  };
+  return event.changed_fields.map(field => {
+    const label = labels[field] ?? field;
+    if (event.details && field in event.details) return `${label}: ${event.details[field] ?? "(vuoto)"}`;
+    return `${label}: modificato`;
+  }).join(" · ");
+}
+export function notificationDate(row: InboxNotification): Date {
+  const value = row.action_at ?? row.created_at;
+  return new Date(/[zZ]$|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`);
 }
 export async function getInbox(offset = 0): Promise<InboxNotification[]> {
   return (await api.get<InboxNotification[]>("/notifications", { params: { limit: 50, offset } })).data;

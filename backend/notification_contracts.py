@@ -21,6 +21,7 @@ class ItemQuantityChangedData(EventData):
     item_id: int = Field(gt=0)
     previous_quantity: int
     quantity: int
+    action_at: str | None = None
 
     @model_validator(mode="after")
     def require_change(self) -> "ItemQuantityChangedData":
@@ -33,11 +34,13 @@ class ItemUpdatedData(EventData):
     event_type: Literal["item_updated"] = "item_updated"
     item_id: int = Field(gt=0)
     changed_fields: list[str] = Field(min_length=1)
+    details: dict[str, str | int | None] = Field(default_factory=dict)
 
 
 class InventoryUpdatedData(EventData):
     event_type: Literal["inventory_updated"] = "inventory_updated"
     changed_fields: list[str] = Field(min_length=1)
+    details: dict[str, str | int | None] = Field(default_factory=dict)
 
 
 NotificationEventData = Annotated[

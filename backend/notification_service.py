@@ -41,6 +41,7 @@ def emit_item_updated(db: Session, item: Item, changed_fields: list[str], actor_
     if fields:
         enqueue_event(db, ItemUpdatedData(
             inventory_id=item.inventory_id, item_id=item.id, changed_fields=fields,
+            details={field: getattr(item, field) for field in fields if field in {"name", "description", "priority", "inventory_id"}},
         ), actor_id=actor_id)
 
 
@@ -50,6 +51,7 @@ def emit_inventory_updated(
     if changed_fields:
         enqueue_event(db, InventoryUpdatedData(
             inventory_id=inventory.id, changed_fields=sorted(set(changed_fields)),
+            details={"name": inventory.name} if "name" in changed_fields else {},
         ), actor_id=actor_id)
 
 
@@ -99,6 +101,7 @@ def emit_item_change(
         return
     data = ItemQuantityChangedData(
         inventory_id=item.inventory_id, item_id=item.id, previous_quantity=initial, quantity=new,
+        action_at=current.isoformat(),
     )
     if pending is None:
         pending = enqueue_event(db, data, actor_id=actor_id, now=current)

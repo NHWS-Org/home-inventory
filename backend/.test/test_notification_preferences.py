@@ -105,7 +105,8 @@ def settle(factory):
 
 def events(factory):
     with factory() as db:
-        return [row.payload for row in db.scalars(select(NotificationEvent).order_by(NotificationEvent.id))]
+        return [{key: value for key, value in row.payload.items() if key not in {"details", "action_at"}}
+                for row in db.scalars(select(NotificationEvent).order_by(NotificationEvent.id))]
 
 
 def enable(client, kind, **options):
@@ -257,6 +258,28 @@ def test_mixed_quantity_and_details_defaults_and_noops(setup):
     settle(factory)
     current[0] = 5
     assert client.get("/notifications").json()[0]["event"]["event_type"] == "item_updated"
+
+
+def test_inbox_action_details_are_historical_and_action_time_precedes_delivery(setup):
+    factory, client, current = setup
+    current[0] = 4
+    enable(client, "item_updated")
+    enable(client, "inventory_updated")
+    current[0] = 1
+    patch_item(client, 1, name="First title", description="First description", quantity=6)
+    patch_item(client, 1, name="Later title", description="Later description", quantity=7)
+    client.patch("/inventory/1", json={"name": "First inventory"})
+    client.patch("/inventory/1", json={"name": "Later inventory"})
+    settle(factory)
+    current[0] = 4
+    rows = client.get("/notifications").json()
+    details = [r["event"]["details"] for r in rows if r["event"]["event_type"] == "item_updated"]
+    assert {"name": "First title", "description": "First description"} in details
+    assert {"name": "Later title", "description": "Later description"} in details
+    assert {"name": "First inventory"} in [r["event"]["details"] for r in rows if r["event"]["event_type"] == "inventory_updated"]
+    quantity = next(r for r in rows if r["event"]["event_type"] == "item_quantity_changed")
+    assert quantity["action_at"] == quantity["event"]["action_at"]
+    assert datetime.fromisoformat(quantity["action_at"]) < datetime.fromisoformat(quantity["created_at"]) + timedelta(seconds=1)
 
 
 @pytest.mark.parametrize("route", ["inventory", "checklist"])

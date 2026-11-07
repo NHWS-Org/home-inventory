@@ -98,6 +98,7 @@ def inbox(
         item = db.get(Item, item_id) if item_id is not None else None
         result.append({
             "id": row.id, "created_at": row.created_at, "read_at": row.read_at,
+            "action_at": record.payload.get("action_at") or record.created_at,
             "event": record.payload, "inventory_type": inventory.type,
             "inventory_name": inventory.name, "item_name": item.name if item is not None else None,
         })

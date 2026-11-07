@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { FiBox, FiCheckSquare, FiArrowRight, FiCheck } from "react-icons/fi";
 import {
-  getInbox, markAllNotificationsRead, markNotificationRead, notificationLabels,
+  getInbox, markAllNotificationsRead, markNotificationRead, notificationAction, notificationDate,
   notificationLink, notifyInboxChanged, type InboxNotification,
 } from "../notificationsApi";
 
@@ -58,20 +59,23 @@ export default function NotificationsPage() {
       {error && <p role="alert">{error}</p>}
       {busy && <p role="status">Caricamento...</p>}
       {!busy && !error && !rows.length && <p role="status">Nessuna notifica disponibile.</p>}
-      <ul aria-label="Notifiche ricevute" className="space-y-3">
+      <ul aria-label="Notifiche ricevute" className="space-y-2">
         {rows.map(row => (
-          <li key={row.id} className={`space-y-2 rounded border p-3 ${!row.read_at ? "border-blue-500" : "border-gray-300 dark:border-gray-700"}`}>
-            <p className="font-semibold">{notificationLabels[row.event.event_type]} — {row.inventory_name}</p>
-            {row.item_name && <p>Elemento: {row.item_name}</p>}
-            <p>{row.read_at ? "Letta" : "Da leggere"} · {new Date(row.created_at + (row.created_at.endsWith("Z") ? "" : "Z")).toLocaleString()}</p>
-            {row.event.event_type === "item_quantity_changed" && (
-              <p>{row.inventory_type === "CHECKLIST"
-                ? `Spunta: ${row.event.previous_quantity >= 1 ? "completato" : "da completare"} → ${row.event.quantity >= 1 ? "completato" : "da completare"}`
-                : `Quantità: ${row.event.previous_quantity} → ${row.event.quantity}`}</p>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <Link to={notificationLink(row)} className="inline-flex min-h-11 items-center text-blue-700 underline dark:text-blue-300">Apri contenitore</Link>
-              {!row.read_at && <button disabled={busy} onClick={() => void read(row.id)} className="min-h-11 rounded border px-3">Segna come letta</button>}
+          <li key={row.id} className={`flex items-start gap-2 rounded border p-2 ${!row.read_at ? "border-blue-500" : "border-gray-300 dark:border-gray-700"}`}>
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="flex items-center gap-1.5 text-sm font-semibold">
+                {row.inventory_type === "CHECKLIST" ? <FiCheckSquare className="shrink-0" aria-label="Lista" /> : <FiBox className="shrink-0" aria-label="Inventario" />}
+                <span className="break-words">{row.inventory_name}</span>
+              </p>
+              <p title={notificationAction(row)} className="line-clamp-2 break-words text-sm [overflow-wrap:anywhere]">{row.item_name && <><span className="font-medium">{row.item_name}</span> · </>}{notificationAction(row)}</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                <time dateTime={row.action_at ?? row.created_at}>{notificationDate(row).toLocaleString([], { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time>
+                <span> · {row.read_at ? "Letta" : "Da leggere"}</span>
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <Link to={notificationLink(row)} aria-label={`Apri ${row.inventory_type === "CHECKLIST" ? "lista" : "inventario"} ${row.inventory_name}`} title={row.inventory_type === "CHECKLIST" ? "Apri lista" : "Apri inventario"} className="inline-flex h-11 w-11 items-center justify-center rounded border text-blue-700 dark:text-blue-300"><FiArrowRight aria-hidden="true" /></Link>
+              {!row.read_at && <button disabled={busy} aria-label="Segna come letta" title="Segna come letta" onClick={() => void read(row.id)} className="inline-flex h-11 w-11 items-center justify-center rounded border"><FiCheck aria-hidden="true" /></button>}
             </div>
           </li>
         ))}
