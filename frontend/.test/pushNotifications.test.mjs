@@ -46,13 +46,13 @@ function browserHarness({ permission = 'default', existing = null } = {}) {
     const path = config.url;
     requests.push({ method: config.method, path, data: config.data });
     if (path === '/notifications/push/config') {
-      return { config, data: { public_key: publicKey, payload_mode: 'generic', ttl_seconds: 300 }, status: 200, statusText: 'OK', headers: {} };
+      return { config, data: { public_key: publicKey, payload_mode: 'detailed', ttl_seconds: 300 }, status: 200, statusText: 'OK', headers: {} };
     }
     if (path === '/notifications/push/subscriptions' && config.method === 'get') {
       return { config, data: [{ id: 41, expires_at: '2099-01-01T00:00:00' }], status: 200, statusText: 'OK', headers: {} };
     }
     if (path === '/notifications/push/subscriptions' && config.method === 'post') {
-      return { config, data: { id: 41, expires_at: '2099-01-01T00:00:00', payload_mode: 'generic' }, status: 201, statusText: 'Created', headers: {} };
+      return { config, data: { id: 41, expires_at: '2099-01-01T00:00:00', payload_mode: 'detailed' }, status: 201, statusText: 'Created', headers: {} };
     }
     if (path === '/notifications/push/subscriptions/41' && config.method === 'delete') {
       return { config, data: { deleted: 1 }, status: 200, statusText: 'OK', headers: {} };
@@ -185,7 +185,7 @@ test('browser state is active only when native subscription and authenticated se
     await push.enablePushForBrowser('alice');
     assert.deepEqual(await push.inspectPushBrowser('alice'), {
       state: 'active',
-      configuration: { public_key: publicKey, payload_mode: 'generic', ttl_seconds: 300 },
+      configuration: { public_key: publicKey, payload_mode: 'detailed', ttl_seconds: 300 },
     });
     assert.equal((await push.inspectPushBrowser('bob')).state, 'expired');
     assert.equal(harness.events.some(([name]) => name === 'unsubscribe'), true);

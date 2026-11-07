@@ -151,7 +151,7 @@ def test_vapid_is_persistent_derived_and_never_generated(setup, monkeypatch):
     assert len(push.decode_key(first.public_key, 65)) == 65
     response = setup.client.get("/notifications/push/config", headers=setup.headers[2])
     assert response.json() == {
-        "public_key": first.public_key, "payload_mode": "generic", "ttl_seconds": 300,
+        "public_key": first.public_key, "payload_mode": "detailed", "ttl_seconds": 300,
     }
     write_key(setup.path)
     assert load_push_config().fingerprint != first.fingerprint
@@ -417,8 +417,8 @@ def test_lease_expiring_while_waiting_for_authorization_never_sends(setup, monke
     assert delivery(setup, delivery_id).status == "cancelled"
 
 
-def test_standard_encryption_vapid_generic_payload_and_transport_safety(setup, monkeypatch):
-    subscription_id = subscribe(setup)
+def test_standard_encryption_vapid_detailed_payload_and_transport_safety(setup, monkeypatch):
+    subscription_id, _, event_id = queued(setup)
     captured = {}
     monkeypatch.setattr(push.socket, "getaddrinfo", lambda *a, **k: [
         (2, 1, 6, "", ("8.8.8.8", 443)),
@@ -435,27 +435,60 @@ def test_standard_encryption_vapid_generic_payload_and_transport_safety(setup, m
 
     monkeypatch.setattr(requests.Session, "request", request)
     with setup.factory() as db:
-        result = push.send_push(db.get(PushSubscription, subscription_id), load_push_config(), "event-uuid")
+        payload = push.notification_push_payload(db, db.get(NotificationEvent, event_id))
+        result = push.send_push(db.get(PushSubscription, subscription_id), load_push_config(), payload)
     assert result.status_code == 201
     assert captured["headers"]["Authorization"].startswith("vapid ")
     assert captured["headers"]["content-encoding"] == "aes128gcm"
     assert str(captured["headers"]["ttl"]) == "300"
     assert b"Hai una nuova notifica" not in captured["data"]
     assert b"Private list name" not in captured["data"]
-    # Inspect plaintext before encryption separately: no names/contents/IDs from private resources.
+    # Resource details are included only inside the encrypted payload.
     def webpush_mock(**kwargs):
-        assert json.loads(kwargs["data"]) == {
-            "title": "Home Inventory", "body": "Hai una nuova notifica",
-            "url": "/notifications", "tag": "event-uuid",
-        }
+        assert json.loads(kwargs["data"]) == payload
+        assert payload["title"] == "Lista: Private list name"
+        assert payload["url"] == "/checklists/1"
         response = requests.Response()
         response.status_code = 202
         return response
     monkeypatch.setattr(push, "webpush", webpush_mock)
     with setup.factory() as db:
         assert push.send_push(
-            db.get(PushSubscription, subscription_id), load_push_config(), "event-uuid",
+            db.get(PushSubscription, subscription_id), load_push_config(), payload,
         ).status_code == 202
+
+
+def test_detailed_push_identifies_resource_item_action_and_bounds_unicode(setup):
+    from models import Item
+    from notification_contracts import ItemQuantityChangedData
+    with setup.factory.begin() as db:
+        inventory = db.get(Inventory, 1)
+        inventory.name = "Dispensa"
+        inventory.type = "INVENTORY"
+        item = Item(name="Riso", inventory_id=1, quantity=3)
+        db.add(item)
+        db.flush()
+        record = enqueue_event(db, ItemQuantityChangedData(
+            inventory_id=1, item_id=item.id, previous_quantity=2, quantity=3,
+        ), actor_id=1)
+        payload = push.notification_push_payload(db, record)
+        assert payload["title"] == "Inventario: Dispensa"
+        assert payload["body"] == "Riso · Quantità: +1 (2 → 3)"
+        assert payload["url"] == "/inventories/1"
+        inventory.type = "CHECKLIST"
+        assert push.notification_push_payload(db, record)["body"] == "Riso · Spunta: completato"
+        record.payload = {
+            "event_type": "item_updated", "inventory_id": 1, "item_id": item.id,
+            "changed_fields": ["description", "name"],
+            "details": {"description": "Una confezione", "name": "Riso integrale"},
+        }
+        assert "Descrizione: Una confezione · Titolo: Riso integrale" in push.notification_push_payload(db, record)["body"]
+        inventory.name = "😀" * 300
+        item.name = "😀" * 700
+        payload = push.notification_push_payload(db, record)
+        assert len(payload["title"]) <= 80
+        assert len(payload["body"]) <= 500
+        assert len(json.dumps(payload, ensure_ascii=False).encode()) < 3500
 
 
 def test_transport_rejects_private_dns_and_redirect_following(monkeypatch):

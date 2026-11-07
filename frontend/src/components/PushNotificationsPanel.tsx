@@ -138,6 +138,8 @@ export default function PushNotificationsPanel() {
       <p className="text-sm text-gray-600 dark:text-gray-300">
         La scelta vale solo per questo browser. Serve anche il consenso push per il tipo di evento;
         configura le preferenze per evento nella sezione Preferenze notifiche del Profilo.
+        I banner mostrano nomi di inventari/liste, elementi e modifiche, anche sulla schermata
+        bloccata se le impostazioni delle anteprime lo consentono.
       </p>
       <div className="flex flex-wrap gap-2">
         {canEnable && (

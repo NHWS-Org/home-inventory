@@ -82,7 +82,7 @@ Titolo e descrizione sono salvati nell'evento, non ricavati dal valore corrente:
 una modifica successiva non riscrive il dettaglio storico. Per eventi precedenti
 senza dettagli viene indicato il campo modificato; per barcode/metadati e
 assegnazioni viene indicata la categoria, senza inventare valori storici.
-Il payload push di sistema resta generico. Non serve una migrazione DB.
+Il payload push di sistema include i dettagli descritti sotto. Non serve una migrazione DB.
 
 ### API
 
@@ -188,8 +188,14 @@ Host consentiti: `fcm.googleapis.com`, `updates.push.services.mozilla.com`,
 `web.push.apple.com`. Solo HTTPS, IP pubblici validati e DNS pinning; niente
 redirect, host arbitrari o proxy ambientali.
 
-Payload lock screen generico: Home Inventory, Hai una nuova notifica, percorso
-`/notifications`, tag UUID. Nessun nome, quantita o contenuto privato.
+I banner desktop/mobile mostrano tipo e nome inventario/lista nel titolo,
+nome item e modifica nel testo (delta quantita, spunta, titolo/descrizione,
+categorie barcode/metadati). Il click apre direttamente inventario/lista,
+con normale verifica login/accessi. Titolo massimo 80 caratteri e testo 500,
+con ellissi per valori lunghi; l'OS puo troncare ulteriormente le anteprime.
+I contenuti sono cifrati con Web Push ma visibili anche sulla schermata bloccata
+se le impostazioni OS lo consentono. Il Profilo avvisa esplicitamente di questo
+comportamento. Nessuna nuova sottoscrizione automatica o prompt forzato.
 `201`/`202` indicano accepted dal provider, non consegnata o letta.
 TTL provider 300 secondi; coda al massimo 24 ore. Endpoint `404`/`410` eliminati.
 `429`/`5xx` ritentati con backoff; timeout/crash ambigui diventano uncertain e
@@ -212,7 +218,7 @@ privata in backup separato protetto.
 ## Fase 5: service worker e consenso browser
 
 `frontend/public/push-sw.js` non intercetta fetch, non usa Cache Storage e non
-legge API autenticate. Mostra payload generici e permette solo link same-origin.
+legge API autenticate. Mostra i dettagli ricevuti nel push e permette solo link same-origin.
 La route protetta `/notifications` conserva la destinazione attraverso login.
 
 Il pannello Profilo distingue supporto, HTTPS, permesso negato, servizio

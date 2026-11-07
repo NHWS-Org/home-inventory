@@ -37,9 +37,9 @@ self.addEventListener("push", (event) => {
     payload = {};
   }
 
-  const title = typeof payload.title === "string" && payload.title.length <= 80
+  const title = typeof payload.title === "string" && payload.title.length <= 160
     ? payload.title : "Home Inventory";
-  const body = typeof payload.body === "string" && payload.body.length <= 160
+  const body = typeof payload.body === "string" && payload.body.length <= 1000
     ? payload.body : "Hai una nuova notifica";
   const tag = typeof payload.tag === "string" && /^[a-zA-Z0-9-]{1,80}$/.test(payload.tag)
     ? payload.tag : "home-inventory-notification";

@@ -26,7 +26,7 @@ from urllib3.exceptions import NewConnectionError
 from urllib3.util.connection import create_connection
 
 from models import (
-    DeviceSession, NotificationEvent, NotificationPreference,
+    DeviceSession, Item, NotificationEvent, NotificationPreference,
     PushDelivery, PushSubscription, User,
 )
 from notification_contracts import notification_event_adapter
@@ -259,11 +259,44 @@ class SendResult:
     retry_after: int | None = None
 
 
-def send_push(subscription: PushSubscription, config: PushConfig, event_key: str) -> SendResult:
-    payload = json.dumps({
-        "title": "Home Inventory", "body": "Hai una nuova notifica",
-        "url": "/notifications", "tag": event_key,
-    }, separators=(",", ":"))
+def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str, str]:
+    inventory = event_inventory(db, event)
+    if inventory is None:
+        raise ValueError("Notification resource no longer exists")
+    data = event.payload
+    item = db.get(Item, data["item_id"]) if "item_id" in data else None
+    if data["event_type"] == "item_quantity_changed":
+        if inventory.type == "CHECKLIST":
+            action = "Spunta: completato" if data["quantity"] >= 1 else "Spunta: da completare"
+        else:
+            delta = data["quantity"] - data["previous_quantity"]
+            action = f"Quantità: {delta:+d} ({data['previous_quantity']} → {data['quantity']})"
+    else:
+        labels = {
+            "name": "Titolo", "description": "Descrizione", "priority": "Priorità",
+            "inventory_id": "Inventario/lista", "barcodes": "Barcode", "metadata": "Metadati",
+            "assignment": "Assegnazione", "assignments": "Assegnazioni",
+        }
+        details = data.get("details", {})
+        action = " · ".join(
+            f"{labels.get(field, field)}: {details[field] if details[field] is not None else '(vuoto)'}"
+            if field in details else f"{labels.get(field, field)}: modificato"
+            for field in data["changed_fields"]
+        )
+    def compact(value: str, limit: int) -> str:
+        text = " ".join(value.split())
+        return text if len(text) <= limit else text[:limit - 1] + "…"
+    kind = "Lista" if inventory.type == "CHECKLIST" else "Inventario"
+    path = "checklists" if inventory.type == "CHECKLIST" else "inventories"
+    return {
+        "title": compact(f"{kind}: {inventory.name}", 80),
+        "body": compact(f"{item.name} · {action}" if item is not None else action, 500),
+        "url": f"/{path}/{inventory.id}", "tag": event.event_key,
+    }
+
+
+def send_push(subscription: PushSubscription, config: PushConfig, payload: dict[str, str]) -> SendResult:
+    encoded_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     with SafePushSession() as transport:
         try:
             response = webpush(
@@ -271,7 +304,7 @@ def send_push(subscription: PushSubscription, config: PushConfig, event_key: str
                     "endpoint": subscription.endpoint,
                     "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
                 },
-                data=payload, vapid_private_key=Vapid(private_key=config.private_key),
+                data=encoded_payload, vapid_private_key=Vapid(private_key=config.private_key),
                 vapid_claims={"sub": config.subject}, ttl=PUSH_TTL_SECONDS,
                 timeout=10, requests_session=transport,
             )
@@ -334,7 +367,8 @@ def process_push(
                     delivery.status = "cancelled"
                     delivery.last_error = "no_longer_authorized"
                 else:
-                    result = sender(subscription, config, db.get(NotificationEvent, delivery.event_id).event_key)
+                    event = db.get(NotificationEvent, delivery.event_id)
+                    result = sender(subscription, config, notification_push_payload(db, event))
                     if result.status_code in (201, 202):
                         delivery.status = "accepted"
                         delivery.accepted_at = utcnow()
