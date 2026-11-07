@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from models import Base, Notification, NotificationEvent, Role, User
-from notification_contracts import ChecklistCompletedData
+from notification_contracts import InventoryUpdatedData
 from notification_outbox import (
     MAX_ATTEMPTS, RetryableNotificationError, claim_event, enqueue_event, process_claim,
 )
@@ -40,7 +40,7 @@ def factory(tmp_path):
 def enqueue(factory, **kwargs):
     with factory.begin() as db:
         record = enqueue_event(
-            db, ChecklistCompletedData(inventory_id=1), actor_id=1, now=NOW, **kwargs,
+            db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1, now=NOW, **kwargs,
         )
         db.flush()
         return record.id
@@ -53,7 +53,7 @@ def inbox_handler(db, record):
 def test_enqueue_does_not_commit_domain_change(factory):
     with factory() as db:
         db.get(User, 1).username = "changed"
-        enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1, now=NOW)
+        enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1, now=NOW)
         db.flush()
         db.rollback()
     with factory() as db:
@@ -242,7 +242,7 @@ def test_worker_once_processes_missing_inventory_without_sending(factory, monkey
     import notification_worker
 
     with factory.begin() as db:
-        enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1)
+        enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
     monkeypatch.setattr(notification_worker, "SessionLocal", factory)
     monkeypatch.setattr("sys.argv", ["notification_worker", "--once"])
     monkeypatch.setattr(notification_worker.signal, "signal", lambda *args: None)

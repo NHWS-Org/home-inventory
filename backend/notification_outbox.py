@@ -95,8 +95,8 @@ def claim_event(factory: sessionmaker, *, now: datetime | None = None) -> Claim 
         return Claim(event_id, token) if result.rowcount == 1 else None
 
 
-def apply_rules(db: Session, event: NotificationEvent) -> None:
-    from notification_rules import evaluate_event
+def apply_preferences(db: Session, event: NotificationEvent) -> None:
+    from notification_service import evaluate_event
 
     evaluate_event(db, event)
 
@@ -104,7 +104,7 @@ def apply_rules(db: Session, event: NotificationEvent) -> None:
 def process_claim(
     factory: sessionmaker,
     claim: Claim,
-    handler: Callable[[Session, NotificationEvent], None] = apply_rules,
+    handler: Callable[[Session, NotificationEvent], None] = apply_preferences,
     *,
     now: datetime | None = None,
 ) -> bool:

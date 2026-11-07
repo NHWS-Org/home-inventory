@@ -16,7 +16,7 @@ from models import (
     ListAssignment,
 )
 from assignment_service import build_assignment_summary, pending_assigned_by_source
-from notification_rules import emit_share
+from notification_service import emit_inventory_updated, emit_removed_item_links, remove_resource_events
 from schemas import InventoryCreate, InventoryResponse, InventoryUpdate, ItemMetadataValueResponse, ItemBarcodeResponse, ItemResponse, UserResponse, InventoryResponseWithItemCount, InventoryVersionResponse, VersionBulkDeleteRequest
 from routes.auth import get_current_user
 from typing import Any, List, cast
@@ -89,6 +89,8 @@ def _write_inventory_version(
 
         if not diff:
             return
+
+        emit_inventory_updated(db, inv, list(diff), user.id)
 
     inventory_id = cast(int, inv.id)
     version = InventoryVersion(
@@ -353,6 +355,8 @@ def delete_inventory_base(
         raise HTTPException(status_code=403, detail="Accesso negato")
 
     _write_inventory_version(db, inventory, "DELETE", user)  # registra prima della delete
+    emit_removed_item_links(db, [item.id for item in inventory.items], user.id)
+    remove_resource_events(db, inventory_id=inventory.id)
     db.delete(inventory)
     db.commit()
     return {"detail": "Inventario eliminato"}
@@ -504,7 +508,6 @@ def share_base(
 
     shared = SharedInventory(user_id=target_user.id, inventory_id=inventory_id)
     db.add(shared)
-    emit_share(db, inventory_id, "user", target_user.id, user.id)
     db.commit()
     return {"detail": f"Inventario condiviso con {target_user.username}"}
 
@@ -582,7 +585,6 @@ def share_with_group_base(
 
     shared = SharedInventoryGroup(group_id=group_id, inventory_id=inventory_id)
     db.add(shared)
-    emit_share(db, inventory_id, "group", group_id, user.id)
     db.commit()
     return {"detail": f"Inventario condiviso con il gruppo '{group.name}'"}
 

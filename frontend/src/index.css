@@ -1,2 +1,17 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+
+@keyframes notification-bell-ring {
+  0%, 30%, 100% { transform: rotate(0); }
+  5%, 15%, 25% { transform: rotate(15deg); }
+  10%, 20% { transform: rotate(-15deg); }
+}
+
+.notification-bell-ringing {
+  transform-origin: top center;
+  animation: notification-bell-ring 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-bell-ringing { animation: none; }
+}

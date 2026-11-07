@@ -252,12 +252,12 @@ condivisa tramite anchor YAML.
 
 ### Notifiche (in sviluppo)
 
-La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). La fase 4 aggiunge il backend Web Push/VAPID, disabilitato di default e legato alle sessioni. La fase 5 aggiunge consenso browser, service worker minimo e gestione da Profilo; editor preferenze e inbox frontend restano fasi successive. Nessuna regola viene preattivata. [Configurazione VAPID e restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni); [test e limiti della fase 5](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR confluiscono in questo branch prima della release. Le [preferenze personali](docs/notifications.md#modello-aggiornato) decidono quali modifiche ricevere per inventari/liste modificabili: quantita e spunte (inbox attiva di default), dettagli degli elementi e nome contenitore (disattivi di default). Non servono regole condivise. Campanella e inbox mostrano stato lettura; il Profilo salva automaticamente ogni scelta. Il worker e opt-in (profilo Compose `notifications`) e Web Push richiede consenso browser e preferenza evento. [Configurazione VAPID e restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni); [consenso browser](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
 
 Sottoscrizioni e code push transitorie sono escluse dai backup/confronti DB e
 svuotate al restore, per non riattivare consensi o invii obsoleti.
 
-Le notifiche quantita accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Anche il completamento checklist attende questa finestra. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
+Le notifiche quantita e singole spunte accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Non sono limitate a soglie o completamento dell'intera lista. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
 
 ### Automazioni agentiche (GitHub Copilot)
 
@@ -529,12 +529,12 @@ or `COMPOSE_PROFILES=notifications` in the shell/private root `.env`.
 
 ### Notifications (in development)
 
-The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). Phase 4 adds a session-bound Web Push/VAPID backend, disabled by default. Phase 5 adds browser consent, a minimal service worker and profile controls; preference editing and the frontend inbox remain for later phases. No rules are enabled automatically. See [VAPID configuration and restore limits](docs/notifications.md#fase-4-web-push-backend-e-sessioni) and [phase 5 checks and limitations](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device` before release integration. [Personal preferences (Italian)](docs/notifications.md#modello-aggiornato) select changes to editable inventories/checklists: quantity and individual checks (inbox on by default), item details and container names (off by default). No shared rules are required. The bell and inbox track read state; Profile automatically saves each toggle. The worker is opt-in (Compose profile `notifications`); Web Push requires both browser consent and an event preference. See [VAPID configuration and restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni) and [browser consent](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
 
 Transient push subscriptions and delivery queues are excluded from backups/DB
 comparisons and cleared on restore to prevent obsolete consent or send replay.
 
-Quantity notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. Checklist completion also waits for this window. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
+Quantity and individual check notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. They are not limited to thresholds or whole-checklist completion. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
 
 ### Agentic workflows (GitHub Copilot)
 

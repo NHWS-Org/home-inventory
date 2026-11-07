@@ -165,7 +165,7 @@ export async function revokeDeviceSession(sessionId: number): Promise<void> {
 
 export interface PushConfiguration {
   public_key: string;
-  payload_mode: "generic";
+  payload_mode: "detailed";
   ttl_seconds: number;
 }
 
@@ -186,7 +186,7 @@ export async function getPushSubscriptions(): Promise<PushSubscriptionRecord[]> 
 export async function savePushSubscription(subscription: PushSubscriptionJSON): Promise<{
   id: number;
   expires_at: string;
-  payload_mode: "generic";
+  payload_mode: "detailed";
 }> {
   return (await api.post("/notifications/push/subscriptions", {
     ...subscription,

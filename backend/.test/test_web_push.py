@@ -27,9 +27,9 @@ from backup_archive import create_backup_archive, read_backup_archive
 from dependencies import get_db
 from models import (
     Base, DeviceSession, Inventory, Notification, NotificationEvent, NotificationPreference,
-    NotificationRule, PushDelivery, PushSubscription, Role, SharedInventory, User,
+    PushDelivery, PushSubscription, Role, SharedInventory, User,
 )
-from notification_contracts import ChecklistCompletedData
+from notification_contracts import InventoryUpdatedData
 from notification_outbox import claim_event, enqueue_event, process_claim, utcnow
 from push_config import PushConfigurationError, load_push_config
 from routes.auth import create_access_token, router as auth_router
@@ -70,7 +70,7 @@ def setup(tmp_path, monkeypatch):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     before = utcnow() - timedelta(minutes=1)
     with factory.begin() as db:
-        db.add(Role(id=1, name="viewer"))
+        db.add_all([Role(id=1, name="moderator"), Role(id=2, name="viewer")])
         db.flush()
         db.add_all([User(id=i, username=f"user{i}", role_id=1) for i in (1, 2, 3)])
         db.flush()
@@ -78,12 +78,8 @@ def setup(tmp_path, monkeypatch):
         db.flush()
         db.add_all([
             SharedInventory(inventory_id=1, user_id=2),
-            NotificationRule(
-                inventory_id=1, event_type="checklist_completed",
-                recipients=[{"kind": "participants"}], data_ins=before, data_mod=before,
-            ),
             NotificationPreference(
-                user_id=2, event_type="checklist_completed", push_enabled=True,
+                user_id=2, event_type="inventory_updated", in_app_enabled=True, push_enabled=True,
                 data_ins=before, data_mod=before,
             ),
             *[DeviceSession(
@@ -132,7 +128,7 @@ def subscribe(setup, **changes):
 def queued(setup):
     subscription_id = subscribe(setup)
     with setup.factory.begin() as db:
-        record = enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1)
+        record = enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
         db.flush()
         event_id = record.id
     claim = claim_event(setup.factory)
@@ -155,7 +151,7 @@ def test_vapid_is_persistent_derived_and_never_generated(setup, monkeypatch):
     assert len(push.decode_key(first.public_key, 65)) == 65
     response = setup.client.get("/notifications/push/config", headers=setup.headers[2])
     assert response.json() == {
-        "public_key": first.public_key, "payload_mode": "generic", "ttl_seconds": 300,
+        "public_key": first.public_key, "payload_mode": "detailed", "ttl_seconds": 300,
     }
     write_key(setup.path)
     assert load_push_config().fingerprint != first.fingerprint
@@ -240,7 +236,7 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
     _, delivery_id, event_id = queued(setup)
     with setup.factory.begin() as db:
         assert db.scalars(select(Notification)).all() == []
-        from notification_rules import evaluate_event
+        from notification_service import evaluate_event
 
         evaluate_event(db, db.get(NotificationEvent, event_id))
     with setup.factory() as db:
@@ -253,6 +249,7 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
         lambda *args: calls.append(args) or push.SendResult(201),
     )
     assert len(calls) == 1
+    assert "notification_event=" not in calls[0][2]["url"]
     assert delivery(setup, delivery_id).status == "accepted"
     assert delivery(setup, delivery_id).accepted_at is not None
     assert not push.process_push(setup.factory, claim, lambda *args: pytest.fail("Duplicate send"))
@@ -264,7 +261,7 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
 
 @pytest.mark.parametrize("change", [
     "logout", "revocation", "expiry", "block", "access", "preference", "own_action",
-    "generation", "vapid", "event_expiry", "subscription_expiry", "account", "rule",
+    "generation", "vapid", "event_expiry", "subscription_expiry", "account", "viewer",
 ])
 def test_rechecks_every_lifecycle_gate_before_send(setup, change):
     subscription_id, delivery_id, event_id = queued(setup)
@@ -295,8 +292,8 @@ def test_rechecks_every_lifecycle_gate_before_send(setup, change):
                 db.get(PushSubscription, subscription_id).expires_at = utcnow() - timedelta(seconds=1)
             elif change == "account":
                 db.get(DeviceSession, 2).user_id = 3
-            elif change == "rule":
-                db.query(NotificationRule).delete()
+            elif change == "viewer":
+                db.get(User, 2).role_id = 2
     assert push.process_push(setup.factory, claim, lambda *args: pytest.fail("Unauthorized send"))
     assert delivery(setup, delivery_id).status == "cancelled"
 
@@ -319,14 +316,14 @@ def test_new_session_rebind_cancels_old_queue(setup):
 
 def test_no_retroactive_push_after_new_consent_or_subscription(setup):
     with setup.factory.begin() as db:
-        record = enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1)
+        record = enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
     subscribe(setup)
     assert process_claim(setup.factory, claim_event(setup.factory))
     with setup.factory() as db:
         assert db.scalars(select(PushDelivery)).all() == []
         assert len(db.scalars(select(Notification)).all()) == 1
     with setup.factory.begin() as db:
-        enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1)
+        enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
         db.scalar(select(NotificationPreference)).data_mod = utcnow() + timedelta(seconds=1)
     assert process_claim(setup.factory, claim_event(setup.factory))
     with setup.factory() as db:
@@ -421,8 +418,20 @@ def test_lease_expiring_while_waiting_for_authorization_never_sends(setup, monke
     assert delivery(setup, delivery_id).status == "cancelled"
 
 
-def test_standard_encryption_vapid_generic_payload_and_transport_safety(setup, monkeypatch):
-    subscription_id = subscribe(setup)
+def test_push_click_link_identifies_only_recipients_inbox_event(setup):
+    _, _, event_id = queued(setup)
+    with setup.factory() as db:
+        key = db.get(NotificationEvent, event_id).event_key
+    calls = []
+    assert push.process_push(
+        setup.factory, push.claim_push(setup.factory),
+        lambda *args: calls.append(args) or push.SendResult(201),
+    )
+    assert calls[0][2]["url"] == f"/checklists/1?notification_event={key}"
+
+
+def test_standard_encryption_vapid_detailed_payload_and_transport_safety(setup, monkeypatch):
+    subscription_id, _, event_id = queued(setup)
     captured = {}
     monkeypatch.setattr(push.socket, "getaddrinfo", lambda *a, **k: [
         (2, 1, 6, "", ("8.8.8.8", 443)),
@@ -439,27 +448,60 @@ def test_standard_encryption_vapid_generic_payload_and_transport_safety(setup, m
 
     monkeypatch.setattr(requests.Session, "request", request)
     with setup.factory() as db:
-        result = push.send_push(db.get(PushSubscription, subscription_id), load_push_config(), "event-uuid")
+        payload = push.notification_push_payload(db, db.get(NotificationEvent, event_id))
+        result = push.send_push(db.get(PushSubscription, subscription_id), load_push_config(), payload)
     assert result.status_code == 201
     assert captured["headers"]["Authorization"].startswith("vapid ")
     assert captured["headers"]["content-encoding"] == "aes128gcm"
     assert str(captured["headers"]["ttl"]) == "300"
     assert b"Hai una nuova notifica" not in captured["data"]
     assert b"Private list name" not in captured["data"]
-    # Inspect plaintext before encryption separately: no names/contents/IDs from private resources.
+    # Resource details are included only inside the encrypted payload.
     def webpush_mock(**kwargs):
-        assert json.loads(kwargs["data"]) == {
-            "title": "Home Inventory", "body": "Hai una nuova notifica",
-            "url": "/notifications", "tag": "event-uuid",
-        }
+        assert json.loads(kwargs["data"]) == payload
+        assert payload["title"] == "Lista: Private list name"
+        assert payload["url"] == "/checklists/1"
         response = requests.Response()
         response.status_code = 202
         return response
     monkeypatch.setattr(push, "webpush", webpush_mock)
     with setup.factory() as db:
         assert push.send_push(
-            db.get(PushSubscription, subscription_id), load_push_config(), "event-uuid",
+            db.get(PushSubscription, subscription_id), load_push_config(), payload,
         ).status_code == 202
+
+
+def test_detailed_push_identifies_resource_item_action_and_bounds_unicode(setup):
+    from models import Item
+    from notification_contracts import ItemQuantityChangedData
+    with setup.factory.begin() as db:
+        inventory = db.get(Inventory, 1)
+        inventory.name = "Dispensa"
+        inventory.type = "INVENTORY"
+        item = Item(name="Riso", inventory_id=1, quantity=3)
+        db.add(item)
+        db.flush()
+        record = enqueue_event(db, ItemQuantityChangedData(
+            inventory_id=1, item_id=item.id, previous_quantity=2, quantity=3,
+        ), actor_id=1)
+        payload = push.notification_push_payload(db, record)
+        assert payload["title"] == "Inventario: Dispensa"
+        assert payload["body"] == "Riso · Quantità: +1 (2 → 3)"
+        assert payload["url"] == "/inventories/1"
+        inventory.type = "CHECKLIST"
+        assert push.notification_push_payload(db, record)["body"] == "Riso · Spunta: completato"
+        record.payload = {
+            "event_type": "item_updated", "inventory_id": 1, "item_id": item.id,
+            "changed_fields": ["description", "name"],
+            "details": {"description": "Una confezione", "name": "Riso integrale"},
+        }
+        assert "Descrizione: Una confezione · Titolo: Riso integrale" in push.notification_push_payload(db, record)["body"]
+        inventory.name = "😀" * 300
+        item.name = "😀" * 700
+        payload = push.notification_push_payload(db, record)
+        assert len(payload["title"]) <= 80
+        assert len(payload["body"]) <= 500
+        assert len(json.dumps(payload, ensure_ascii=False).encode()) < 3500
 
 
 def test_transport_rejects_private_dns_and_redirect_following(monkeypatch):

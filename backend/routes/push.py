@@ -42,7 +42,7 @@ def current_session(db: Session, user: User, token: str) -> DeviceSession:
 @router.get("/config")
 def config(user=Depends(get_current_user)):
     config = push_config()
-    return {"public_key": config.public_key, "payload_mode": "generic", "ttl_seconds": 300}
+    return {"public_key": config.public_key, "payload_mode": "detailed", "ttl_seconds": 300}
 
 
 @router.post("/subscriptions", status_code=201)
@@ -97,7 +97,7 @@ def subscribe(
         row.updated_at = now
         row.expires_at = expires_at
         db.commit()
-        return {"id": row.id, "expires_at": row.expires_at, "payload_mode": "generic"}
+        return {"id": row.id, "expires_at": row.expires_at, "payload_mode": "detailed"}
     except IntegrityError:
         db.rollback()
         logger.warning("Concurrent Web Push subscription registration")

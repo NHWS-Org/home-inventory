@@ -130,7 +130,7 @@ def correct_registered_barcode(
         raise HTTPException(status_code=409, detail="Questo codice è già associato allo stesso item")
 
     old_snapshot = _snapshot_item(item)
-    old_codes = [entry.code for entry in item.barcodes]
+    old_codes = [(entry.code, entry.format) for entry in item.barcodes]
     barcode.code = normalized
     barcode.format = payload.format
     barcode.user_mod = user.id
@@ -143,7 +143,8 @@ def correct_registered_barcode(
         "UPDATE",
         user,
         old_snapshot,
-        extra_diff={"barcodes": {"from": old_codes, "to": [entry.code for entry in item.barcodes]}},
+        extra_diff={"barcodes": {"from": old_codes, "to": [(entry.code, entry.format) for entry in item.barcodes]}}
+        if old_codes != [(entry.code, entry.format) for entry in item.barcodes] else None,
     )
     db.commit()
     db.refresh(barcode)

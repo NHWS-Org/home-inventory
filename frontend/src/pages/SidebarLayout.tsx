@@ -3,6 +3,8 @@ import { ReactNode, useState, useEffect } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { Dialog } from '@headlessui/react'
 import GlobalBarcodeScan from '../components/GlobalBarcodeScan'
+import NotificationBell from '../components/NotificationBell'
+import NotificationClickReader from '../components/NotificationClickReader'
 import { useAuth } from '../useAuth'
 import { getApiVersion } from '../api'
 import { FiLogOut, FiCompass, FiBox, FiCheckSquare, FiSettings, FiLogIn, FiUser, FiSun, FiMoon, FiMonitor, FiInfo } from 'react-icons/fi'
@@ -41,6 +43,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
           : location.pathname.startsWith('/settings') ? 'Impostazioni'
             : location.pathname === '/about' ? 'About'
               : location.pathname === '/profile' ? 'Profilo'
+                : location.pathname === '/notifications' ? 'Centro notifiche'
                 : null
 
   useEffect(() => {
@@ -89,6 +92,9 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      {user && <div className="fixed right-20 top-4 z-50 rounded bg-white text-gray-900 dark:bg-gray-900 dark:text-white md:hidden">
+        <NotificationBell key={user.id} />
+      </div>}
       <button
         type="button"
         onClick={() => setAccountOpen(true)}
@@ -198,6 +204,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             <FiInfo className="text-lg shrink-0" />
             <span>About</span>
           </NavLink>
+          {user && <NotificationBell key={user.id} />}
         </nav>
 
         <div className="mt-6 border-t border-gray-600 pt-4">
@@ -225,13 +232,14 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       </div>
       {/* Contenuto */}
       <div className={`ml-0 w-full flex-1 overflow-auto px-4 pb-28 dark:bg-gray-900 dark:text-white sm:px-6 md:p-6 ${isItemDetail ? 'pt-40 md:pt-6' : 'pt-16 md:pt-6'}`}>
+        <NotificationClickReader />
         {location.pathname.startsWith('/settings') && <h1 className="mb-5 hidden text-2xl font-bold md:block">Impostazioni</h1>}
         {children}
       </div>
       <GlobalBarcodeScan />
 
       <div aria-hidden="true" className={`pointer-events-none fixed inset-x-0 top-0 z-40 bg-white/95 backdrop-blur dark:bg-gray-900/95 md:hidden ${isItemDetail ? 'h-40' : 'h-16'}`} />
-      {mobileSectionTitle && <div className="pointer-events-none fixed inset-x-0 top-4 z-[45] flex h-12 items-center justify-center px-20 text-center text-2xl font-bold md:hidden">{mobileSectionTitle}</div>}
+      {mobileSectionTitle && <div className={`pointer-events-none fixed inset-x-0 top-4 z-[45] flex h-12 items-center justify-center pl-20 text-center ${location.pathname === '/notifications' ? 'text-base' : 'text-xl'} font-bold md:hidden ${user ? 'pr-40' : 'pr-20'}`}>{mobileSectionTitle}</div>}
 
       <nav aria-label="Navigazione principale" className="fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 border-t border-gray-200 bg-white/95 px-1 pt-1 pb-[calc(env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 md:hidden">
         <NavLink to="/" end className={({ isActive }) => navItemClass(isActive)}>

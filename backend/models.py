@@ -221,7 +221,7 @@ class NotificationPreference(Base, LoggingData):
     __table_args__ = (
         UniqueConstraint("user_id", "event_type", name="uq_notification_preferences_user_event"),
         CheckConstraint(
-            "event_type IN ('inventory_shared', 'item_quantity_changed', 'checklist_completed')",
+            "event_type IN ('item_quantity_changed', 'item_updated', 'inventory_updated')",
             name="ck_notification_preferences_event_type",
         ),
     )
@@ -229,33 +229,13 @@ class NotificationPreference(Base, LoggingData):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(32), nullable=False)
-    in_app_enabled = Column(Boolean, nullable=False, default=True, server_default="1")
+    in_app_enabled = Column(
+        Boolean, nullable=False,
+        default=lambda context: context.get_current_parameters().get("event_type") == "item_quantity_changed",
+        server_default="0",
+    )
     push_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
     include_own_actions = Column(Boolean, nullable=False, default=False, server_default="0")
-
-################################################
-class NotificationRule(Base, LoggingData):
-    __tablename__ = "notification_rules"
-    __table_args__ = (
-        CheckConstraint(
-            "event_type IN ('inventory_shared', 'item_quantity_changed', 'checklist_completed')",
-            name="ck_notification_rules_event_type",
-        ),
-        CheckConstraint(
-            "(event_type = 'item_quantity_changed' AND threshold IS NOT NULL AND threshold >= 0)"
-            " OR (event_type != 'item_quantity_changed' AND threshold IS NULL)",
-            name="ck_notification_rules_threshold",
-        ),
-    )
-
-    id = Column(Integer, primary_key=True)
-    inventory_id = Column(
-        Integer, ForeignKey("inventories.id", ondelete="CASCADE"), nullable=False, index=True,
-    )
-    event_type = Column(String(32), nullable=False)
-    threshold = Column(Integer, nullable=True)
-    recipients = Column(JSON, nullable=False)
-    enabled = Column(Boolean, nullable=False, default=True, server_default="1")
 
 ################################################
 class SecurityAudit(Base):
