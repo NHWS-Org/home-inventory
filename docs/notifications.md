@@ -67,6 +67,8 @@ Lo stato letto riguarda la inbox, non certifica consegna o visualizzazione push.
 Le righe compatte mostrano icona inventario/lista, nome, elemento e azione
 (quantita con delta firmato, spunta, titolo/descrizione aggiornati), data/ora
 dell'azione e pulsanti a destra per aprire inventario/lista o segnare letto.
+Il pulsante di lettura resta visibile dopo la lettura, grigio e disabilitato
+con etichetta "Gia letta", mantenendo stabile il layout delle azioni.
 Titolo e descrizione sono salvati nell'evento, non ricavati dal valore corrente:
 una modifica successiva non riscrive il dettaglio storico. Per eventi precedenti
 senza dettagli viene indicato il campo modificato; per barcode/metadati e
