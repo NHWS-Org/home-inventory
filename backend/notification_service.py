@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from models import Inventory, Item, ListAssignment, Notification, NotificationEvent, NotificationPreference, User
@@ -29,11 +29,26 @@ def can_receive(user: User, inventory: Inventory) -> bool:
 def event_inventory(db: Session, record: NotificationEvent) -> Inventory | None:
     data = notification_event_adapter.validate_python(record.payload)
     inventory = db.get(Inventory, data.inventory_id)
+    if inventory is not None and inventory.data_ins > record.created_at:
+        return None
     if inventory is not None and isinstance(data, (ItemQuantityChangedData, ItemUpdatedData)):
         item = db.get(Item, data.item_id)
-        if item is None or item.inventory_id != inventory.id:
+        if item is None or item.inventory_id != inventory.id or item.data_ins > record.created_at:
             return None
     return inventory
+
+
+def remove_resource_events(
+    db: Session, *, inventory_id: int | None = None, item_id: int | None = None,
+) -> None:
+    if inventory_id is not None:
+        condition = NotificationEvent.payload["inventory_id"].as_integer() == inventory_id
+    elif item_id is not None:
+        condition = NotificationEvent.payload["item_id"].as_integer() == item_id
+    else:
+        raise ValueError("A resource ID is required")
+    # JSON resource IDs have no FK; remove their events before SQLite can reuse IDs.
+    db.execute(delete(NotificationEvent).where(condition))
 
 
 def emit_item_updated(db: Session, item: Item, changed_fields: list[str], actor_id: int) -> None:

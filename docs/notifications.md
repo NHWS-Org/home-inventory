@@ -58,10 +58,16 @@ La campanella mostra il numero di notifiche non lette accessibili, aggiornato
 ogni 30 secondi, al focus e dopo la lettura. Un errore non viene mostrato come zero.
 La inbox elenca 50 righe per volta con Carica altre, Aggiorna, lettura singola
 e Segna tutte come lette. La lettura globale riguarda tutte le pagine.
+L'ordine e decrescente per data/ora dell'azione (ID come spareggio), non per
+ordine di consegna del worker, e viene applicato prima della paginazione.
 
 Contenitori non piu modificabili non vengono elencati, conteggiati o modificati
 dalla lettura massiva. I link usano il tipo del contenitore autorizzato dal
 backend; le route verificano nuovamente i permessi all'apertura.
+La cancellazione di un inventario/lista o item elimina i relativi eventi e le
+notifiche/code associate: il riutilizzo degli ID SQLite non ricollega vecchi
+avvisi a nuove risorse. Anche gli eventi preesistenti vengono esclusi se la
+risorsa corrente e stata creata dopo l'evento.
 Aprire un contenitore non segna automaticamente la notifica come letta.
 Lo stato letto riguarda la inbox, non certifica consegna o visualizzazione push.
 Le righe compatte mostrano icona inventario/lista, nome, elemento e azione

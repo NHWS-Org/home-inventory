@@ -282,6 +282,60 @@ def test_inbox_action_details_are_historical_and_action_time_precedes_delivery(s
     assert datetime.fromisoformat(quantity["action_at"]) < datetime.fromisoformat(quantity["created_at"]) + timedelta(seconds=1)
 
 
+def test_inbox_orders_by_action_time_before_pagination_not_delivery_id(setup):
+    factory, client, current = setup
+    base = utcnow()
+    with factory.begin() as db:
+        for index in (2, 0, 1):
+            record = enqueue_event(db, ItemQuantityChangedData(
+                inventory_id=1, item_id=1, previous_quantity=index, quantity=index + 1,
+                action_at=(base + timedelta(seconds=index)).isoformat(),
+            ), actor_id=1)
+            db.flush()
+            db.add(Notification(event_id=record.id, user_id=4))
+    current[0] = 4
+    first = client.get("/notifications?limit=2").json()
+    second = client.get("/notifications?limit=2&offset=2").json()
+    assert [r["event"]["previous_quantity"] for r in first + second] == [2, 1, 0]
+    assert len({r["id"] for r in first + second}) == 3
+
+
+@pytest.mark.parametrize("resource", ["inventory", "item"])
+def test_old_event_does_not_attach_to_recreated_resource(setup, resource):
+    factory, client, current = setup
+    patch_item(client, 1, quantity=6)
+    settle(factory)
+    current[0] = 4
+    assert client.get("/notifications").json()
+    with factory.begin() as db:
+        if resource == "inventory":
+            db.get(Inventory, 1).data_ins = utcnow() + timedelta(seconds=1)
+        else:
+            db.get(Item, 1).data_ins = utcnow() + timedelta(seconds=1)
+    assert client.get("/notifications").json() == []
+    assert client.get("/notifications/unread-count").json() == {"count": 0}
+    assert client.put("/notifications/read-all").json() == {"updated": 0}
+
+
+@pytest.mark.parametrize("resource", ["inventory", "item"])
+def test_deletion_removes_events_even_when_resource_id_reused_immediately(setup, resource):
+    factory, client, current = setup
+    patch_item(client, 1, quantity=6)
+    settle(factory)
+    current[0] = 4
+    if resource == "inventory":
+        assert client.delete("/inventory/1").status_code == 200
+        with factory.begin() as db:
+            db.add(Inventory(id=1, name="New list", type="CHECKLIST", owner_id=4))
+    else:
+        assert client.request("DELETE", "/item/1", json={"confirm": True}).status_code == 200
+        with factory.begin() as db:
+            db.add(Item(id=1, name="New item", inventory_id=1, quantity=0))
+    assert client.get("/notifications").json() == []
+    with factory() as db:
+        assert db.scalars(select(NotificationEvent)).all() == []
+
+
 @pytest.mark.parametrize("route", ["inventory", "checklist"])
 def test_inventory_rename_rollback_noops_and_default_off(setup, route):
     factory, client, current = setup

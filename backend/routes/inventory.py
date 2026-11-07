@@ -16,7 +16,7 @@ from models import (
     ListAssignment,
 )
 from assignment_service import build_assignment_summary, pending_assigned_by_source
-from notification_service import emit_inventory_updated, emit_removed_item_links
+from notification_service import emit_inventory_updated, emit_removed_item_links, remove_resource_events
 from schemas import InventoryCreate, InventoryResponse, InventoryUpdate, ItemMetadataValueResponse, ItemBarcodeResponse, ItemResponse, UserResponse, InventoryResponseWithItemCount, InventoryVersionResponse, VersionBulkDeleteRequest
 from routes.auth import get_current_user
 from typing import Any, List, cast
@@ -356,6 +356,7 @@ def delete_inventory_base(
 
     _write_inventory_version(db, inventory, "DELETE", user)  # registra prima della delete
     emit_removed_item_links(db, [item.id for item in inventory.items], user.id)
+    remove_resource_events(db, inventory_id=inventory.id)
     db.delete(inventory)
     db.commit()
     return {"detail": "Inventario eliminato"}

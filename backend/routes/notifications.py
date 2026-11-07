@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -83,27 +85,31 @@ def accessible_notifications(db: Session, user: User, *, unread_only: bool = Fal
                 yield row, context[0], context[1]
 
 
+def action_time(record: NotificationEvent) -> datetime:
+    value = record.payload.get("action_at")
+    result = datetime.fromisoformat(value) if value else record.created_at
+    return result.astimezone(timezone.utc).replace(tzinfo=None) if result.tzinfo else result
+
+
 @router.get("")
 def inbox(
     limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
     db: Session = Depends(get_db), user=Depends(get_current_user),
 ):
     result = []
-    skipped = 0
-    for row, record, inventory in accessible_notifications(db, user):
-        if skipped < offset:
-            skipped += 1
-            continue
+    authorized = sorted(
+        accessible_notifications(db, user),
+        key=lambda entry: (action_time(entry[1]), entry[0].id), reverse=True,
+    )
+    for row, record, inventory in authorized[offset:offset + limit]:
         item_id = record.payload.get("item_id")
         item = db.get(Item, item_id) if item_id is not None else None
         result.append({
             "id": row.id, "created_at": row.created_at, "read_at": row.read_at,
-            "action_at": record.payload.get("action_at") or record.created_at,
+            "action_at": action_time(record),
             "event": record.payload, "inventory_type": inventory.type,
             "inventory_name": inventory.name, "item_name": item.name if item is not None else None,
         })
-        if len(result) == limit:
-            break
     return result
 
 
