@@ -37,7 +37,7 @@ export default function NotificationBell() {
   return (
     <Link to="/notifications" aria-label={error ? "Notifiche: conteggio non disponibile" : count === null ? "Notifiche: caricamento" : `Notifiche: ${count} da leggere`}
       className="inline-flex min-h-11 items-center gap-2 rounded px-3 focus-visible:outline-2">
-      <FiBell aria-hidden="true" /><span className="hidden md:inline">Notifiche</span>
+      <FiBell aria-hidden="true" className={count !== null && count > 0 ? "notification-bell-ringing text-blue-500" : ""} /><span className="hidden md:inline">Notifiche</span>
       <span aria-live="polite">{error ? "!" : count === null ? "…" : count}</span>
     </Link>
   );

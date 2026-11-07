@@ -49,7 +49,7 @@ export default function NotificationsPage() {
   }
   return (
     <section aria-labelledby="notifications-heading" aria-busy={busy} className="space-y-4 p-4">
-      <h1 id="notifications-heading" className="text-2xl font-bold">Centro notifiche</h1>
+      <h1 id="notifications-heading" className="sr-only text-2xl font-bold md:not-sr-only">Centro notifiche</h1>
       <p className="text-sm">La lettura riguarda l'inbox. Non indica la consegna di una notifica push.</p>
       <div className="flex flex-wrap gap-2">
         <button disabled={busy} onClick={() => void load()} className="min-h-11 rounded border px-3">Aggiorna</button>

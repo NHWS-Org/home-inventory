@@ -42,6 +42,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
           : location.pathname.startsWith('/settings') ? 'Impostazioni'
             : location.pathname === '/about' ? 'About'
               : location.pathname === '/profile' ? 'Profilo'
+                : location.pathname === '/notifications' ? 'Centro notifiche'
                 : null
 
   useEffect(() => {
@@ -236,7 +237,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       <GlobalBarcodeScan />
 
       <div aria-hidden="true" className={`pointer-events-none fixed inset-x-0 top-0 z-40 bg-white/95 backdrop-blur dark:bg-gray-900/95 md:hidden ${isItemDetail ? 'h-40' : 'h-16'}`} />
-      {mobileSectionTitle && <div className={`pointer-events-none fixed inset-x-0 top-4 z-[45] flex h-12 items-center justify-center pl-20 text-center text-xl font-bold md:hidden ${user ? 'pr-40' : 'pr-20'}`}>{mobileSectionTitle}</div>}
+      {mobileSectionTitle && <div className={`pointer-events-none fixed inset-x-0 top-4 z-[45] flex h-12 items-center justify-center pl-20 text-center ${location.pathname === '/notifications' ? 'text-base' : 'text-xl'} font-bold md:hidden ${user ? 'pr-40' : 'pr-20'}`}>{mobileSectionTitle}</div>}
 
       <nav aria-label="Navigazione principale" className="fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 border-t border-gray-200 bg-white/95 px-1 pt-1 pb-[calc(env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 md:hidden">
         <NavLink to="/" end className={({ isActive }) => navItemClass(isActive)}>

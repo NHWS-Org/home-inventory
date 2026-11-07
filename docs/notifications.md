@@ -56,6 +56,9 @@ usano il grace period delle quantita.
 
 La campanella mostra il numero di notifiche non lette accessibili, aggiornato
 ogni 30 secondi, al focus e dopo la lettura. Un errore non viene mostrato come zero.
+Con notifiche non lette l'icona oscilla su desktop e mobile; l'animazione si
+ferma a zero e rispetta la preferenza di sistema per ridurre il movimento.
+Su mobile il titolo Centro notifiche compare nel header comune alle altre pagine.
 La inbox elenca 50 righe per volta con Carica altre, Aggiorna, lettura singola
 e Segna tutte come lette. La lettura globale riguarda tutte le pagine.
 L'ordine e decrescente per data/ora dell'azione (ID come spareggio), non per
