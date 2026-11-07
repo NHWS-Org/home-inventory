@@ -40,6 +40,7 @@ export default function NotificationPreferences() {
     <section aria-labelledby="notification-preferences-heading" className="space-y-2">
       <h2 id="notification-preferences-heading" className="text-xl font-bold">Preferenze notifiche</h2>
       <p className="text-sm">Tocca un parametro per attivarlo o disattivarlo: si salva automaticamente. Il push richiede anche il consenso browser nel pannello dedicato.</p>
+      <p className="text-sm">Solo per inventari e liste che puoi modificare. Quantità e spunte sono notificate dopo 45 secondi dall'ultima modifica; i dettagli includono nome, descrizione, barcode e metadati. Le tue azioni sono escluse salvo scelta di "Mie azioni".</p>
       {loading && <p role="status">Caricamento...</p>}
       {error && <p role="alert">{error}</p>}
       {error && <button type="button" disabled={busy || loading} onClick={() => void load()} className="min-h-11 rounded border px-3">Ricarica preferenze</button>}

@@ -337,10 +337,9 @@ const ProfilePage = () => {
         )}
       </div>
 
-      <section>
-        <PushNotificationsPanel />
-      </section>
-      <NotificationPreferences />
+      {user?.role?.name === "viewer"
+        ? <section><h2 className="text-xl font-bold">Preferenze notifiche</h2><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></section>
+        : <><section><PushNotificationsPanel /></section><NotificationPreferences /></>}
 
       <section>
         <h2 id="profile-devices-heading" className="text-xl font-bold mb-4">Dispositivi connessi</h2>

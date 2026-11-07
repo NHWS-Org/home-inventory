@@ -20,8 +20,8 @@ from models import (
     Base, Notification, NotificationEvent, NotificationPreference, Role, User,
 )
 from notification_contracts import (
-    ChecklistCompletedData,
-    InventorySharedData,
+    InventoryUpdatedData,
+    ItemUpdatedData,
     ItemQuantityChangedData,
     NotificationEventType,
     notification_event_adapter,
@@ -54,10 +54,9 @@ def engine():
 
 
 @pytest.mark.parametrize("data", [
-    InventorySharedData(inventory_id=1, recipient_kind="user", recipient_id=2),
-    InventorySharedData(inventory_id=1, recipient_kind="group", recipient_id=2),
+    InventoryUpdatedData(inventory_id=1, changed_fields=["name"]),
+    ItemUpdatedData(inventory_id=1, item_id=2, changed_fields=["metadata"]),
     ItemQuantityChangedData(inventory_id=1, item_id=2, previous_quantity=5, quantity=2),
-    ChecklistCompletedData(inventory_id=1),
 ])
 def test_event_contract_round_trip(data):
     restored = notification_event_adapter.validate_json(data.model_dump_json())
@@ -85,9 +84,9 @@ def test_invalid_or_no_op_event_rejected(payload):
 def test_defaults_and_single_inbox_entry_per_event_user(engine):
     with Session(engine) as db:
         record = NotificationEvent(
-            actor_id=1, payload=ChecklistCompletedData(inventory_id=1).model_dump(mode="json"),
+            actor_id=1, payload=InventoryUpdatedData(inventory_id=1, changed_fields=["name"]).model_dump(mode="json"),
         )
-        preference = NotificationPreference(user_id=1, event_type="checklist_completed")
+        preference = NotificationPreference(user_id=1, event_type="item_quantity_changed")
         db.add_all([record, preference])
         db.flush()
         assert record.event_key
@@ -111,7 +110,7 @@ def test_event_and_change_rollback_together(engine):
     with Session(engine) as db:
         user = db.get(User, 1)
         user.username = "changed"
-        db.add(NotificationEvent(payload=ChecklistCompletedData(inventory_id=1).model_dump(mode="json")))
+        db.add(NotificationEvent(payload=InventoryUpdatedData(inventory_id=1, changed_fields=["name"]).model_dump(mode="json")))
         db.flush()
         db.rollback()
     with Session(engine) as db:
@@ -121,12 +120,12 @@ def test_event_and_change_rollback_together(engine):
 
 def test_deleting_recipient_removes_inbox_and_preferences_not_event(engine):
     with Session(engine) as db:
-        record = NotificationEvent(actor_id=1, payload={"event_type": "checklist_completed", "inventory_id": 1})
+        record = NotificationEvent(actor_id=1, payload={"event_type": "inventory_updated", "inventory_id": 1, "changed_fields": ["name"]})
         db.add(record)
         db.flush()
         db.add_all([
             Notification(event_id=record.id, user_id=1),
-            NotificationPreference(user_id=1, event_type="checklist_completed"),
+            NotificationPreference(user_id=1, event_type="inventory_updated"),
         ])
         db.commit()
         db.execute(delete(User).where(User.id == 1))
@@ -152,11 +151,11 @@ def test_database_constraints(engine, model, values):
 def test_duplicate_preference_and_event_key_rejected(engine):
     with Session(engine) as db:
         db.add_all([
-            NotificationPreference(user_id=1, event_type="inventory_shared"),
+            NotificationPreference(user_id=1, event_type="inventory_updated"),
             NotificationEvent(event_key="stable-key", payload={}),
         ])
         db.commit()
-        db.add(NotificationPreference(user_id=1, event_type="inventory_shared"))
+        db.add(NotificationPreference(user_id=1, event_type="inventory_updated"))
         with pytest.raises(IntegrityError):
             db.flush()
         db.rollback()
@@ -191,6 +190,8 @@ def test_migration_upgrade_matches_models_and_downgrade_preserves_users(engine, 
             migration.upgrade()
             worker_migration.upgrade()
             worker_migration.upgrade()
+            redesign = load_migration(MIGRATION.parent / "a9b0c1d2e3f4_personal_notification_preferences.py")
+            redesign.upgrade()
             assert compare_metadata(context, Base.metadata) == []
             worker_migration.downgrade()
             migration.downgrade()
@@ -241,28 +242,26 @@ def test_alembic_cli_bootstrap_upgrade_downgrade(tmp_path, bootstrap_current_mod
     run("-m", "alembic", "upgrade", "head")
     run("-m", "notification_worker", "--status")
     run("-m", "notification_worker", "--once")
-    run("-m", "alembic", "downgrade", "9b0c1d2e3f4a")
-    run("-m", "alembic", "upgrade", "head")
     migrated_engine = create_engine(environment["DATABASE_URL"])
     try:
         assert TABLES.issubset(inspect(migrated_engine).get_table_names())
         with migrated_engine.connect() as connection:
             assert connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
-            ).scalar_one() == "f8a9b0c1d2e3"
+            ).scalar_one() == "a9b0c1d2e3f4"
     finally:
         migrated_engine.dispose()
 
 
 def test_backup_includes_event_inbox_and_preferences(engine, tmp_path):
     with Session(engine) as db:
-        payload = ChecklistCompletedData(inventory_id=1).model_dump(mode="json")
+        payload = InventoryUpdatedData(inventory_id=1, changed_fields=["name"]).model_dump(mode="json")
         record = NotificationEvent(payload=payload, actor_id=1)
         db.add(record)
         db.flush()
         db.add_all([
             Notification(event_id=record.id, user_id=1),
-            NotificationPreference(user_id=1, event_type="checklist_completed"),
+            NotificationPreference(user_id=1, event_type="inventory_updated"),
         ])
         db.commit()
         path = tmp_path / "notifications.hibackup"

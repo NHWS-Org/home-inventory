@@ -27,9 +27,9 @@ from backup_archive import create_backup_archive, read_backup_archive
 from dependencies import get_db
 from models import (
     Base, DeviceSession, Inventory, Notification, NotificationEvent, NotificationPreference,
-    NotificationRule, PushDelivery, PushSubscription, Role, SharedInventory, User,
+    PushDelivery, PushSubscription, Role, SharedInventory, User,
 )
-from notification_contracts import ChecklistCompletedData
+from notification_contracts import InventoryUpdatedData
 from notification_outbox import claim_event, enqueue_event, process_claim, utcnow
 from push_config import PushConfigurationError, load_push_config
 from routes.auth import create_access_token, router as auth_router
@@ -70,7 +70,7 @@ def setup(tmp_path, monkeypatch):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     before = utcnow() - timedelta(minutes=1)
     with factory.begin() as db:
-        db.add(Role(id=1, name="viewer"))
+        db.add_all([Role(id=1, name="moderator"), Role(id=2, name="viewer")])
         db.flush()
         db.add_all([User(id=i, username=f"user{i}", role_id=1) for i in (1, 2, 3)])
         db.flush()
@@ -78,12 +78,8 @@ def setup(tmp_path, monkeypatch):
         db.flush()
         db.add_all([
             SharedInventory(inventory_id=1, user_id=2),
-            NotificationRule(
-                inventory_id=1, event_type="checklist_completed",
-                recipients=[{"kind": "participants"}], data_ins=before, data_mod=before,
-            ),
             NotificationPreference(
-                user_id=2, event_type="checklist_completed", push_enabled=True,
+                user_id=2, event_type="inventory_updated", in_app_enabled=True, push_enabled=True,
                 data_ins=before, data_mod=before,
             ),
             *[DeviceSession(
@@ -132,7 +128,7 @@ def subscribe(setup, **changes):
 def queued(setup):
     subscription_id = subscribe(setup)
     with setup.factory.begin() as db:
-        record = enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1)
+        record = enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
         db.flush()
         event_id = record.id
     claim = claim_event(setup.factory)
@@ -240,7 +236,7 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
     _, delivery_id, event_id = queued(setup)
     with setup.factory.begin() as db:
         assert db.scalars(select(Notification)).all() == []
-        from notification_rules import evaluate_event
+        from notification_service import evaluate_event
 
         evaluate_event(db, db.get(NotificationEvent, event_id))
     with setup.factory() as db:
@@ -264,7 +260,7 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
 
 @pytest.mark.parametrize("change", [
     "logout", "revocation", "expiry", "block", "access", "preference", "own_action",
-    "generation", "vapid", "event_expiry", "subscription_expiry", "account", "rule",
+    "generation", "vapid", "event_expiry", "subscription_expiry", "account", "viewer",
 ])
 def test_rechecks_every_lifecycle_gate_before_send(setup, change):
     subscription_id, delivery_id, event_id = queued(setup)
@@ -295,8 +291,8 @@ def test_rechecks_every_lifecycle_gate_before_send(setup, change):
                 db.get(PushSubscription, subscription_id).expires_at = utcnow() - timedelta(seconds=1)
             elif change == "account":
                 db.get(DeviceSession, 2).user_id = 3
-            elif change == "rule":
-                db.query(NotificationRule).delete()
+            elif change == "viewer":
+                db.get(User, 2).role_id = 2
     assert push.process_push(setup.factory, claim, lambda *args: pytest.fail("Unauthorized send"))
     assert delivery(setup, delivery_id).status == "cancelled"
 
@@ -319,14 +315,14 @@ def test_new_session_rebind_cancels_old_queue(setup):
 
 def test_no_retroactive_push_after_new_consent_or_subscription(setup):
     with setup.factory.begin() as db:
-        record = enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1)
+        record = enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
     subscribe(setup)
     assert process_claim(setup.factory, claim_event(setup.factory))
     with setup.factory() as db:
         assert db.scalars(select(PushDelivery)).all() == []
         assert len(db.scalars(select(Notification)).all()) == 1
     with setup.factory.begin() as db:
-        enqueue_event(db, ChecklistCompletedData(inventory_id=1), actor_id=1)
+        enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
         db.scalar(select(NotificationPreference)).data_mod = utcnow() + timedelta(seconds=1)
     assert process_claim(setup.factory, claim_event(setup.factory))
     with setup.factory() as db:

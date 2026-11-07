@@ -26,12 +26,12 @@ from urllib3.exceptions import NewConnectionError
 from urllib3.util.connection import create_connection
 
 from models import (
-    DeviceSession, Inventory, Item, NotificationEvent, NotificationPreference,
+    DeviceSession, NotificationEvent, NotificationPreference,
     PushDelivery, PushSubscription, User,
 )
-from notification_contracts import ItemQuantityChangedData, notification_event_adapter
+from notification_contracts import notification_event_adapter
 from notification_outbox import LEASE_SECONDS, MAX_ATTEMPTS, RETRY_SECONDS, utcnow
-from notification_rules import can_receive, event_recipients
+from notification_service import can_receive, event_inventory, event_recipients
 from push_config import PushConfig, load_push_config
 
 logger = logging.getLogger(__name__)
@@ -191,15 +191,11 @@ def authorized_subscription(
     ):
         return None
     data = notification_event_adapter.validate_python(event.payload)
-    inventory = db.get(Inventory, data.inventory_id)
+    inventory = event_inventory(db, event)
     if inventory is None or not can_receive(user, inventory):
         return None
     if user.id not in event_recipients(db, event):
         return None
-    if isinstance(data, ItemQuantityChangedData):
-        item = db.get(Item, data.item_id)
-        if item is None or item.inventory_id != inventory.id:
-            return None
     preference = db.scalar(select(NotificationPreference).where(
         NotificationPreference.user_id == user.id,
         NotificationPreference.event_type == data.event_type,

@@ -10,7 +10,7 @@ after(() => server.close());
 const notifications = await server.ssrLoadModule('/src/notificationsApi.ts');
 const { api } = await server.ssrLoadModule('/src/api.ts');
 
-test('notification deep links use the authorized inventory type, including checklist shares', () => {
+test('notification deep links use the authorized inventory type', () => {
   assert.equal(notifications.notificationLink({ inventory_type: 'CHECKLIST', event: { inventory_id: 7 } }), '/checklists/7');
   assert.equal(notifications.notificationLink({ inventory_type: 'INVENTORY', event: { inventory_id: 8 } }), '/inventories/8');
 });
@@ -40,7 +40,7 @@ test('inbox client preserves pagination and sends scoped read requests', async (
   }
 });
 
-test('preferences and rule CRUD never send user/session identities or request browser consent', async () => {
+test('personal change preferences never send user/session identities or request browser consent', async () => {
   const oldAdapter = api.defaults.adapter;
   const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
@@ -51,25 +51,31 @@ test('preferences and rule CRUD never send user/session identities or request br
   };
   try {
     await notifications.saveNotificationPreference({
-      event_type: 'inventory_shared', in_app_enabled: true, push_enabled: false, include_own_actions: false,
+      event_type: 'item_quantity_changed', in_app_enabled: true, push_enabled: false, include_own_actions: false,
     });
     assert.deepEqual(JSON.parse(requests[0].data), {
       in_app_enabled: true, push_enabled: false, include_own_actions: false,
     });
-    const rule = { event_type: 'item_quantity_changed', threshold: 3, recipients: [{ kind: 'owner' }], enabled: true };
-    await notifications.saveNotificationRule(7, rule);
-    await notifications.saveNotificationRule(7, rule, 11);
-    await notifications.getRuleRecipients(7);
-    await notifications.deleteNotificationRule(7, 11);
-    assert.deepEqual(requests.slice(1).map(r => [r.method, r.url]), [
-      ['post', '/notifications/rules/7'], ['put', '/notifications/rules/7/11'],
-      ['get', '/notifications/rules/7/recipients'], ['delete', '/notifications/rules/7/11'],
+    assert.equal(requests[0].url, '/notifications/preferences/item_quantity_changed');
+    assert.deepEqual(Object.keys(notifications.notificationLabels).sort(), [
+      'inventory_updated', 'item_quantity_changed', 'item_updated',
     ]);
-    assert.deepEqual(JSON.parse(requests[1].data), rule);
+    await notifications.saveNotificationPreference({
+      event_type: 'item_updated', in_app_enabled: false, push_enabled: true, include_own_actions: false,
+    });
+    await notifications.saveNotificationPreference({
+      event_type: 'inventory_updated', in_app_enabled: false, push_enabled: false, include_own_actions: true,
+    });
+    assert.deepEqual(requests.map(r => r.url), [
+      '/notifications/preferences/item_quantity_changed', '/notifications/preferences/item_updated',
+      '/notifications/preferences/inventory_updated',
+    ]);
     api.defaults.adapter = async () => { throw new Error('access revoked'); };
     await assert.rejects(notifications.getInbox(), /access revoked/);
     await assert.rejects(notifications.markAllNotificationsRead(), /access revoked/);
-    await assert.rejects(notifications.saveNotificationRule(7, rule), /access revoked/);
+    await assert.rejects(notifications.saveNotificationPreference({
+      event_type: 'item_updated', in_app_enabled: true, push_enabled: false, include_own_actions: false,
+    }), /access revoked/);
   } finally {
     api.defaults.adapter = oldAdapter;
     if (oldStorage) Object.defineProperty(globalThis, 'localStorage', oldStorage);

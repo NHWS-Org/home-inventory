@@ -62,8 +62,13 @@ export default function NotificationsPage() {
         {rows.map(row => (
           <li key={row.id} className={`space-y-2 rounded border p-3 ${!row.read_at ? "border-blue-500" : "border-gray-300 dark:border-gray-700"}`}>
             <p className="font-semibold">{notificationLabels[row.event.event_type]} — {row.inventory_name}</p>
+            {row.item_name && <p>Elemento: {row.item_name}</p>}
             <p>{row.read_at ? "Letta" : "Da leggere"} · {new Date(row.created_at + (row.created_at.endsWith("Z") ? "" : "Z")).toLocaleString()}</p>
-            {row.event.event_type === "item_quantity_changed" && <p>Quantità: {row.event.previous_quantity} → {row.event.quantity}</p>}
+            {row.event.event_type === "item_quantity_changed" && (
+              <p>{row.inventory_type === "CHECKLIST"
+                ? `Spunta: ${row.event.previous_quantity >= 1 ? "completato" : "da completare"} → ${row.event.quantity >= 1 ? "completato" : "da completare"}`
+                : `Quantità: ${row.event.previous_quantity} → ${row.event.quantity}`}</p>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <Link to={notificationLink(row)} className="inline-flex min-h-11 items-center text-blue-700 underline dark:text-blue-300">Apri contenitore</Link>
               {!row.read_at && <button disabled={busy} onClick={() => void read(row.id)} className="min-h-11 rounded border px-3">Segna come letta</button>}

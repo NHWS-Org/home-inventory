@@ -17,7 +17,6 @@ import { AuthContext } from "../auth-context";
 import { useSwipeable } from 'react-swipeable';
 import { HistoryModal } from "../components/HistoryModal";
 import MetadataFilterManager from "../components/MetadataFilterManager";
-import NotificationRuleEditor from "../components/NotificationRuleEditor";
 import { ITEMS_CHANGED_EVENT } from "../components/GlobalBarcodeScan";
 import ItemBarcodesEditor from "../components/ItemBarcodesEditor";
 import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
@@ -1162,9 +1161,6 @@ useEffect(() => {
 
       {inventory ? (
         <div>
-          {(isAdmin || user?.id === inventory.owner.id) && (
-            <NotificationRuleEditor key={inventory.id} inventoryId={inventory.id} checklist={isChecklist} />
-          )}
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
             <label className="hidden sm:inline text-sm font-medium">Ordina per:</label>
             {isChecklist && (

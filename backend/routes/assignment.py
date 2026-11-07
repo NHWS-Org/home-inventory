@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from assignment_service import build_assignment_response, pending_assigned_by_source
 from dependencies import get_db
 from models import Item, ListAssignment
+from notification_service import emit_item_updated
 from routes.auth import get_current_user
 from routes.item import can_access_item
 from schemas import AssignmentCreate, AssignmentResponse, AssignmentUpdate
@@ -60,6 +61,8 @@ def create_assignment(payload: AssignmentCreate, db: Session = Depends(get_db), 
         user_ins=user.id, user_mod=user.id,
     )
     db.add(assignment)
+    emit_item_updated(db, list_item, ["assignment"], user.id)
+    emit_item_updated(db, source, ["assignments"], user.id)
     db.commit()
     db.refresh(assignment)
     return build_assignment_response(assignment)
@@ -89,8 +92,12 @@ def update_assignment(assignment_id: int, payload: AssignmentUpdate, db: Session
     if not can_access_item(user, assignment.list_item, action="edit") or not can_access_item(user, assignment.source_item, action="view"):
         raise HTTPException(status_code=403, detail="Accesso negato")
     _ensure_qty_within_stock(payload.qty, assignment.source_item, db, assignment=assignment)
+    changed = assignment.qty != payload.qty
     assignment.qty = payload.qty
     assignment.user_mod = user.id
+    if changed:
+        emit_item_updated(db, assignment.list_item, ["assignment"], user.id)
+        emit_item_updated(db, assignment.source_item, ["assignments"], user.id)
     db.commit()
     db.refresh(assignment)
     return build_assignment_response(assignment)
@@ -102,6 +109,8 @@ def delete_assignment(assignment_id: int, db: Session = Depends(get_db), user=De
     # Security: Verify permissions on both the checklist row (edit) and source inventory item (view)
     if not can_access_item(user, assignment.list_item, action="edit") or not can_access_item(user, assignment.source_item, action="view"):
         raise HTTPException(status_code=403, detail="Accesso negato")
+    emit_item_updated(db, assignment.list_item, ["assignment"], user.id)
+    emit_item_updated(db, assignment.source_item, ["assignments"], user.id)
     db.delete(assignment)
     db.commit()
     return {"detail": "Assegnazione eliminata"}

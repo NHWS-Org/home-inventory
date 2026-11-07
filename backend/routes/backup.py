@@ -433,7 +433,6 @@ def _restore_backup_rows(
     _safe_delete_table(db, "push_subscriptions")
     _safe_delete_table(db, "notifications")
     _safe_delete_table(db, "notification_events")
-    _safe_delete_table(db, "notification_rules")
     selected_tables = set(CORE_RESTORE_TABLES) | {"users"}
     overwrite_roles = payload.mode == "advanced" and payload.overwrite_users_roles
     if overwrite_roles:

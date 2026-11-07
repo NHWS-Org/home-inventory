@@ -79,7 +79,7 @@ def main() -> None:
         logger.info("Web Push queue counts: %s", push_counts)
         return
     config = load_push_config()
-    logger.info("Notification rules enabled; Web Push %s", "enabled" if config else "disabled")
+    logger.info("Personal notifications enabled; Web Push %s", "enabled" if config else "disabled")
     stop = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda _signum, _frame: stop.set())
