@@ -12,7 +12,7 @@ const server = await createServer({
   server: { middlewareMode: true, ws: false },
 });
 after(() => server.close());
-const { default: ProfilePage } = await server.ssrLoadModule('/src/pages/ProfilePage.tsx');
+const { default: ProfilePage, PushStatusBadge, DeviceCountBadge } = await server.ssrLoadModule('/src/pages/ProfilePage.tsx');
 const { AuthContext } = await server.ssrLoadModule('/src/auth-context-instance.ts');
 
 function renderProfile(role) {
@@ -49,4 +49,44 @@ test('viewer profile keeps its notification explanation without push controls', 
   assert.equal((html.match(/<details class=/g) ?? []).length, 4);
   assert.match(html, /Gli utenti con sola lettura non le ricevono/);
   assert.doesNotMatch(html, /Attivazione notifiche push/);
+});
+
+test('push badge distinguishes active, inactive, checking and error without relying on color', () => {
+  for (const [state, label, color] of [
+    ['active', 'Notifiche push attive su questo browser', 'text-green-700'],
+    ['permission-required', 'Notifiche push non attive su questo browser', 'text-gray-500'],
+    ['expired', 'Notifiche push non attive su questo browser', 'text-gray-500'],
+    ['checking', 'Verifica notifiche push in corso', 'text-gray-500'],
+    ['error', 'Stato notifiche push non disponibile', 'text-amber-700'],
+  ]) {
+    const html = renderToStaticMarkup(createElement(PushStatusBadge, { state }));
+    assert.match(html, new RegExp(label));
+    assert.match(html, new RegExp(color));
+    assert.match(html, /class="sr-only"/);
+  }
+});
+
+test('device badge communicates active session count and unavailable states', () => {
+  for (const [status, count, label] of [
+    ['ready', 0, '0 sessioni attive'],
+    ['ready', 1, '1 sessione attiva'],
+    ['ready', 3, '3 sessioni attive'],
+    ['loading', 0, 'Verifica dispositivi in corso'],
+    ['error', 0, 'Numero dispositivi non disponibile'],
+  ]) {
+    const sessions = Array.from({ length: count }, () => ({ is_expired: false, revoked_at: null }));
+    const html = renderToStaticMarkup(createElement(DeviceCountBadge, { status, sessions }));
+    assert.match(html, new RegExp(label));
+    assert.match(html, /class="sr-only"/);
+  }
+});
+
+test('active device count excludes expired and revoked sessions', () => {
+  const html = renderToStaticMarkup(createElement(DeviceCountBadge, { status: 'ready', sessions: [
+    { is_expired: false, revoked_at: null },
+    { is_expired: false, revoked_at: null },
+    { is_expired: true, revoked_at: null },
+    { is_expired: false, revoked_at: '2026-01-01T00:00:00Z' },
+  ] }));
+  assert.match(html, /2 sessioni attive/);
 });

@@ -233,6 +233,10 @@ Il pannello Profilo distingue supporto, HTTPS, permesso negato, servizio
 disabilitato, sottoscrizione scaduta e errori. Il prompt parte solo dal pulsante
 esplicito, prima del lavoro asincrono. Logout/cambio account/revoche puliscono
 server e browser; un errore di cleanup viene segnalato e non blocca logout.
+La sezione collassata mostra lo stato push del browser corrente; il conteggio
+dispositivi indica le sessioni attive, escludendo quelle scadute e revocate.
+Durante la verifica o in caso di errore gli indicatori mostrano uno stato
+distinto, non un risultato negativo o un conteggio pari a zero.
 Se la disattivazione dal Profilo fallisce, l'associazione locale resta disponibile
 per riprovare la pulizia; in caso di sottoscrizione scaduta e possibile sia
 riattivarla sia disattivarla.

@@ -1,28 +1,68 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
-import { FiChevronDown } from "react-icons/fi";
+import { FiAlertCircle, FiCheckCircle, FiChevronDown, FiClock, FiSlash } from "react-icons/fi";
 import PushNotificationsPanel from "../components/PushNotificationsPanel";
 import NotificationPreferences from "../components/NotificationPreferences";
-import { disablePushForBrowser } from "../utils/pushNotifications";
+import { disablePushForBrowser, type PushBrowserState } from "../utils/pushNotifications";
 import { SESSION_RENEWED } from "../utils/sessionRenewal";
 import { useAuth } from "../useAuth";
 
-function ProfileSection({ title, headingId, children }: {
+function ProfileSection({ title, headingId, badge, children }: {
   title: string;
   headingId?: string;
+  badge?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <details className="group rounded-xl border border-gray-200 dark:border-gray-700">
       <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-blue-500 dark:hover:bg-gray-800">
         <h2 id={headingId} className="text-base font-bold">{title}</h2>
-        <FiChevronDown aria-hidden="true" className="shrink-0 transition-transform group-open:rotate-180" />
+        <span className="flex shrink-0 items-center gap-3">
+          {badge}
+          <FiChevronDown aria-hidden="true" className="transition-transform group-open:rotate-180" />
+        </span>
       </summary>
       <div className="space-y-4 border-t border-gray-200 p-4 dark:border-gray-700">
         {children}
       </div>
     </details>
+  );
+}
+
+export function PushStatusBadge({ state }: { state: PushBrowserState }) {
+  const active = state === "active";
+  const checking = state === "checking";
+  const error = state === "error";
+  const label = checking ? "Verifica notifiche push in corso"
+    : error ? "Stato notifiche push non disponibile"
+    : active ? "Notifiche push attive su questo browser"
+    : "Notifiche push non attive su questo browser";
+  const Icon = checking ? FiClock : error ? FiAlertCircle : active ? FiCheckCircle : FiSlash;
+  return (
+    <span role="status" title={label} className={
+      error ? "text-amber-700 dark:text-amber-400"
+        : active ? "text-green-700 dark:text-green-400" : "text-gray-500 dark:text-gray-400"
+    }>
+      <Icon aria-hidden="true" className="h-5 w-5" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+export function DeviceCountBadge({ status, sessions }: {
+  status: "loading" | "ready" | "error";
+  sessions: DeviceSession[];
+}) {
+  const count = sessions.filter((session) => !session.revoked_at && !session.is_expired).length;
+  const label = status === "loading" ? "Verifica dispositivi in corso"
+    : status === "error" ? "Numero dispositivi non disponibile"
+    : `${count} ${count === 1 ? "sessione attiva" : "sessioni attive"}`;
+  return (
+    <span role="status" title={label} className="inline-flex min-w-7 items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-sm font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+      <span aria-hidden="true">{status === "ready" ? count : status === "loading" ? "…" : "!"}</span>
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
@@ -48,6 +88,9 @@ const ProfilePage = () => {
   const [sessionMessage, setSessionMessage] = useState("");
   const [sessionNotice, setSessionNotice] = useState("");
   const [sessionsBusy, setSessionsBusy] = useState(false);
+  const [sessionsStatus, setSessionsStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [pushState, setPushState] = useState<PushBrowserState>("checking");
+  const sessionsRequest = useRef(0);
 
   const emailInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -68,20 +111,32 @@ const ProfilePage = () => {
       });
   }, []);
 
+  const refreshSessions = useCallback(async () => {
+    const request = ++sessionsRequest.current;
+    try {
+      const sessions = await getDeviceSessions();
+      if (request === sessionsRequest.current) {
+        setDeviceSessions(sessions);
+        setSessionsStatus("ready");
+      }
+    } catch {
+      if (request === sessionsRequest.current) setSessionsStatus("error");
+    }
+  }, []);
+
   useEffect(() => {
-    let active = true;
-    const refreshSessions = () => {
-      getDeviceSessions()
-        .then((sessions) => { if (active) setDeviceSessions(sessions); })
-        .catch(() => { if (active) setSessionMessage("Errore nel recupero dei dispositivi."); });
-    };
+    const requestRef = sessionsRequest;
     refreshSessions();
     window.addEventListener(SESSION_RENEWED, refreshSessions);
+    window.addEventListener("focus", refreshSessions);
+    const timer = window.setInterval(refreshSessions, 60_000);
     return () => {
-      active = false;
+      requestRef.current++;
+      window.clearInterval(timer);
       window.removeEventListener(SESSION_RENEWED, refreshSessions);
+      window.removeEventListener("focus", refreshSessions);
     };
-  }, []);
+  }, [refreshSessions]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -218,6 +273,7 @@ const ProfilePage = () => {
         await disablePushForBrowser(user.username);
       }
       await revokeDeviceSession(session.id);
+      sessionsRequest.current++;
       if (session.is_current) {
         localStorage.removeItem("access_token");
         window.location.assign("/login");
@@ -228,6 +284,7 @@ const ProfilePage = () => {
           item.id === session.id ? { ...item, revoked_at: new Date().toISOString() } : item
         )
       );
+      void refreshSessions();
     } catch {
       setSessionMessage("Errore nella disconnessione del dispositivo.");
     } finally {
@@ -243,11 +300,7 @@ const ProfilePage = () => {
     try {
       const deleted = await cleanupDeviceSessions();
       setSessionNotice(`Sessioni eliminate: ${deleted}. I dispositivi attivi restano connessi.`);
-      try {
-        setDeviceSessions(await getDeviceSessions());
-      } catch {
-        setSessionMessage("Pulizia completata, ma aggiornamento elenco non riuscito. Ricaricare la pagina.");
-      }
+      await refreshSessions();
     } catch {
       setSessionMessage("Pulizia delle sessioni non riuscita. Riprovare.");
     } finally {
@@ -367,11 +420,11 @@ const ProfilePage = () => {
       {user?.role?.name === "viewer"
         ? <ProfileSection title="Preferenze notifiche"><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></ProfileSection>
         : <>
-            <ProfileSection title="Attivazione notifiche push" headingId="profile-push-heading"><PushNotificationsPanel /></ProfileSection>
+            <ProfileSection title="Attivazione notifiche push" headingId="profile-push-heading" badge={<PushStatusBadge state={pushState} />}><PushNotificationsPanel state={pushState} setState={setPushState} /></ProfileSection>
             <ProfileSection title="Preferenze notifiche" headingId="notification-preferences-heading"><NotificationPreferences /></ProfileSection>
           </>}
 
-      <ProfileSection title="Dispositivi connessi" headingId="profile-devices-heading">
+      <ProfileSection title="Dispositivi connessi" headingId="profile-devices-heading" badge={<DeviceCountBadge status={sessionsStatus} sessions={deviceSessions} />}>
         <p className="mb-2 text-sm">Elimina subito solo le tue sessioni scadute o disconnesse, senza disconnettere i dispositivi attivi.</p>
         <button type="button" onClick={handleCleanupSessions} disabled={sessionsBusy}
           className="mb-3 min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">
@@ -379,7 +432,15 @@ const ProfilePage = () => {
         </button>
         {sessionNotice && <p role="status" className="mb-3 text-sm">{sessionNotice}</p>}
         {sessionMessage && <p role="alert" className="mb-3 text-sm text-red-600">{sessionMessage}</p>}
-        {deviceSessions.length === 0 ? (
+        {sessionsStatus === "error" && (
+          <div className="mb-3 text-sm">
+            <p role="alert" className="text-red-600">Errore nel recupero dei dispositivi.</p>
+            <button type="button" onClick={() => void refreshSessions()} className="min-h-11 rounded border px-3">Riprova</button>
+          </div>
+        )}
+        {sessionsStatus === "loading" ? (
+          <p role="status" className="text-sm">Caricamento dispositivi...</p>
+        ) : sessionsStatus === "error" ? null : deviceSessions.length === 0 ? (
           <p className="text-sm text-gray-600 dark:text-gray-300">Nessun dispositivo registrato.</p>
         ) : (
           <ul aria-labelledby="profile-devices-heading" tabIndex={0}

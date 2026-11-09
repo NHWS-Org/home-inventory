@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FiBell, FiBellOff, FiRefreshCw } from "react-icons/fi";
 import axios from "axios";
 import {
@@ -28,33 +28,44 @@ function isPermissionDenied(): boolean {
   return typeof Notification !== "undefined" && Notification.permission === "denied";
 }
 
-export default function PushNotificationsPanel() {
+export default function PushNotificationsPanel({ state, setState }: {
+  state: PushBrowserState;
+  setState: (state: PushBrowserState) => void;
+}) {
   const { user } = useAuth();
   const username = user?.username ?? "";
-  const [state, setState] = useState<PushBrowserState>("checking");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [cleanupFailed, setCleanupFailed] = useState(false);
+  const inspection = useRef(0);
+  const busyRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (!username) return;
+    if (!username || busyRef.current) return;
+    const request = ++inspection.current;
     setState("checking");
-    const result = await inspectPushBrowser(username);
-    setState(result.state);
-  }, [username]);
+    try {
+      const result = await inspectPushBrowser(username);
+      if (request === inspection.current) setState(result.state);
+    } catch {
+      if (request === inspection.current) setState("error");
+    }
+  }, [username, setState]);
 
   useEffect(() => {
-    let active = true;
-    if (username) {
-      void inspectPushBrowser(username).then((result) => {
-        if (active) setState(result.state);
-      });
-    }
-    return () => { active = false; };
-  }, [username]);
+    const inspectionRef = inspection;
+    void refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      inspectionRef.current++;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refresh]);
 
   async function enable() {
     if (busy || !username) return;
+    busyRef.current = true;
+    inspection.current++;
     setBusy(true);
     setMessage("");
     try {
@@ -75,12 +86,15 @@ export default function PushNotificationsPanel() {
         setMessage("Attivazione non riuscita. Controlla la connessione e riprova.");
       }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function disable() {
     if (busy || !username) return;
+    busyRef.current = true;
+    inspection.current++;
     setBusy(true);
     setMessage("");
     try {
@@ -93,12 +107,14 @@ export default function PushNotificationsPanel() {
       setState("error");
       setMessage("Disattivazione incompleta. Aggiorna lo stato e riprova.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function test() {
     if (busy) return;
+    busyRef.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -107,6 +123,7 @@ export default function PushNotificationsPanel() {
     } catch {
       setMessage("Impossibile mostrare la notifica di prova. Verifica i permessi del browser.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
