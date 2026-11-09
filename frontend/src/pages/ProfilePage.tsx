@@ -5,6 +5,7 @@ import { FiChevronDown } from "react-icons/fi";
 import PushNotificationsPanel from "../components/PushNotificationsPanel";
 import NotificationPreferences from "../components/NotificationPreferences";
 import { disablePushForBrowser } from "../utils/pushNotifications";
+import { SESSION_RENEWED } from "../utils/sessionRenewal";
 import { useAuth } from "../useAuth";
 
 function ProfileSection({ title, headingId, children }: {
@@ -68,9 +69,18 @@ const ProfilePage = () => {
   }, []);
 
   useEffect(() => {
-    getDeviceSessions()
-      .then(setDeviceSessions)
-      .catch(() => setSessionMessage("Errore nel recupero dei dispositivi."));
+    let active = true;
+    const refreshSessions = () => {
+      getDeviceSessions()
+        .then((sessions) => { if (active) setDeviceSessions(sessions); })
+        .catch(() => { if (active) setSessionMessage("Errore nel recupero dei dispositivi."); });
+    };
+    refreshSessions();
+    window.addEventListener(SESSION_RENEWED, refreshSessions);
+    return () => {
+      active = false;
+      window.removeEventListener(SESSION_RENEWED, refreshSessions);
+    };
   }, []);
 
   useEffect(() => {

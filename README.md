@@ -143,6 +143,26 @@ riavvio. Con chiave esplicita/file verificare il messaggio di configurazione,
 mai il suo valore. Provare una rotazione soltanto sull'installazione di test:
 il vecchio token deve dare 401 e un nuovo login deve riuscire.
 
+#### Rinnovo della sessione
+
+La durata predefinita e di 14400 minuti (10 giorni), configurabile con
+`ACCESS_TOKEN_EXPIRE_MINUTES` nel backend. Quando, dopo un'interazione
+dell'utente, resta meno del 50% della durata del JWT, il browser richiede un
+nuovo token per la stessa sessione dispositivo. Con 10 giorni, la richiesta
+parte quando ne restano meno di 5; i controlli periodici automatici non
+mantengono viva una sessione inattiva. La scadenza della sessione viene
+estesa e, se presente e verificabile nel browser, anche la sottoscrizione
+push esistente, senza superare la sua scadenza nativa. Non viene richiesto
+un nuovo permesso browser. Se il push non puo essere verificato, viene
+mostrato un avviso e occorre controllarlo nel Profilo.
+
+Il rinnovo richiede un token ancora valido, una sessione non revocata e
+connettivita: dopo la scadenza o la revoca occorre accedere di nuovo e
+riattivare il push. I token precedenti restano validi fino alla propria
+scadenza o alla revoca della sessione. Il rinnovo permette anche a chi
+possiede un token rubato di prolungare una sessione attiva: disconnettere
+il dispositivo o revocare tutte le sessioni se si sospetta una compromissione.
+
 #### Recupero password da container
 
 Se non e disponibile un amministratore gia autenticato, dalla macchina che
@@ -461,6 +481,20 @@ across restarts and confirm login with the existing password. Confirm tokens
 survive restart with a stable key; after a deliberate test key rotation, old
 tokens must fail while a new login succeeds. See the [Italian configuration
 examples](#chiave-jwt-e-configurazione-privata) for Docker secrets.
+
+#### Session renewal
+
+The default session lifetime is 14400 minutes (10 days), configurable with
+`ACCESS_TOKEN_EXPIRE_MINUTES`. After user interaction, a JWT with less than
+half its lifetime remaining is renewed for the same device session. Background
+polling does not keep an inactive session alive. An existing push subscription
+is extended only when the browser can confirm it, and never beyond its native
+expiration; no new browser permission is requested. A warning is shown if push
+could not be verified. Renewal requires a valid, unrevoked token and network
+access; after expiry or revocation, sign in and enable push again. Previous
+tokens remain valid until their own expiry or session revocation. A stolen
+token can also renew an active session: revoke the device or all sessions if
+compromise is suspected.
 
 #### Password recovery from the container
 

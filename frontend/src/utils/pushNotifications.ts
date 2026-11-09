@@ -121,6 +121,26 @@ async function browserSubscription(): Promise<PushSubscription | null> {
   return registration?.pushManager.getSubscription() ?? null;
 }
 
+export async function pushRenewalSnapshot(username: string): Promise<{
+  id: number;
+  endpoint: string;
+  expiration_time: number | null;
+} | null> {
+  if (localStorage.getItem(OWNER_KEY) !== username) return null;
+  const storedId = localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username));
+  if (!storedId || !Number.isSafeInteger(Number(storedId)) || Number(storedId) <= 0) {
+    throw new Error("Impossibile verificare la sottoscrizione push.");
+  }
+  if (detectPushAvailability(currentEnvironment()) !== "supported" || Notification.permission !== "granted") {
+    throw new Error("Permesso push non disponibile.");
+  }
+  const subscription = await browserSubscription();
+  if (!subscription || subscription.expirationTime !== null && subscription.expirationTime <= Date.now()) {
+    throw new Error("Sottoscrizione push assente o scaduta.");
+  }
+  return { id: Number(storedId), endpoint: subscription.endpoint, expiration_time: subscription.expirationTime };
+}
+
 export async function inspectPushBrowser(username: string): Promise<{
   state: PushBrowserState;
   configuration?: PushConfiguration;

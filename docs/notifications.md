@@ -236,6 +236,10 @@ server e browser; un errore di cleanup viene segnalato e non blocca logout.
 Se la disattivazione dal Profilo fallisce, l'associazione locale resta disponibile
 per riprovare la pulizia; in caso di sottoscrizione scaduta e possibile sia
 riattivarla sia disattivarla.
+Con l'attivita dell'utente, il rinnovo della sessione sotto il 50% estende anche
+la sottoscrizione push confermata dal browser, rispettandone la scadenza nativa.
+Se la verifica fallisce, la sessione puo rinnovarsi ma il push no: un avviso
+invita a controllare l'attivazione nel Profilo. Il polling non rinnova sessioni.
 
 Mostra notifica di prova e un **test locale**, non un invio provider.
 Su iOS/iPadOS serve 16.4+, HTTPS e app aggiunta alla schermata Home da Safari.

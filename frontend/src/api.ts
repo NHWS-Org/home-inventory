@@ -60,6 +60,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
+      const requestAuthorization = error.config?.headers?.Authorization;
+      const currentToken = localStorage.getItem('access_token');
+      if (typeof requestAuthorization === 'string' && requestAuthorization !== `Bearer ${currentToken}`) {
+        return Promise.reject(error);
+      }
       localStorage.removeItem('access_token');
       if (
         typeof window !== 'undefined' &&

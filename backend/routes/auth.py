@@ -8,12 +8,14 @@ import datetime
 import os
 import re
 import uuid
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, SecurityScopes
 from fastapi.security.utils import get_authorization_scheme_param
-from sqlalchemy import update
+from sqlalchemy import case, update
+from pydantic import BaseModel, ConfigDict, Field
 from dependencies import get_db, get_current_user, authenticated_user, decode_access_token
 from crud import get_setting, set_setting, cleanup_ended_sessions
-from models import DeviceSession
+from models import DeviceSession, PushSubscription
+from web_push import endpoint_hash, validate_endpoint
 from auth_config import get_secret_key, current_secret_key, key_lock, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
@@ -175,6 +177,105 @@ def login(
         db.add(device_session)
         db.commit()
     return {"access_token": token, "token_type": "bearer"}
+
+
+class RenewalPush(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: int = Field(gt=0)
+    endpoint: str = Field(max_length=2048)
+    expiration_time: int | None = Field(ge=0)
+
+
+class RenewalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    push: RenewalPush | None = None
+
+
+@router.post("/renew")
+def renew_session(
+    payload: RenewalRequest,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    with key_lock():
+        claims = decode_access_token(token)
+        username, session_token_id, expiry = claims.get("sub"), claims.get("jti"), claims.get("exp")
+        if (
+            not isinstance(username, str) or not isinstance(session_token_id, str)
+            or isinstance(expiry, bool) or not isinstance(expiry, (int, float))
+        ):
+            raise HTTPException(401, "Sessione non rinnovabile: accedi nuovamente")
+
+        user = db.query(User).filter(User.username == username).with_for_update().first()
+        if user is None:
+            raise HTTPException(401, "Sessione non valida")
+        locked = db.query(User).filter(
+            User.id == user.id, User.auth_revoked_before == user.auth_revoked_before,
+            User.is_blocked.is_(user.is_blocked),
+        ).update({User.hashed_password: User.hashed_password}, synchronize_session=False)
+        if locked != 1:
+            raise HTTPException(401, "Sessione non valida")
+        db.expire_all()
+        current = get_current_user(
+            SecurityScopes(), token=token, db=db,
+        )
+        now = _session_now()
+        session = db.query(DeviceSession).filter(
+            DeviceSession.user_id == current.id,
+            DeviceSession.session_token_id == session_token_id,
+            DeviceSession.revoked_at.is_(None),
+            DeviceSession.expires_at > now,
+        ).with_for_update().first()
+        if session is None:
+            raise HTTPException(401, "Sessione non valida o revocata")
+        remaining = expiry - datetime.datetime.now(datetime.timezone.utc).timestamp()
+        if remaining >= ACCESS_TOKEN_EXPIRE_MINUTES * 60 / 2:
+            return {"access_token": token, "renewed": False, "push_extended": None}
+
+        push_row = None
+        native_expiry = None
+        if payload.push is not None:
+            try:
+                digest = endpoint_hash(validate_endpoint(payload.push.endpoint))
+                if payload.push.expiration_time is not None:
+                    native_expiry = datetime.datetime.fromtimestamp(
+                        payload.push.expiration_time / 1000, datetime.timezone.utc,
+                    ).replace(tzinfo=None)
+            except (ValueError, OverflowError, OSError):
+                raise HTTPException(422, "Sottoscrizione browser non valida") from None
+            push_row = db.query(PushSubscription).filter(
+                PushSubscription.id == payload.push.id,
+                PushSubscription.user_id == current.id,
+                PushSubscription.session_id == session.id,
+                PushSubscription.endpoint_hash == digest,
+                PushSubscription.expires_at > now,
+            ).with_for_update().first()
+
+        new_token, expire = _encode_access_token(
+            {"sub": username, "jti": session_token_id}, ACCESS_TOKEN_EXPIRE_MINUTES,
+        )
+        new_expiry = expire.replace(tzinfo=None)
+        updated = db.query(DeviceSession).filter(
+            DeviceSession.id == session.id, DeviceSession.revoked_at.is_(None),
+            DeviceSession.expires_at > now,
+        ).update({
+            DeviceSession.expires_at: case(
+                (DeviceSession.expires_at < new_expiry, new_expiry),
+                else_=DeviceSession.expires_at,
+            ),
+        }, synchronize_session=False)
+        if updated != 1:
+            raise HTTPException(401, "Sessione non valida o revocata")
+        push_extended = None
+        if payload.push is not None:
+            push_extended = bool(push_row is not None and (native_expiry is None or native_expiry > now))
+            if push_row is not None and push_extended:
+                db.query(PushSubscription).filter(PushSubscription.id == push_row.id).update({
+                    PushSubscription.expires_at: min(new_expiry, native_expiry) if native_expiry else new_expiry,
+                    PushSubscription.updated_at: now,
+                }, synchronize_session=False)
+        db.commit()
+        return {"access_token": new_token, "renewed": True, "push_extended": push_extended}
 
 #############################################################################
 # Logout utente
