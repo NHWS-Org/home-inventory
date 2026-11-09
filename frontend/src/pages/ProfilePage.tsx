@@ -1,10 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
+import { FiChevronDown } from "react-icons/fi";
 import PushNotificationsPanel from "../components/PushNotificationsPanel";
 import NotificationPreferences from "../components/NotificationPreferences";
 import { disablePushForBrowser } from "../utils/pushNotifications";
 import { useAuth } from "../useAuth";
+
+function ProfileSection({ title, headingId, children }: {
+  title: string;
+  headingId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="group rounded-xl border border-gray-200 dark:border-gray-700">
+      <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-blue-500 dark:hover:bg-gray-800">
+        <h2 id={headingId} className="text-base font-bold">{title}</h2>
+        <FiChevronDown aria-hidden="true" className="shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-4 border-t border-gray-200 p-4 dark:border-gray-700">
+        {children}
+      </div>
+    </details>
+  );
+}
 
 const ProfilePage = () => {
   const { user } = useAuth();
@@ -227,12 +246,11 @@ const ProfilePage = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-8 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-8">
+    <div className="max-w-md mx-auto mt-4 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-3">
       <Link to={returnPath} className="inline-flex min-h-11 items-center rounded-xl bg-gray-100 px-4 font-medium text-blue-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-gray-700">
         ← Torna indietro
       </Link>
-      <div>
-        <h2 className="text-xl font-bold mb-4">Dati Anagrafici</h2>
+      <ProfileSection title="Dati Anagrafici">
         <form onSubmit={handleProfileSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-100">Email</label>
@@ -276,10 +294,9 @@ const ProfilePage = () => {
             {message} (chiude tra {messageCountdown}s)
           </p>
         )}
-      </div>
+      </ProfileSection>
 
-      <div>
-        <h2 className="text-xl font-bold mb-4">Cambia Password</h2>
+      <ProfileSection title="Cambia Password">
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-100">Nuova Password</label>
@@ -335,14 +352,16 @@ const ProfilePage = () => {
             {passwordMessage} (chiude tra {passwordCountdown}s)
           </p>
         )}
-      </div>
+      </ProfileSection>
 
       {user?.role?.name === "viewer"
-        ? <section><h2 className="text-xl font-bold">Preferenze notifiche</h2><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></section>
-        : <><section><PushNotificationsPanel /></section><NotificationPreferences /></>}
+        ? <ProfileSection title="Preferenze notifiche"><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></ProfileSection>
+        : <>
+            <ProfileSection title="Notifiche push su questo browser" headingId="profile-push-heading"><PushNotificationsPanel /></ProfileSection>
+            <ProfileSection title="Preferenze notifiche" headingId="notification-preferences-heading"><NotificationPreferences /></ProfileSection>
+          </>}
 
-      <section>
-        <h2 id="profile-devices-heading" className="text-xl font-bold mb-4">Dispositivi connessi</h2>
+      <ProfileSection title="Dispositivi connessi" headingId="profile-devices-heading">
         <p className="mb-2 text-sm">Elimina subito solo le tue sessioni scadute o disconnesse, senza disconnettere i dispositivi attivi.</p>
         <button type="button" onClick={handleCleanupSessions} disabled={sessionsBusy}
           className="mb-3 min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">
@@ -393,7 +412,7 @@ const ProfilePage = () => {
             })}
           </ul>
         )}
-      </section>
+      </ProfileSection>
     </div>
   );
 };

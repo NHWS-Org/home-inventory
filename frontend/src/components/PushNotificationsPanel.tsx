@@ -119,9 +119,6 @@ export default function PushNotificationsPanel() {
   return (
     <section aria-labelledby="profile-push-heading" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="profile-push-heading" className="text-xl font-bold">
-          Notifiche push su questo browser
-        </h2>
         <button type="button" onClick={() => void refresh()} disabled={busy || state === "checking"}
           aria-label="Aggiorna stato notifiche push"
           className="inline-flex min-h-11 items-center gap-2 rounded border px-3 py-2 disabled:opacity-50">
