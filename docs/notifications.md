@@ -24,7 +24,7 @@ preferenza o richiesta del consenso push per eventi che non possono ricevere.
 | Evento | Quando | Inbox predefinita |
 |---|---|---|
 | `item_quantity_changed` | Qualsiasi variazione di quantita o spunta di una singola riga | Attiva |
-| `item_updated` | Creazione di un elemento o modifica effettiva di nome, descrizione, barcode, metadati o altri dettagli | Disattiva |
+| `item_updated` | Creazione o eliminazione di un elemento oppure modifica effettiva dei suoi dettagli | Disattiva |
 | `inventory_updated` | Modifica effettiva del contenitore, attualmente il nome | Disattiva |
 
 I valori predefiniti valgono per utenti nuovi e per l'inizializzazione della
@@ -33,12 +33,16 @@ preferenza personale per evento e attivazione esplicita del browser.
 Le azioni proprie sono escluse salvo scelta di **Mie azioni**.
 Inbox e push sono indipendenti.
 
-La preferenza **Creazione e dettagli degli elementi** include le nuove righe.
+La preferenza **Creazione, eliminazione e dettagli degli elementi** include le
+nuove righe e le cancellazioni.
 La notifica indica il nome e la quantita iniziali, oppure lo stato iniziale
 della spunta per le liste; questi valori rimangono riferiti alla creazione
 anche se l'elemento viene successivamente modificato. I metadati inseriti
 durante la creazione sono salvati insieme alla riga, senza una seconda
 notifica di modifica; le successive modifiche ai metadati restano notificabili.
+La notifica di eliminazione conserva il nome dell'elemento e apre il suo
+inventario o lista, non l'elemento cancellato. Anche per essa sono richiesti
+accesso corrente e preferenze personali.
 
 La sezione e compatta: ogni tocco su Inbox, Push o Mie azioni salva
 automaticamente. Durante la richiesta i controlli sono disabilitati per evitare
@@ -76,10 +80,12 @@ ordine di consegna del worker, e viene applicato prima della paginazione.
 Contenitori non piu modificabili non vengono elencati, conteggiati o modificati
 dalla lettura massiva. I link usano il tipo del contenitore autorizzato dal
 backend; le route verificano nuovamente i permessi all'apertura.
-La cancellazione di un inventario/lista o item elimina i relativi eventi e le
-notifiche/code associate: il riutilizzo degli ID SQLite non ricollega vecchi
-avvisi a nuove risorse. Anche gli eventi preesistenti vengono esclusi se la
-risorsa corrente e stata creata dopo l'evento.
+La cancellazione di un item elimina i suoi precedenti eventi e le relative
+notifiche/code, quindi registra un evento di eliminazione legato al contenitore,
+senza riutilizzare l'ID dell'item. Le notifiche di eliminazione rimangono
+disponibili anche se l'ID viene riutilizzato. La cancellazione del contenitore
+elimina tutti i suoi eventi e le notifiche/code associate. Gli eventi
+preesistenti vengono esclusi se la risorsa corrente e stata creata dopo l'evento.
 Aprire direttamente un inventario o una lista non segna le notifiche come lette.
 La freccia di una notifica non letta apre la risorsa e segna letta solo quella
 notifica; un errore resta visibile con la possibilità di riprovare. Il click su

@@ -26,7 +26,7 @@ from sqlalchemy.schema import CreateTable
 from backup_archive import create_backup_archive, read_backup_archive
 from dependencies import get_db
 from models import (
-    Base, DeviceSession, Inventory, Notification, NotificationEvent, NotificationPreference,
+    Base, DeviceSession, Inventory, Item, Notification, NotificationEvent, NotificationPreference,
     PushDelivery, PushSubscription, Role, SharedInventory, User,
 )
 from notification_contracts import InventoryUpdatedData
@@ -257,6 +257,36 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
     assert status[0]["status"] == "accepted"
     assert "read_at" not in status[0]
     assert setup.client.get("/notifications/push/deliveries", headers=setup.headers[3]).json() == []
+
+
+@pytest.mark.parametrize("revoke_access", [False, True])
+def test_deleted_item_push_respects_container_access(setup, revoke_access):
+    from notification_service import emit_item_deleted
+    subscribe(setup)
+    with setup.factory.begin() as db:
+        db.add(NotificationPreference(
+            user_id=2, event_type="item_updated", in_app_enabled=True, push_enabled=True,
+            data_ins=utcnow() - timedelta(minutes=1), data_mod=utcnow() - timedelta(minutes=1),
+        ))
+        item = Item(name="Deleted name", inventory_id=1, quantity=0)
+        db.add(item)
+        db.flush()
+        emit_item_deleted(db, item, actor_id=1)
+        db.delete(item)
+    assert process_claim(setup.factory, claim_event(setup.factory))
+    claim = push.claim_push(setup.factory)
+    assert claim is not None
+    if revoke_access:
+        with setup.factory.begin() as db:
+            db.query(SharedInventory).delete()
+    calls = []
+    assert push.process_push(setup.factory, claim, lambda *args: calls.append(args) or push.SendResult(201))
+    if revoke_access:
+        assert calls == []
+    else:
+        assert len(calls) == 1
+        assert calls[0][2]["body"] == "Deleted name · Elemento eliminato"
+        assert calls[0][2]["url"].startswith("/checklists/1?notification_event=")
 
 
 @pytest.mark.parametrize("change", [

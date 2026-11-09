@@ -51,6 +51,9 @@ def enqueue_event(
     if data.event_type == "item_updated" and payload.get("operation") is None:
         payload.pop("operation", None)
         payload.pop("quantity", None)
+    elif data.event_type == "item_updated" and payload.get("operation") == "deleted":
+        payload.pop("item_id", None)
+        payload.pop("quantity", None)
     key = str(uuid4()) if event_key is None else str(UUID(event_key))
     created = now or utcnow()
     record = NotificationEvent(

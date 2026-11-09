@@ -31,7 +31,8 @@ def event_inventory(db: Session, record: NotificationEvent) -> Inventory | None:
     inventory = db.get(Inventory, data.inventory_id)
     if inventory is not None and inventory.data_ins > record.created_at:
         return None
-    if inventory is not None and isinstance(data, (ItemQuantityChangedData, ItemUpdatedData)):
+    if (inventory is not None and isinstance(data, (ItemQuantityChangedData, ItemUpdatedData))
+            and not (isinstance(data, ItemUpdatedData) and data.operation == "deleted")):
         item = db.get(Item, data.item_id)
         if item is None or item.inventory_id != inventory.id or item.data_ins > record.created_at:
             return None
@@ -65,6 +66,13 @@ def emit_item_created(db: Session, item: Item, actor_id: int) -> None:
         inventory_id=item.inventory_id, item_id=item.id, changed_fields=["name"],
         operation="created", quantity=item.quantity,
         details={"name": item.name, "description": item.description},
+    ), actor_id=actor_id)
+
+
+def emit_item_deleted(db: Session, item: Item, actor_id: int) -> None:
+    enqueue_event(db, ItemUpdatedData(
+        inventory_id=item.inventory_id, changed_fields=["name"],
+        operation="deleted", details={"name": item.name},
     ), actor_id=actor_id)
 
 

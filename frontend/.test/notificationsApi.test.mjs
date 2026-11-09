@@ -41,6 +41,20 @@ test('creation notifications show the initial name and quantity or checklist sta
   assert.equal(notifications.notificationItemName({item_name: 'Current', event: {event_type: 'item_updated'}}), 'Current');
 });
 
+test('deleted notifications show the snapshot and open only their container', () => {
+  for (const [type, path] of [['INVENTORY', 'inventories'], ['CHECKLIST', 'checklists']]) {
+    const row = { id: 21, read_at: null, inventory_type: type, item_name: null, event: {
+      event_type: 'item_updated', inventory_id: 7, operation: 'deleted',
+      changed_fields: ['name'], details: { name: 'Deleted' },
+    }};
+    assert.equal(notifications.notificationAction(row), 'Elemento eliminato');
+    assert.equal(notifications.notificationItemName(row), 'Deleted');
+    assert.equal(notifications.notificationLink(row), `/${path}/7?notification_id=21`);
+    row.read_at = '2026-01-01';
+    assert.equal(notifications.notificationLink(row), `/${path}/7`);
+  }
+});
+
 test('item creation submits initial metadata in the same request', async () => {
   const oldAdapter = api.defaults.adapter;
   const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');

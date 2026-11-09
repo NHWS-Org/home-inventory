@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, select, update
 from models import User, Item, Inventory, ItemVersion, ItemBarcode
 from assignment_service import apply_check_change, build_assignment_summary, pending_assigned_by_source
-from notification_service import emit_item_change, emit_item_created, emit_item_updated, emit_removed_item_links, remove_resource_events
+from notification_service import emit_item_change, emit_item_created, emit_item_deleted, emit_item_updated, emit_removed_item_links, remove_resource_events
 from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 from dependencies import get_db
 from schemas import ItemCreate, ItemUpdate, ItemDelete, ItemMetadataValueResponse, ItemResponse, ItemVersionResponse, VersionBulkDeleteRequest, ItemBarcodeCreate, ItemBarcodeResponse
@@ -434,6 +434,7 @@ def delete_item(item_id: int, delete: ItemDelete, db: Session = Depends(get_db),
     item.inventory.user_mod = user.id
     emit_removed_item_links(db, [item.id], user.id)
     remove_resource_events(db, item_id=item.id)
+    emit_item_deleted(db, item, user.id)
     db.delete(item)
     db.commit()
     return {"detail": "Item eliminato"}

@@ -266,7 +266,10 @@ def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str
     data = event.payload
     item = db.get(Item, data["item_id"]) if "item_id" in data else None
     item_name = item.name if item is not None else None
-    if data["event_type"] == "item_updated" and data.get("operation") == "created":
+    if data["event_type"] == "item_updated" and data.get("operation") == "deleted":
+        item_name = data["details"]["name"]
+        action = "Elemento eliminato"
+    elif data["event_type"] == "item_updated" and data.get("operation") == "created":
         quantity = data["quantity"]
         item_name = data.get("details", {}).get("name", item_name)
         action = (

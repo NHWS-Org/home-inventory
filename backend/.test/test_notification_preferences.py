@@ -356,7 +356,8 @@ def test_deletion_removes_events_even_when_resource_id_reused_immediately(setup,
             db.add(Item(id=1, name="New item", inventory_id=1, quantity=0))
     assert client.get("/notifications").json() == []
     with factory() as db:
-        assert db.scalars(select(NotificationEvent)).all() == []
+        remaining = db.scalars(select(NotificationEvent)).all()
+        assert [row.payload.get("operation") for row in remaining] == (["deleted"] if resource == "item" else [])
 
 
 @pytest.mark.parametrize("route", ["inventory", "checklist"])
@@ -704,12 +705,82 @@ def test_assignment_cascade_notifies_surviving_items(setup, deleted):
     else:
         response = client.delete("/checklist/2" if deleted == "checklist" else "/inventory/1")
     assert response.status_code == 200, response.text
-    assert events(factory)[-1] == {
+    surviving = [row for row in events(factory) if row.get("operation") != "deleted"]
+    assert surviving[-1] == {
         "event_type": "item_updated",
         "item_id": 1 if deleted in ("list_item", "checklist") else 2,
         "inventory_id": 1 if deleted in ("list_item", "checklist") else 2,
         "changed_fields": ["assignments" if deleted in ("list_item", "checklist") else "assignment"],
     }
+
+
+@pytest.mark.parametrize("item_id,inventory_id,kind,name,path", [
+    (1, 1, "INVENTORY", "Rice", "inventories"),
+    (2, 2, "CHECKLIST", "A", "checklists"),
+])
+def test_deleted_item_notifies_and_opens_container_even_after_id_reuse(setup, item_id, inventory_id, kind, name, path):
+    from web_push import notification_push_payload
+    factory, client, current = setup
+    current[0] = 5
+    enable(client, "item_updated")
+    current[0] = 1
+    assert client.request("DELETE", f"/item/{item_id}", json={"confirm": True}).status_code == 200
+    with factory.begin() as db:
+        db.add(Item(id=item_id, name="Replacement", inventory_id=inventory_id, quantity=0))
+    settle(factory)
+    current[0] = 5
+    rows = client.get("/notifications").json()
+    assert len(rows) == 1
+    assert rows[0]["inventory_type"] == kind
+    assert rows[0]["item_name"] is None
+    assert rows[0]["event"]["operation"] == "deleted"
+    assert rows[0]["event"]["details"]["name"] == name
+    with factory() as db:
+        record = db.scalar(select(NotificationEvent))
+        payload = notification_push_payload(db, record)
+        assert payload["body"] == f"{name} · Elemento eliminato"
+        assert payload["url"] == f"/{path}/{inventory_id}"
+    assert client.put(f"/notifications/{rows[0]['id']}/read").status_code == 200
+    current[0] = 1
+    assert client.request("DELETE", f"/item/{item_id}", json={"confirm": True}).status_code == 200
+    settle(factory)
+    current[0] = 5
+    assert {row["event"]["details"]["name"] for row in client.get("/notifications").json()} == {name, "Replacement"}
+    with factory.begin() as db:
+        db.query(SharedInventory).filter_by(inventory_id=inventory_id, user_id=5).delete()
+    assert client.get("/notifications").json() == []
+
+
+def test_deleted_item_uses_opt_in_and_actor_preferences(setup):
+    factory, client, current = setup
+    assert client.request("DELETE", "/item/1", json={"confirm": True}).status_code == 200
+    settle(factory)
+    with factory() as db:
+        assert db.scalars(select(Notification)).all() == []
+    enable(client, "item_updated", include_own_actions=True)
+    assert client.request("DELETE", "/item/2", json={"confirm": True}).status_code == 200
+    settle(factory)
+    current[0] = 1
+    rows = client.get("/notifications").json()
+    assert len(rows) == 1
+    assert rows[0]["event"]["details"]["name"] == "A"
+
+
+def test_deleted_item_notification_removed_with_container(setup):
+    factory, client, current = setup
+    current[0] = 5
+    enable(client, "item_updated")
+    current[0] = 1
+    assert client.request("DELETE", "/item/1", json={"confirm": True}).status_code == 200
+    settle(factory)
+    current[0] = 5
+    assert len(client.get("/notifications").json()) == 1
+    current[0] = 1
+    assert client.delete("/inventory/1").status_code == 200
+    with factory() as db:
+        assert db.scalars(select(NotificationEvent)).all() == []
+    current[0] = 5
+    assert client.get("/notifications").json() == []
 
 
 def test_forward_migration_resets_old_choices_preserves_sessions_and_subscriptions():

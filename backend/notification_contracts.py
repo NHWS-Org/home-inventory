@@ -32,18 +32,23 @@ class ItemQuantityChangedData(EventData):
 
 class ItemUpdatedData(EventData):
     event_type: Literal["item_updated"] = "item_updated"
-    item_id: int = Field(gt=0)
+    item_id: int | None = Field(default=None, gt=0)
     changed_fields: list[str] = Field(min_length=1)
     details: dict[str, str | int | None] = Field(default_factory=dict)
-    operation: Literal["created"] | None = None
+    operation: Literal["created", "deleted"] | None = None
     quantity: int | None = None
 
     @model_validator(mode="after")
     def validate_creation_quantity(self) -> "ItemUpdatedData":
         if self.operation == "created" and self.quantity is None:
             raise ValueError("La quantità iniziale è obbligatoria")
-        if self.operation is None and self.quantity is not None:
+        if self.operation != "created" and self.quantity is not None:
             raise ValueError("La quantità iniziale richiede un evento di creazione")
+        if self.operation == "deleted":
+            if self.item_id is not None or not isinstance(self.details.get("name"), str):
+                raise ValueError("La cancellazione richiede il nome e non deve riferirsi all'ID dell'elemento")
+        elif self.item_id is None:
+            raise ValueError("L'ID dell'elemento è obbligatorio")
         return self
 
 
