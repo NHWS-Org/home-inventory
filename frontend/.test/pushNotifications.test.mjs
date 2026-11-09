@@ -165,6 +165,39 @@ test('permission prompt is called on the user action before service worker and A
   }
 });
 
+test('activation reports the failing step without exposing browser or server secrets', async () => {
+  for (const stage of ['configuration', 'worker', 'subscription', 'registration']) {
+    const harness = browserHarness({ permission: 'granted' });
+    const adapter = api.defaults.adapter;
+    try {
+      if (stage === 'configuration' || stage === 'registration') {
+        api.defaults.adapter = async config => {
+          if (stage === 'configuration' && config.url.endsWith('/config')
+            || stage === 'registration' && config.method === 'post') {
+            throw { isAxiosError: true, response: { status: 422, data: { detail: 'secret endpoint' } } };
+          }
+          return adapter(config);
+        };
+      } else if (stage === 'worker') {
+        navigator.serviceWorker.register = async () => { throw new Error('secret endpoint'); };
+      } else {
+        harness.registration.pushManager.subscribe = async () => { throw new Error('secret endpoint'); };
+      }
+      await assert.rejects(push.enablePushForBrowser('alice'), error => {
+        assert.ok(error instanceof push.PushActivationError);
+        assert.equal(error.stage, stage);
+        assert.equal(error.status, stage === 'configuration' || stage === 'registration' ? 422 : undefined);
+        const message = push.activationErrorMessage(error);
+        assert.doesNotMatch(message, /secret endpoint/);
+        if (error.status) assert.match(message, /HTTP 422/);
+        return true;
+      });
+    } finally {
+      harness.restore();
+    }
+  }
+});
+
 test('existing subscription is not re-prompted and an enabled browser can show a local test', async () => {
   const harness = browserHarness({ permission: 'granted' });
   try {

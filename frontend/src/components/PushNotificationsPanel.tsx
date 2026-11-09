@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FiBell, FiBellOff, FiRefreshCw } from "react-icons/fi";
-import axios from "axios";
 import {
   disablePushForBrowser,
   enablePushForBrowser,
   inspectPushBrowser,
+  activationErrorMessage,
+  PushActivationError,
   testPushOnBrowser,
   type PushBrowserState,
 } from "../utils/pushNotifications";
@@ -79,11 +80,13 @@ export default function PushNotificationsPanel({ state, setState }: {
         "unsupported", "insecure", "install-required", "ios-version-required",
       ].includes(error.message)) {
         setState(error.message as PushBrowserState);
-      } else if (axios.isAxiosError(error) && error.response?.status === 503) {
+      } else if (error instanceof PushActivationError && error.stage === "configuration" && error.status === 503) {
         setState("disabled");
       } else {
         setState("error");
-        setMessage("Attivazione non riuscita. Controlla la connessione e riprova.");
+        setMessage(error instanceof PushActivationError
+          ? activationErrorMessage(error)
+          : "Attivazione non riuscita. Controlla la connessione e riprova.");
       }
     } finally {
       busyRef.current = false;
@@ -128,7 +131,7 @@ export default function PushNotificationsPanel({ state, setState }: {
     }
   }
 
-  const canEnable = ["permission-required", "expired"].includes(state);
+  const canEnable = ["permission-required", "expired", "error"].includes(state);
   const canDisable = ["active", "denied", "expired"].includes(state)
     || state === "error" && cleanupFailed;
   const canTest = state === "active";

@@ -14,6 +14,7 @@ const server = await createServer({
 after(() => server.close());
 const { default: ProfilePage, PushStatusBadge, DeviceCountBadge } = await server.ssrLoadModule('/src/pages/ProfilePage.tsx');
 const { AuthContext } = await server.ssrLoadModule('/src/auth-context-instance.ts');
+const { default: PushNotificationsPanel } = await server.ssrLoadModule('/src/components/PushNotificationsPanel.tsx');
 
 function renderProfile(role) {
   return renderToStaticMarkup(createElement(
@@ -65,6 +66,16 @@ test('push badge distinguishes active, inactive, checking and error without rely
     assert.match(html, new RegExp(color));
     assert.match(html, /class="sr-only"/);
   }
+});
+
+test('push activation remains retryable after an error', () => {
+  const html = renderToStaticMarkup(createElement(
+    AuthContext.Provider,
+    { value: { user: { username: 'test' } } },
+    createElement(PushNotificationsPanel, { state: 'error', setState: () => {} }),
+  ));
+  assert.match(html, /Non è stato possibile verificare le notifiche/);
+  assert.match(html, /Attiva su questo browser/);
 });
 
 test('device badge communicates active session count and unavailable states', () => {

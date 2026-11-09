@@ -247,6 +247,9 @@ distinto, non un risultato negativo o un conteggio pari a zero.
 Se la disattivazione dal Profilo fallisce, l'associazione locale resta disponibile
 per riprovare la pulizia; in caso di sottoscrizione scaduta e possibile sia
 riattivarla sia disattivarla.
+In caso di errore di attivazione il pannello permette di riprovare e indica
+la fase fallita (configurazione, service worker, sottoscrizione browser o
+registrazione server) e l'eventuale codice HTTP, senza mostrare chiavi o endpoint.
 Con l'attivita dell'utente, il rinnovo della sessione sotto il 50% estende anche
 la sottoscrizione push confermata dal browser, rispettandone la scadenza nativa.
 Se la verifica fallisce, la sessione puo rinnovarsi ma il push no: un avviso

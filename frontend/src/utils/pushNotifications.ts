@@ -220,6 +220,37 @@ async function deleteKnownSubscription(subscriptionId: number): Promise<void> {
   }
 }
 
+export type PushActivationStage = "configuration" | "worker" | "subscription" | "registration";
+
+export class PushActivationError extends Error {
+  constructor(
+    public readonly stage: PushActivationStage,
+    public readonly status: number | undefined,
+    public readonly cause: unknown,
+  ) {
+    super(`Push activation failed: ${stage}`);
+    this.name = "PushActivationError";
+  }
+}
+
+export function activationErrorMessage(error: PushActivationError): string {
+  const stages = {
+    configuration: "configurazione Web Push",
+    worker: "registrazione del service worker",
+    subscription: "creazione o verifica della sottoscrizione nel browser",
+    registration: "registrazione della sottoscrizione sul server",
+  };
+  return `Attivazione non riuscita: ${stages[error.stage]}${error.status ? ` (HTTP ${error.status})` : ""}. Riprova.`;
+}
+
+async function activationStep<T>(stage: PushActivationStage, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw new PushActivationError(stage, axios.isAxiosError(error) ? error.response?.status : undefined, error);
+  }
+}
+
 export async function enablePushForBrowser(
   username: string,
   requestPermission: () => Promise<NotificationPermission> = () => Notification.requestPermission(),
@@ -235,12 +266,14 @@ export async function enablePushForBrowser(
   const permission = await permissionRequest;
   if (permission !== "granted") throw new Error("denied");
 
-  const configuration = await getPushConfiguration();
-  const decodedKey = decodeVapidPublicKey(configuration.public_key);
+  const { configuration, decodedKey } = await activationStep("configuration", async () => {
+    const configuration = await getPushConfiguration();
+    return { configuration, decodedKey: decodeVapidPublicKey(configuration.public_key) };
+  });
   const applicationServerKey = new Uint8Array(new ArrayBuffer(decodedKey.byteLength));
   applicationServerKey.set(decodedKey);
-  const registration = await navigator.serviceWorker.register("/push-sw.js", { scope: "/" });
-  let subscription = await registration.pushManager.getSubscription();
+  const registration = await activationStep("worker", () => navigator.serviceWorker.register("/push-sw.js", { scope: "/" }));
+  let subscription = await activationStep("subscription", () => registration.pushManager.getSubscription());
   const nativeKey = subscription?.options.applicationServerKey
     ? bytesToBase64Url(new Uint8Array(subscription.options.applicationServerKey))
     : null;
@@ -257,29 +290,30 @@ export async function enablePushForBrowser(
   );
   if (staleSubscription && storedOwner === username) {
     const storedId = localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username));
-    if (storedId) await deleteKnownSubscription(Number(storedId));
+    if (storedId) await activationStep("registration", () => deleteKnownSubscription(Number(storedId)));
   }
   if (subscription && staleSubscription) {
-    await subscription.unsubscribe();
+    const removed = await activationStep("subscription", () => subscription!.unsubscribe());
+    if (!removed) throw new PushActivationError("subscription", undefined, new Error("Unsubscribe failed"));
     subscription = null;
   }
   if (!subscription && storedOwner === username) {
     const storedId = localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username));
-    if (storedId && !staleSubscription) await deleteKnownSubscription(Number(storedId));
+    if (storedId && !staleSubscription) await activationStep("registration", () => deleteKnownSubscription(Number(storedId)));
   }
   if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
+    subscription = await activationStep("subscription", () => registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey,
-    });
+    }));
   }
 
   let savedId: number | null = null;
   try {
-    const saved = await savePushSubscription({
+    const saved = await activationStep("registration", () => savePushSubscription({
       ...subscription.toJSON(),
       expirationTime: subscription.expirationTime,
-    });
+    }));
     savedId = saved.id;
     localStorage.setItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username), String(saved.id));
     localStorage.setItem(subscriptionStorageKey(PUBLIC_KEY_PREFIX, username), configuration.public_key);
