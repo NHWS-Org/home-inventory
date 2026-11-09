@@ -4,6 +4,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom'
 import { Dialog } from '@headlessui/react'
 import GlobalBarcodeScan from '../components/GlobalBarcodeScan'
 import NotificationBell from '../components/NotificationBell'
+import { useUnreadNotifications } from '../components/useUnreadNotifications'
 import NotificationClickReader from '../components/NotificationClickReader'
 import { useAuth } from '../useAuth'
 import { getApiVersion } from '../api'
@@ -32,6 +33,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const auth = useAuth()
   const { logout } = auth
   const user = auth.user ?? null
+  const notificationStatus = useUnreadNotifications(user?.id ?? null)
   const isInventoryDetail = /^\/inventories\/[^/]+/.test(location.pathname)
   const isChecklistDetail = /^\/checklists\/[^/]+/.test(location.pathname)
   const isItemDetail = isInventoryDetail || isChecklistDetail
@@ -92,9 +94,6 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {user && <div className="fixed right-20 top-4 z-50 rounded bg-white text-gray-900 dark:bg-gray-900 dark:text-white md:hidden">
-        <NotificationBell key={user.id} />
-      </div>}
       <button
         type="button"
         onClick={() => setAccountOpen(true)}
@@ -204,7 +203,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             <FiInfo className="text-lg shrink-0" />
             <span>About</span>
           </NavLink>
-          {user && <NotificationBell key={user.id} />}
+          {user && <NotificationBell {...notificationStatus} variant="desktop" navItemClass={navItemClass} />}
         </nav>
 
         <div className="mt-6 border-t border-gray-600 pt-4">
@@ -239,24 +238,25 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       <GlobalBarcodeScan />
 
       <div aria-hidden="true" className={`pointer-events-none fixed inset-x-0 top-0 z-40 bg-white/95 backdrop-blur dark:bg-gray-900/95 md:hidden ${isItemDetail ? 'h-40' : 'h-16'}`} />
-      {mobileSectionTitle && <div className={`pointer-events-none fixed inset-x-0 top-4 z-[45] flex h-12 items-center justify-center pl-20 text-center ${location.pathname === '/notifications' ? 'text-base' : 'text-xl'} font-bold md:hidden ${user ? 'pr-40' : 'pr-20'}`}>{mobileSectionTitle}</div>}
+      {mobileSectionTitle && <div className={`pointer-events-none fixed inset-x-0 top-4 z-[45] flex h-12 items-center justify-center px-20 text-center ${location.pathname === '/notifications' ? 'text-base' : 'text-xl'} font-bold md:hidden`}>{mobileSectionTitle}</div>}
 
       <nav aria-label="Navigazione principale" className="fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-0.5 border-t border-gray-200 bg-white/95 px-1 pt-1 pb-[calc(env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 md:hidden">
         <NavLink to="/" end className={({ isActive }) => navItemClass(isActive)}>
-          <FiCompass className="text-xl" aria-hidden="true" /><span className="text-[11px] leading-tight">Home</span>
+          <FiCompass className="text-xl" aria-hidden="true" /><span className="flex h-4 items-center text-[11px] leading-tight">Home</span>
         </NavLink>
         {user?.username && <NavLink to="/inventories" className={({ isActive }) => navItemClass(isActive)}>
-          <FiBox className="text-xl" aria-hidden="true" /><span className="text-[11px] leading-tight">Inventari</span>
+          <FiBox className="text-xl" aria-hidden="true" /><span className="flex h-4 items-center text-[11px] leading-tight">Inventari</span>
         </NavLink>}
         {user?.username && <NavLink to="/checklists" className={({ isActive }) => navItemClass(isActive)}>
-          <FiCheckSquare className="text-xl" aria-hidden="true" /><span className="text-[11px] leading-tight">Liste</span>
+          <FiCheckSquare className="text-xl" aria-hidden="true" /><span className="flex h-4 items-center text-[11px] leading-tight">Liste</span>
         </NavLink>}
         {user?.username && user.role?.name === 'admin' && <NavLink to="/settings" className={({ isActive }) => navItemClass(isActive)}>
-          <FiSettings className="text-xl" aria-hidden="true" /><span className="break-words text-[11px] leading-tight">Impostazioni</span>
+          <FiSettings className="text-xl" aria-hidden="true" /><span className="flex h-4 items-center whitespace-nowrap text-[8px] leading-tight min-[375px]:text-[10px]">Impostazioni</span>
         </NavLink>}
         <NavLink to="/about" className={({ isActive }) => navItemClass(isActive)}>
-          <FiInfo className="text-xl" aria-hidden="true" /><span className="text-[11px] leading-tight">About</span>
+          <FiInfo className="text-xl" aria-hidden="true" /><span className="flex h-4 items-center text-[11px] leading-tight">About</span>
         </NavLink>
+        {user && <NotificationBell {...notificationStatus} variant="mobile" navItemClass={navItemClass} />}
       </nav>
 
       <Dialog open={accountOpen} onClose={closeAccount} className="relative z-[70] md:hidden">
