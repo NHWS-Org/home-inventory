@@ -195,6 +195,21 @@ test('browser state is active only when native subscription and authenticated se
   }
 });
 
+test('reset browser permission cannot leave the push status active', async () => {
+  const harness = browserHarness({ permission: 'granted' });
+  try {
+    await push.enablePushForBrowser('alice');
+    assert.equal((await push.inspectPushBrowser('alice')).state, 'active');
+    globalThis.Notification.permission = 'default';
+    assert.equal((await push.inspectPushBrowser('alice')).state, 'permission-required');
+    assert.equal(harness.storage.get('web_push_subscription_id:alice'), '41');
+    globalThis.Notification.permission = 'granted';
+    assert.equal((await push.inspectPushBrowser('alice')).state, 'active');
+  } finally {
+    harness.restore();
+  }
+});
+
 test('granted browser permission without an existing association is not a stale subscription', async () => {
   const harness = browserHarness({ permission: 'granted' });
   try {

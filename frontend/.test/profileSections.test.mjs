@@ -55,6 +55,7 @@ test('push badge distinguishes active, inactive, checking and error without rely
   for (const [state, label, color] of [
     ['active', 'Notifiche push attive su questo browser', 'text-green-700'],
     ['permission-required', 'Notifiche push non attive su questo browser', 'text-gray-500'],
+    ['denied', 'Notifiche push non attive su questo browser', 'text-gray-500'],
     ['expired', 'Notifiche push non attive su questo browser', 'text-gray-500'],
     ['checking', 'Verifica notifiche push in corso', 'text-gray-500'],
     ['error', 'Stato notifiche push non disponibile', 'text-amber-700'],

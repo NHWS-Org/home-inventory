@@ -239,6 +239,9 @@ esplicito, prima del lavoro asincrono. Logout/cambio account/revoche puliscono
 server e browser; un errore di cleanup viene segnalato e non blocca logout.
 La sezione collassata mostra lo stato push del browser corrente; il conteggio
 dispositivi indica le sessioni attive, escludendo quelle scadute e revocate.
+Il badge verde richiede anche il permesso del browser esplicitamente concesso;
+con permesso negato o non ancora concesso il badge non è attivo, anche se
+esiste ancora una sottoscrizione precedente da rimuovere o riattivare.
 Durante la verifica o in caso di errore gli indicatori mostrano uno stato
 distinto, non un risultato negativo o un conteggio pari a zero.
 Se la disattivazione dal Profilo fallisce, l'associazione locale resta disponibile

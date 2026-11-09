@@ -148,6 +148,7 @@ export async function inspectPushBrowser(username: string): Promise<{
   const availability = detectPushAvailability(currentEnvironment());
   if (availability !== "supported") return { state: availability };
   if (Notification.permission === "denied") return { state: "denied" };
+  if (Notification.permission !== "granted") return { state: "permission-required" };
 
   let configuration: PushConfiguration;
   try {
