@@ -623,7 +623,17 @@ def list_group_shares_base(
     if not can_access_inventory(user, inventory, action="edit"):
         raise HTTPException(status_code=403, detail="Accesso negato")
 
-    return [share.group.name for share in inventory.shared_with_groups]
+    # ⚡ Bolt optimization: Join Group and SharedInventoryGroup to query group names in a single query
+    # instead of iterating over shared_with_groups and lazy-loading Group models one by one (avoids N+1 queries).
+    # Impact: Reduces queries from O(G) to O(1) where G is the number of shared groups.
+    rows = (
+        db.query(Group.name)
+        .join(SharedInventoryGroup, SharedInventoryGroup.group_id == Group.id)
+        .filter(SharedInventoryGroup.inventory_id == inventory_id)
+        .order_by(SharedInventoryGroup.id)
+        .all()
+    )
+    return [name for (name,) in rows]
 
 #############################################################################
 # Elencare tutti gli utenti che hanno accesso a un inventario, con tipo di accesso e modalità
