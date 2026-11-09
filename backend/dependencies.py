@@ -70,11 +70,13 @@ def authenticated_user(db: Session, payload: dict) -> User | None:
     if result is None:
         return None
     user, cutoff = result
-    if cutoff is not None:
+    user_cutoff = user.auth_revoked_before
+    if cutoff is not None or user_cutoff is not None:
         issued_at = payload.get("iat")
         if (
             type(issued_at) not in (int, float)
-            or issued_at <= cutoff / 1_000_000
+            or cutoff is not None and issued_at <= cutoff / 1_000_000
+            or user_cutoff is not None and issued_at <= user_cutoff / 1_000_000
         ):
             raise HTTPException(status_code=401, detail="Sessione revocata")
     session_token_id = payload.get("jti")

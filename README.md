@@ -143,6 +143,29 @@ riavvio. Con chiave esplicita/file verificare il messaggio di configurazione,
 mai il suo valore. Provare una rotazione soltanto sull'installazione di test:
 il vecchio token deve dare 401 e un nuovo login deve riuscire.
 
+#### Recupero password da container
+
+Se non e disponibile un amministratore gia autenticato, dalla macchina che
+gestisce Compose eseguire sul **backend in esecuzione**:
+
+```sh
+docker compose exec backend python -m reset_password NOME_UTENTE
+```
+
+Con il compose di sviluppo usare
+`docker compose -f docker-compose-dev.yml exec backend python -m reset_password NOME_UTENTE`.
+Il comando richiede un terminale interattivo e chiede due volte la nuova
+password senza mostrarla: non inserirla nella riga di comando o in variabili
+d'ambiente. La password deve essere non vuota e non superare 72 byte UTF-8.
+L'operazione aggiorna l'hash e revoca tutte le sessioni e i token precedenti
+di quell'utente, inclusi quelli legacy senza sessione tracciata, nella stessa
+transazione. Gli altri utenti non sono coinvolti. I dispositivi dell'utente
+devono accedere nuovamente e riattivare il push; le preferenze restano salvate.
+L'accesso al container e privilegiato: riservarlo agli amministratori
+dell'installazione. Ricostruire il backend e applicare le migrazioni prima di
+usare il comando. Un ripristino di un vecchio backup puo ripristinare anche
+vecchie password e sessioni: ripetere il reset dopo il ripristino se necessario.
+
 #### Operazioni amministrative di sicurezza
 
 In **Impostazioni > Sicurezza**, solo gli amministratori possono:
@@ -438,6 +461,21 @@ across restarts and confirm login with the existing password. Confirm tokens
 survive restart with a stable key; after a deliberate test key rotation, old
 tokens must fail while a new login succeeds. See the [Italian configuration
 examples](#chiave-jwt-e-configurazione-privata) for Docker secrets.
+
+#### Password recovery from the container
+
+If no administrator is already signed in, run
+`docker compose exec backend python -m reset_password USERNAME` on the host.
+For the development compose, add `-f docker-compose-dev.yml` after `docker compose`.
+The command requires an interactive terminal and prompts twice without echoing
+the password; do not put it in command arguments or environment variables.
+Passwords must be nonempty and at most 72 UTF-8 bytes. The password update
+atomically revokes the user's sessions and older tokens, including untracked
+legacy tokens; other users are unaffected. The user must sign in and enable
+push again on each device. Notification preferences are retained. Container
+access is privileged and should be restricted to installation administrators.
+Rebuild the backend and apply migrations first. Restoring an older backup can
+restore old passwords and sessions; repeat the reset after restore if needed.
 
 **Settings > Sicurezza** provides two separate admin-only actions: revoke
 all sessions without changing the signing key, and rotate the automatically

@@ -82,6 +82,7 @@ class User(Base, LoggingData):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255), unique=True, index=True)
     hashed_password = Column(String(255))
+    auth_revoked_before = Column(BigInteger, nullable=True)
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
     is_blocked = Column(Boolean, default=False)
     email = Column(String(255), nullable=True)

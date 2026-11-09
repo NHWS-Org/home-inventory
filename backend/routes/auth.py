@@ -10,6 +10,7 @@ import re
 import uuid
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.security.utils import get_authorization_scheme_param
+from sqlalchemy import update
 from dependencies import get_db, get_current_user, authenticated_user, decode_access_token
 from crud import get_setting, set_setting, cleanup_ended_sessions
 from models import DeviceSession
@@ -135,14 +136,6 @@ def login(
     if db is None:  # ✅ Debug: Controlla se db è None
         raise HTTPException(status_code=500, detail="Errore interno: database non disponibile")
 
-    user = db.query(User).filter(User.username == form_data.username).first()
-
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenziali non valide")
-
-    if user.is_blocked:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Utente bloccato. Accesso negato.")
-    
     session_token_id = str(uuid.uuid4())
     user_agent = request.headers.get("user-agent", "")
     device_type, browser, operating_system = _device_details(user_agent)
@@ -150,6 +143,20 @@ def login(
     if not re.fullmatch(r"[A-Z]{2}", region):
         region = None
     with key_lock():
+        user = db.query(User).filter(User.username == form_data.username).with_for_update().first()
+        if not user or not verify_password(form_data.password, user.hashed_password):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenziali non valide")
+        if user.is_blocked:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Utente bloccato. Accesso negato.")
+        # Also acquire a write lock on SQLite, where SELECT FOR UPDATE has no effect.
+        locked = db.execute(update(User).where(
+            User.id == user.id,
+            User.hashed_password == user.hashed_password,
+            User.auth_revoked_before == user.auth_revoked_before,
+            User.is_blocked.is_(user.is_blocked),
+        ).values(hashed_password=User.hashed_password))
+        if locked.rowcount != 1:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenziali non valide")
         token, expire = _encode_access_token(
             {"sub": user.username, "jti": session_token_id}, ACCESS_TOKEN_EXPIRE_MINUTES,
         )
