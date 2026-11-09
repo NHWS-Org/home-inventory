@@ -2,7 +2,7 @@
 Route centralizzato per audit log e query storiche
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, desc, false, true, func
 from datetime import datetime, timezone
 from models import ItemVersion, InventoryVersion, User, Inventory
@@ -73,7 +73,16 @@ def get_item_audit_logs(
 
     # Permessi: solo admin vede tutto, altri vedono solo i loro inventari e quelli condivisi con loro
     if current_user.role.name != "admin":
-        all_inventories = db.query(Inventory).all()
+        # ⚡ Bolt optimization: Eager load shared_with_users and shared_with_groups to eliminate N+1 queries during access checks.
+        # Impact: Reduces queries from O(N) to O(1) for non-admin users viewing audit logs across N inventories.
+        all_inventories = (
+            db.query(Inventory)
+            .options(
+                joinedload(Inventory.shared_with_users),
+                joinedload(Inventory.shared_with_groups),
+            )
+            .all()
+        )
         ids = [
             inv.id for inv in all_inventories
             if can_access_inventory(current_user, inv, action="view")
@@ -180,7 +189,16 @@ def get_inventory_audit_logs(
 
     # Permessi: admin vede tutto; gli altri vedono gli inventari attivi accessibili o cancellati di cui sono owner
     if current_user.role.name != "admin":
-        all_inventories = db.query(Inventory).all()
+        # ⚡ Bolt optimization: Eager load shared_with_users and shared_with_groups to eliminate N+1 queries during access checks.
+        # Impact: Reduces queries from O(N) to O(1) for non-admin users viewing audit logs across N inventories.
+        all_inventories = (
+            db.query(Inventory)
+            .options(
+                joinedload(Inventory.shared_with_users),
+                joinedload(Inventory.shared_with_groups),
+            )
+            .all()
+        )
         accessible_ids = [
             inv.id for inv in all_inventories
             if can_access_inventory(current_user, inv, action="view")
