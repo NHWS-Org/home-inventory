@@ -1136,22 +1136,15 @@ def delete_item_metadata_value(
     return {"detail": "Valore metadato eliminato"}
 
 
-@router.put("/values/bulk-upsert", response_model=List[ItemMetadataValueResponse])
-def bulk_upsert_item_metadata_values(
-    payload: ItemMetadataBulkUpsertRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    item = _get_item_or_404(db, payload.item_id)
-    inventory = _get_inventory_or_404(db, item.inventory_id)
-    if not can_access_inventory(user, inventory, action="edit"):
-        raise HTTPException(status_code=403, detail="Accesso negato")
+def _upsert_metadata_values(
+    db: Session, item: Item, inventory: Inventory, user: User, values: list[ItemMetadataValueUpsert],
+) -> tuple[list[ItemMetadataValueResponse], list[dict[str, Any]]]:
     definitions = {
         cast(int, d.id): d for d in _resolve_applicable_definitions(db, inventory, include_inactive=True)
     }
     result: List[ItemMetadataValueResponse] = []
     metadata_changes: list[dict[str, Any]] = []
-    for entry in payload.values:
+    for entry in values:
         definition = definitions.get(entry.definition_id)
         if not definition:
             raise HTTPException(
@@ -1188,6 +1181,20 @@ def bulk_upsert_item_metadata_values(
                 "to": after_value,
             })
         result.append(_to_value_response(value, definition))
+    return result, metadata_changes
+
+
+@router.put("/values/bulk-upsert", response_model=List[ItemMetadataValueResponse])
+def bulk_upsert_item_metadata_values(
+    payload: ItemMetadataBulkUpsertRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = _get_item_or_404(db, payload.item_id)
+    inventory = _get_inventory_or_404(db, item.inventory_id)
+    if not can_access_inventory(user, inventory, action="edit"):
+        raise HTTPException(status_code=403, detail="Accesso negato")
+    result, metadata_changes = _upsert_metadata_values(db, item, inventory, user, payload.values)
     _touch_item_for_metadata_change(db, item, inventory, user, metadata_changes)
     db.commit()
     return result

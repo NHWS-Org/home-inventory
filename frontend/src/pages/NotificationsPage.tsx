@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { FiBox, FiCheckSquare, FiArrowRight, FiCheck } from "react-icons/fi";
 import {
   getInbox, markAllNotificationsRead, markNotificationRead, notificationAction, notificationDate,
-  notificationLink, notifyInboxChanged, type InboxNotification,
+  notificationItemName, notificationLink, notifyInboxChanged, type InboxNotification,
 } from "../notificationsApi";
 
 export function NotificationOpenLink({ row }: { row: InboxNotification }) {
@@ -72,7 +72,7 @@ export default function NotificationsPage() {
                 {row.inventory_type === "CHECKLIST" ? <FiCheckSquare className="shrink-0" aria-label="Lista" /> : <FiBox className="shrink-0" aria-label="Inventario" />}
                 <span className="break-words">{row.inventory_name}</span>
               </p>
-              <p title={notificationAction(row)} className="line-clamp-2 break-words text-sm [overflow-wrap:anywhere]">{row.item_name && <><span className="font-medium">{row.item_name}</span> · </>}{notificationAction(row)}</p>
+              <p title={notificationAction(row)} className="line-clamp-2 break-words text-sm [overflow-wrap:anywhere]">{notificationItemName(row) && <><span className="font-medium">{notificationItemName(row)}</span> · </>}{notificationAction(row)}</p>
               <p className="text-xs text-gray-600 dark:text-gray-400">
                 <time dateTime={row.action_at ?? row.created_at}>{notificationDate(row).toLocaleString([], { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time>
                 <span> · {row.read_at ? "Letta" : "Da leggere"}</span>

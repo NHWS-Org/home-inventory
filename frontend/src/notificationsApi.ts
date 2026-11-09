@@ -9,7 +9,7 @@ export interface NotificationPreference {
 }
 export type InboxEvent =
   | { event_type: "item_quantity_changed"; inventory_id: number; item_id: number; previous_quantity: number; quantity: number }
-  | { event_type: "item_updated"; inventory_id: number; item_id: number; changed_fields: string[]; details?: Record<string, string | number | null> }
+  | { event_type: "item_updated"; inventory_id: number; item_id: number; changed_fields: string[]; details?: Record<string, string | number | null> } & ({ operation: "created"; quantity: number } | { operation?: null; quantity?: null })
   | { event_type: "inventory_updated"; inventory_id: number; changed_fields: string[]; details?: Record<string, string | number | null> };
 export interface InboxNotification {
   id: number;
@@ -23,7 +23,7 @@ export interface InboxNotification {
 }
 export const notificationLabels: Record<NotificationEventType, string> = {
   item_quantity_changed: "Quantità / spunte",
-  item_updated: "Dettagli degli elementi",
+  item_updated: "Creazione e dettagli degli elementi",
   inventory_updated: "Inventari / liste",
 };
 export function notificationLink(row: InboxNotification): string {
@@ -33,6 +33,13 @@ export function notificationLink(row: InboxNotification): string {
 }
 export function notificationAction(row: InboxNotification): string {
   const event = row.event;
+  if (event.event_type === "item_updated" && event.operation === "created") {
+    const quantity = event.quantity;
+    const status = row.inventory_type === "CHECKLIST"
+      ? `Spunta: ${quantity >= 1 ? "completato" : "da completare"}`
+      : `Quantità: ${quantity}`;
+    return `Nuovo elemento · ${status}`;
+  }
   if (event.event_type === "item_quantity_changed") {
     if (row.inventory_type === "CHECKLIST") return event.quantity >= 1 ? "Spunta: completato" : "Spunta: da completare";
     const delta = event.quantity - event.previous_quantity;
@@ -47,6 +54,13 @@ export function notificationAction(row: InboxNotification): string {
     if (event.details && field in event.details) return `${label}: ${event.details[field] ?? "(vuoto)"}`;
     return `${label}: modificato`;
   }).join(" · ");
+}
+export function notificationItemName(row: InboxNotification): string | null {
+  const event = row.event;
+  if (event.event_type === "item_updated" && event.operation === "created" && typeof event.details?.name === "string") {
+    return event.details.name;
+  }
+  return row.item_name;
 }
 export function notificationDate(row: InboxNotification): Date {
   const value = row.action_at ?? row.created_at;

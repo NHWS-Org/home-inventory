@@ -22,6 +22,7 @@ import {
   ItemMetadataValue,
   ItemMetadataValueCreate,
   ItemMetadataValueUpdate,
+  ItemMetadataValueUpsert,
   ItemMetadataBulkUpsertRequest,
   TextMetadataFilterRequest,
   TextMetadataFilterResponse,
@@ -426,6 +427,7 @@ export async function createItem(data: {
   priority?: number;
   inventory_id: number;
   barcodes?: { code: string; format?: string | null }[];
+  metadata_values?: ItemMetadataValueUpsert[];
 }): Promise<InventoryItem> {
   const response = await api.post('/item/', data);
   return response.data as InventoryItem;

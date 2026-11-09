@@ -21,6 +21,7 @@ import { ITEMS_CHANGED_EVENT } from "../components/GlobalBarcodeScan";
 import ItemBarcodesEditor from "../components/ItemBarcodesEditor";
 import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
 import { AddFromInventoryDialog, AssignExistingListItemDialog, AssignToListDialog, EditAssignmentDialog, ListLinkField, SourceAssignmentsDialog } from "../components/AssignmentDialogs";
+import { isAxiosError } from "axios";
 
 interface Props {
   item: Item;
@@ -39,6 +40,16 @@ interface Props {
 }
 
 type MetadataDraftMap = Record<number, ItemMetadataValueUpsert>;
+
+async function createItemWithFeedback(data: Parameters<typeof createItem>[0]) {
+  try {
+    return await createItem(data);
+  } catch (error) {
+    const detail = isAxiosError<{ detail?: string }>(error) ? error.response?.data?.detail : undefined;
+    window.alert(typeof detail === "string" ? `Creazione non riuscita: ${detail}` : "Creazione non riuscita. Riprova.");
+    return null;
+  }
+}
 
 const ITEM_PRIORITY_OPTIONS = [
   { value: 2, label: "🔥🔥 Molto alta" },
@@ -1543,12 +1554,16 @@ useEffect(() => {
               onSubmit={async (e) => {
                 e.preventDefault();
                 if (!inventory) return;
-                const newItem = await createItem({
+                const metadataValues = metadataDefinitions
+                  .map((definition) => normalizeMetadataDraft(definition, newItemMetadataDrafts[definition.id]))
+                  .filter((value): value is ItemMetadataValueUpsert => value !== null);
+                const newItem = await createItemWithFeedback({
                   name: newItemName,
                   description: newItemDescription,
                   quantity: newItemQuantity,
                   priority: isChecklist ? newItemPriority : 0,
                   inventory_id: inventory.id,
+                  metadata_values: metadataValues,
                 });
                 if (newItem) {
                   if (isChecklist && newItemLink) {
@@ -1558,17 +1573,6 @@ useEffect(() => {
                       window.alert(err instanceof Error ? err.message : "Collegamento non riuscito");
                     }
                   }
-                  const metadataValues = metadataDefinitions
-                    .map((definition) => normalizeMetadataDraft(definition, newItemMetadataDrafts[definition.id]))
-                    .filter((value): value is ItemMetadataValueUpsert => value !== null);
-
-                  if (metadataValues.length > 0) {
-                    await bulkUpsertItemMetadataValues({
-                      item_id: newItem.id,
-                      values: metadataValues,
-                    });
-                  }
-
                   const getItems = isInventory ? getInventoryItems : getChecklistItems;
                   const refreshed = inventory && await getItems(inventory.id);
                   if (refreshed) setItems(refreshed);
@@ -1719,25 +1723,18 @@ useEffect(() => {
                 e.preventDefault();
                 if (isCloning) {
                   if (!inventory) return;
-                  const newItem = await createItem({
+                  const metadataValues = metadataDefinitions
+                    .map((definition) => normalizeMetadataDraft(definition, editingMetadataDrafts[definition.id]))
+                    .filter((value): value is ItemMetadataValueUpsert => value !== null);
+                  const newItem = await createItemWithFeedback({
                     name: itemBeingEdited.name,
                     description: itemBeingEdited.description ?? "",
                     quantity: itemBeingEdited.quantity,
                     priority: isChecklist ? itemBeingEdited.priority ?? 0 : 0,
                     inventory_id: inventory.id,
+                    metadata_values: metadataValues,
                   });
                   if (newItem) {
-                    const metadataValues = metadataDefinitions
-                      .map((definition) => normalizeMetadataDraft(definition, editingMetadataDrafts[definition.id]))
-                      .filter((value): value is ItemMetadataValueUpsert => value !== null);
-
-                    if (metadataValues.length > 0) {
-                      await bulkUpsertItemMetadataValues({
-                        item_id: newItem.id,
-                        values: metadataValues,
-                      });
-                    }
-
                     const getItems = isInventory ? getInventoryItems : getChecklistItems;
                     const refreshed = inventory && await getItems(inventory.id);
                     if (refreshed) setItems(refreshed);

@@ -35,6 +35,16 @@ class ItemUpdatedData(EventData):
     item_id: int = Field(gt=0)
     changed_fields: list[str] = Field(min_length=1)
     details: dict[str, str | int | None] = Field(default_factory=dict)
+    operation: Literal["created"] | None = None
+    quantity: int | None = None
+
+    @model_validator(mode="after")
+    def validate_creation_quantity(self) -> "ItemUpdatedData":
+        if self.operation == "created" and self.quantity is None:
+            raise ValueError("La quantità iniziale è obbligatoria")
+        if self.operation is None and self.quantity is not None:
+            raise ValueError("La quantità iniziale richiede un evento di creazione")
+        return self
 
 
 class InventoryUpdatedData(EventData):

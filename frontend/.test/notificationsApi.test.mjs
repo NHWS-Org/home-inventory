@@ -11,7 +11,7 @@ const server = await createServer({
 });
 after(() => server.close());
 const notifications = await server.ssrLoadModule('/src/notificationsApi.ts');
-const { api } = await server.ssrLoadModule('/src/api.ts');
+const { api, createItem } = await server.ssrLoadModule('/src/api.ts');
 const { NotificationOpenLink } = await server.ssrLoadModule('/src/pages/NotificationsPage.tsx');
 
 test('compact actions show signed deltas, checks, historical text and legacy labels', () => {
@@ -22,6 +22,45 @@ test('compact actions show signed deltas, checks, historical text and legacy lab
   assert.equal(notifications.notificationAction({event:{event_type:'item_updated',changed_fields:['barcodes']}}), 'Barcode: modificato');
   assert.equal(notifications.notificationDate({action_at:'2026-11-07T01:00:00+01:00'}).toISOString(), '2026-11-07T00:00:00.000Z');
   assert.equal(notifications.notificationDate({created_at:'2026-11-07T00:00:00'}).toISOString(), '2026-11-07T00:00:00.000Z');
+});
+
+test('creation notifications show the initial name and quantity or checklist status', () => {
+  for (const [type, quantity, expected] of [
+    ['INVENTORY', 0, 'Nuovo elemento · Quantità: 0'],
+    ['INVENTORY', 6, 'Nuovo elemento · Quantità: 6'],
+    ['CHECKLIST', 0, 'Nuovo elemento · Spunta: da completare'],
+    ['CHECKLIST', 1, 'Nuovo elemento · Spunta: completato'],
+  ]) {
+    const row = {inventory_type: type, item_name: 'Renamed', event: {
+      event_type: 'item_updated', operation: 'created', quantity, changed_fields: ['name'],
+      details: {name: 'Original'},
+    }};
+    assert.equal(notifications.notificationAction(row), expected);
+    assert.equal(notifications.notificationItemName(row), 'Original');
+  }
+  assert.equal(notifications.notificationItemName({item_name: 'Current', event: {event_type: 'item_updated'}}), 'Current');
+});
+
+test('item creation submits initial metadata in the same request', async () => {
+  const oldAdapter = api.defaults.adapter;
+  const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
+  const requests = [];
+  api.defaults.adapter = async config => {
+    requests.push(config);
+    return { config, data: { id: 1 }, status: 201, statusText: 'Created', headers: {} };
+  };
+  try {
+    const payload = {name: 'Item', quantity: 0, inventory_id: 1, metadata_values: [{definition_id: 2, value_text: 'Value'}]};
+    await createItem(payload);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, '/item/');
+    assert.deepEqual(JSON.parse(requests[0].data), payload);
+  } finally {
+    api.defaults.adapter = oldAdapter;
+    if (oldStorage) Object.defineProperty(globalThis, 'localStorage', oldStorage);
+    else delete globalThis.localStorage;
+  }
 });
 
 test('notification deep links use the authorized inventory type', () => {

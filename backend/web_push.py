@@ -265,7 +265,15 @@ def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str
         raise ValueError("Notification resource no longer exists")
     data = event.payload
     item = db.get(Item, data["item_id"]) if "item_id" in data else None
-    if data["event_type"] == "item_quantity_changed":
+    item_name = item.name if item is not None else None
+    if data["event_type"] == "item_updated" and data.get("operation") == "created":
+        quantity = data["quantity"]
+        item_name = data.get("details", {}).get("name", item_name)
+        action = (
+            f"Nuovo elemento · Spunta: {'completato' if quantity >= 1 else 'da completare'}"
+            if inventory.type == "CHECKLIST" else f"Nuovo elemento · Quantità: {quantity}"
+        )
+    elif data["event_type"] == "item_quantity_changed":
         if inventory.type == "CHECKLIST":
             action = "Spunta: completato" if data["quantity"] >= 1 else "Spunta: da completare"
         else:
@@ -290,7 +298,7 @@ def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str
     path = "checklists" if inventory.type == "CHECKLIST" else "inventories"
     return {
         "title": compact(f"{kind}: {inventory.name}", 80),
-        "body": compact(f"{item.name} · {action}" if item is not None else action, 500),
+        "body": compact(f"{item_name} · {action}" if item_name is not None else action, 500),
         "url": f"/{path}/{inventory.id}", "tag": event.event_key,
     }
 

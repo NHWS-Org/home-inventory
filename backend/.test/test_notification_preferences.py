@@ -463,16 +463,19 @@ def test_viewer_owner_still_cannot_receive_and_admin_global_semantics(setup):
         assert event_recipients(db, record) == {4, 5, 6}
 
 
-def test_creation_and_restore_are_not_update_events_and_item_rollback_is(setup):
+def test_creation_and_item_rollback_are_distinct_events(setup):
     factory, client, _ = setup
     response = client.post("/item/", json={"name": "New", "quantity": 1, "inventory_id": 1})
     assert response.status_code == 201
-    assert events(factory) == []
+    assert events(factory) == [{
+        "event_type": "item_updated", "inventory_id": 1, "item_id": response.json()["id"],
+        "changed_fields": ["name"], "operation": "created", "quantity": 1,
+    }]
     patch_item(client, 1, name="Changed", quantity=8)
     patch_item(client, 1, name="Again", quantity=9)
     response = client.post("/item/1/rollback/1")
     assert response.status_code == 200, response.text
-    assert len([row for row in events(factory) if row["event_type"] == "item_updated"]) == 3
+    assert len([row for row in events(factory) if row["event_type"] == "item_updated"]) == 4
     assert response.json()["name"] == "Changed"
     assert response.json()["quantity"] == 8
 
@@ -522,6 +525,96 @@ def create_metadata(client):
     })
     assert response.status_code == 201, response.text
     return definition_id, response.json()["id"]
+
+@pytest.mark.parametrize("inventory_id,quantity,expected", [
+    (1, 6, "Nuovo elemento · Quantità: 6"),
+    (2, 0, "Nuovo elemento · Spunta: da completare"),
+    (2, 1, "Nuovo elemento · Spunta: completato"),
+])
+def test_create_with_initial_metadata_emits_one_creation_event(setup, inventory_id, quantity, expected):
+    from web_push import notification_push_payload
+    factory, client, current = setup
+    current[0] = 4
+    definition_id, _ = create_metadata(client)
+    with factory.begin() as db:
+        db.query(NotificationEvent).delete()
+    current[0] = 5
+    enable(client, "item_updated")
+    current[0] = 1
+    response = client.post("/item/", json={
+        "name": "New", "description": "Original", "quantity": quantity,
+        "inventory_id": inventory_id,
+        "metadata_values": [{"definition_id": definition_id, "value_text": "Bevande"}],
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()["metadata_values"][0]["value_text"] == "Bevande"
+    with factory() as db:
+        version = db.scalar(select(ItemVersion).where(ItemVersion.item_id == response.json()["id"]))
+        assert version.operation == "CREATE"
+        assert '"value_text": "Bevande"' in version.diff
+    with factory.begin() as db:
+        db.get(Item, response.json()["id"]).name = "Renamed"
+    with factory() as db:
+        records = db.scalars(select(NotificationEvent)).all()
+        assert len(records) == 1
+        assert records[0].payload["operation"] == "created"
+        assert records[0].payload["quantity"] == quantity
+        assert records[0].payload["details"]["description"] == "Original"
+        assert notification_push_payload(db, records[0])["body"] == f"New · {expected}"
+    settle(factory)
+    current[0] = 5
+    inbox = client.get("/notifications").json()
+    assert len(inbox) == 1
+    assert inbox[0]["event"]["operation"] == "created"
+    assert inbox[0]["event"]["quantity"] == quantity
+    assert inbox[0]["event"]["details"]["name"] == "New"
+    assert inbox[0]["item_name"] == "Renamed"
+    current[0] = 1
+    assert client.get("/notifications").json() == []
+    response = client.put("/metadata/values/bulk-upsert", json={
+        "item_id": response.json()["id"],
+        "values": [{"definition_id": definition_id, "value_text": "Later"}],
+    })
+    assert response.status_code == 200, response.text
+    assert events(factory)[-1]["changed_fields"] == ["metadata"]
+    assert "operation" not in events(factory)[-1]
+
+
+def test_invalid_initial_metadata_rolls_back_item_and_notification(setup):
+    factory, client, current = setup
+    current[0] = 4
+    definition_id, _ = create_metadata(client)
+    with factory.begin() as db:
+        db.query(NotificationEvent).delete()
+    current[0] = 1
+    response = client.post("/item/", json={
+        "name": "Invalid", "quantity": 1, "inventory_id": 1,
+        "metadata_values": [
+            {"definition_id": definition_id, "value_text": "valid"},
+            {"definition_id": 999, "value_text": "x"},
+        ],
+    })
+    assert response.status_code == 400
+    with factory() as db:
+        assert db.scalar(select(Item).where(Item.name == "Invalid")) is None
+        assert db.scalars(select(NotificationEvent)).all() == []
+
+
+def test_creation_uses_existing_opt_in_preferences(setup):
+    factory, client, current = setup
+    response = client.post("/item/", json={"name": "New", "quantity": 0, "inventory_id": 1})
+    assert response.status_code == 201
+    settle(factory)
+    with factory() as db:
+        assert db.scalars(select(Notification)).all() == []
+    current[0] = 5
+    enable(client, "item_updated")
+    current[0] = 1
+    response = client.post("/item/", json={"name": "Next", "quantity": 0, "inventory_id": 1})
+    assert response.status_code == 201
+    settle(factory)
+    with factory() as db:
+        assert [row.user_id for row in db.scalars(select(Notification))] == [5]
 
 
 def test_metadata_value_all_mutations_and_shared_definition_changes(setup):

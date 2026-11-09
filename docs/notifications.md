@@ -24,7 +24,7 @@ preferenza o richiesta del consenso push per eventi che non possono ricevere.
 | Evento | Quando | Inbox predefinita |
 |---|---|---|
 | `item_quantity_changed` | Qualsiasi variazione di quantita o spunta di una singola riga | Attiva |
-| `item_updated` | Modifica effettiva di nome, descrizione, barcode, metadati o altri dettagli di un elemento | Disattiva |
+| `item_updated` | Creazione di un elemento o modifica effettiva di nome, descrizione, barcode, metadati o altri dettagli | Disattiva |
 | `inventory_updated` | Modifica effettiva del contenitore, attualmente il nome | Disattiva |
 
 I valori predefiniti valgono per utenti nuovi e per l'inizializzazione della
@@ -32,6 +32,13 @@ migrazione. Il push e sempre disattivato di default e richiede due consensi:
 preferenza personale per evento e attivazione esplicita del browser.
 Le azioni proprie sono escluse salvo scelta di **Mie azioni**.
 Inbox e push sono indipendenti.
+
+La preferenza **Creazione e dettagli degli elementi** include le nuove righe.
+La notifica indica il nome e la quantita iniziali, oppure lo stato iniziale
+della spunta per le liste; questi valori rimangono riferiti alla creazione
+anche se l'elemento viene successivamente modificato. I metadati inseriti
+durante la creazione sono salvati insieme alla riga, senza una seconda
+notifica di modifica; le successive modifiche ai metadati restano notificabili.
 
 La sezione e compatta: ogni tocco su Inbox, Push o Mie azioni salva
 automaticamente. Durante la richiesta i controlli sono disabilitati per evitare

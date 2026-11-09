@@ -60,6 +60,14 @@ def emit_item_updated(db: Session, item: Item, changed_fields: list[str], actor_
         ), actor_id=actor_id)
 
 
+def emit_item_created(db: Session, item: Item, actor_id: int) -> None:
+    enqueue_event(db, ItemUpdatedData(
+        inventory_id=item.inventory_id, item_id=item.id, changed_fields=["name"],
+        operation="created", quantity=item.quantity,
+        details={"name": item.name, "description": item.description},
+    ), actor_id=actor_id)
+
+
 def emit_inventory_updated(
     db: Session, inventory: Inventory, changed_fields: list[str], actor_id: int,
 ) -> None:

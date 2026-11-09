@@ -47,13 +47,17 @@ def enqueue_event(
 ) -> NotificationEvent:
     """Stage an event without flushing or committing the caller's transaction."""
     data = notification_event_adapter.validate_python(data)
+    payload = data.model_dump(mode="json")
+    if data.event_type == "item_updated" and payload.get("operation") is None:
+        payload.pop("operation", None)
+        payload.pop("quantity", None)
     key = str(uuid4()) if event_key is None else str(UUID(event_key))
     created = now or utcnow()
     record = NotificationEvent(
         event_key=key,
         schema_version=1,
         actor_id=actor_id,
-        payload=data.model_dump(mode="json"),
+        payload=payload,
         created_at=created,
         available_at=created,
         expires_at=created + timedelta(days=7),
