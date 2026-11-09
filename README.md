@@ -20,9 +20,90 @@ Per avviare il progetto con Docker, clona questo repository ed esegui:
 docker-compose up --build -d
 ```
 
-- API backend: <http://localhost:3000/api>
-- Frontend: <http://localhost:3000>
+- API backend: <https://localhost:3000/api>
+- Frontend: <https://localhost:3000>
 - Credenziali predefinite: `admin` / `12345`
+
+### HTTPS e certificati frontend
+
+Nginx espone solo HTTPS: il passaggio da HTTP cambia l'URL e il vecchio
+`http://localhost:3000` non funziona più. Entrambi i Compose pubblicano la porta
+container 443 sulla porta host 3000, modificabile con `FRONTEND_PORT`. Aggiornare
+eventuali reverse proxy che prima collegavano il container sulla porta 80;
+la connessione verso il backend nella rete Docker resta HTTP.
+HTTP e HTTPS sono origini browser diverse: occorre accedere nuovamente e
+riattivare le notifiche push su ciascun dispositivo dopo il passaggio a HTTPS.
+
+Di default viene creata una **CA privata locale**, persistita nel volume Docker
+`frontendtls`, che firma un certificato server valido per `localhost`,
+`127.0.0.1` e `::1`. Per accedere da altri dispositivi impostare nel `.env`
+privato root o nella shell, prima di creare il container:
+
+```dotenv
+TLS_HOSTS=192.168.1.10,inventario.example.com
+FRONTEND_PORT=3000
+```
+
+Indicare gli IP e/o nomi DNS effettivamente usati dai browser, separati da
+virgole, senza schema o porta. Il nome deve risolvere verso il server e l'IP
+deve restare stabile; per un IPv6 nell'URL usare le parentesi, ad esempio
+`https://[::1]:3000`. Un certificato per un nome non copre automaticamente
+l'IP o altri nomi. Ricreare il frontend dopo una modifica a `TLS_HOSTS`: la
+CA rimane uguale e il certificato server viene rigenerato. La CA dura 10 anni;
+il certificato server dura 365 giorni e viene rinnovato automaticamente a
+meno di 30 giorni dalla scadenza, con controllo ogni 12 ore e riavvio a caldo
+di Nginx. Un container fermo rinnova al successivo avvio. Se il rinnovo fallisce
+il messaggio compare nei log e viene riprovato. Una CA prossima alla scadenza
+richiede sostituzione manuale e nuova installazione della fiducia.
+
+**La CA locale non è attendibile automaticamente**: senza installarla e
+abilitarne esplicitamente la fiducia su ogni dispositivo, il browser mostrerà
+un avviso e le funzioni che richiedono un contesto sicuro, come Web Push,
+potrebbero non funzionare. Esportare solo il certificato pubblico:
+
+```bash
+docker cp inventory-frontend:/var/lib/frontend-tls/ca/cert.pem ./home-inventory-ca.crt
+openssl x509 -in ./home-inventory-ca.crt -noout -fingerprint -sha256
+```
+
+Trasferirlo mediante un canale fidato e verificare l'impronta prima di
+installarlo come CA attendibile. Su iOS/iPadOS occorre installare il profilo e
+abilitare esplicitamente la fiducia completa nelle impostazioni certificati.
+Non distribuire **mai** la chiave privata della CA: chi la possiede può
+impersonare siti sui dispositivi che la considerano attendibile. Proteggere e
+salvare separatamente il volume `frontendtls` (contiene chiavi private);
+`docker compose down -v` lo elimina. La perdita o sostituzione della CA richiede
+di ristabilire la fiducia su ogni dispositivo. Non condividere il volume tra
+istanze frontend contemporanee.
+
+Per usare invece un certificato proprio, impostare entrambi i percorsi
+**all'interno del container** tramite `TLS_CERT_FILE` e `TLS_KEY_FILE` e montare
+file leggibili in sola lettura, usando percorsi assoluti. Ad esempio, in un override Compose privato:
+
+```yaml
+services:
+  frontend:
+    environment:
+      TLS_CERT_FILE: /run/custom-tls/fullchain.pem
+      TLS_KEY_FILE: /run/custom-tls/privkey.pem
+    volumes:
+      - /percorso/privato/certificati:/run/custom-tls:ro
+```
+
+Il certificato deve includere la catena necessaria e corrispondere al nome
+usato; coppie mancanti, non corrispondenti o scadute bloccano l'avvio. Il
+rinnovo dei certificati esterni spetta al loro gestore: dopo la sostituzione
+ricreare o riavviare il frontend per validare e ricaricare la coppia. Non
+inserire chiavi o certificati privati nel repository o nelle variabili env.
+
+Questa modalità automatica **non usa Let's Encrypt** e non dà fiducia pubblica,
+anche se `TLS_HOSTS` contiene un dominio pubblico. Per un certificato
+pubblicamente attendibile usare una coppia fornita da una CA o un reverse
+proxy HTTPS esterno con ACME. Let's Encrypt supporta anche IP pubblici
+verificabili, ma non IP privati/localhost; HTTP-01 richiede la porta pubblica
+80. Un dominio pubblico con DNS corretto è normalmente la scelta più pratica.
+La configurazione del proxy, la validazione ACME e i relativi rinnovi sono
+responsabilità del gestore esterno.
 
 ### Database e backup
 
@@ -394,9 +475,49 @@ To run this project with Docker, clone this repository and run:
 docker-compose up --build -d
 ```
 
-- Backend API: <http://localhost:3000/api>
-- Frontend: <http://localhost:3000>
+- Backend API: <https://localhost:3000/api>
+- Frontend: <https://localhost:3000>
 - Default credentials: `admin` / `12345`
+
+### Frontend HTTPS
+
+The frontend now serves HTTPS only on container port 443, published as host
+port 3000 (override with `FRONTEND_PORT`). Old HTTP URLs and reverse proxies
+targeting container port 80 must be updated. Traffic from nginx to the backend
+within Docker remains HTTP. HTTP and HTTPS are different browser origins:
+users must log in again and re-enable push notifications on each device.
+
+By default a persistent local CA in Docker volume `frontendtls` signs a
+365-day server certificate for localhost, 127.0.0.1 and ::1. Add the actual
+client-facing IP addresses and/or DNS names as a comma-separated `TLS_HOSTS`
+in the private root `.env` or shell (for example
+`TLS_HOSTS=192.168.1.10,inventory.example.com`), then recreate the frontend.
+The DNS name must resolve to the server. Server certificates are checked every
+12 hours, renewed within 30 days of expiry and reloaded in nginx; renewal also
+occurs on startup. The local CA lasts 10 years and must be replaced manually
+before expiry, requiring trust to be re-established on every device.
+
+The local CA is **not publicly trusted**. Export only its public certificate
+with `docker cp inventory-frontend:/var/lib/frontend-tls/ca/cert.pem ./home-inventory-ca.crt`,
+verify its SHA-256 fingerprint and install/trust it securely on each client.
+On iOS/iPadOS the installed certificate profile also requires full trust in
+certificate settings. Without trust, browsers warn and secure-context features
+such as Web Push may not work. Protect and back up the volume separately: it
+contains the CA private key, whose compromise allows impersonation of sites
+to devices trusting that CA. Never distribute the private key. `docker compose
+down -v` removes the volume; do not share it between concurrent frontend
+instances.
+
+Alternatively mount a certificate chain and matching private key read-only and
+set `TLS_CERT_FILE` and `TLS_KEY_FILE` to their paths inside the container.
+Both paths must be absolute.
+See the [Compose example](#https-e-certificati-frontend). Invalid or expired
+provided certificates fail startup. External certificate renewal is managed
+outside the app; restart/recreate the frontend to validate and reload them.
+Automatic local certificates are not Let's Encrypt certificates, even for
+public domain names. For public trust, provide a CA-issued certificate or use
+an external ACME reverse proxy. Let's Encrypt supports verifiable public IPs,
+but not private IPs or localhost; HTTP-01 requires public port 80.
 
 ### Database and backups
 

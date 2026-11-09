@@ -90,11 +90,17 @@ services:
     environment:
       <<: *common-environment
       BACKEND_BASE_URL: http://backend:8000
+      TLS_HOSTS: ${TLS_HOSTS:-}
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-}
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:443"
+    volumes:
+      - frontendtls:/var/lib/frontend-tls
     depends_on:
       - backend
     restart: always
 
 volumes:
   mysqldata:
+  frontendtls:

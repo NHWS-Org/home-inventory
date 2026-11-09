@@ -16,7 +16,7 @@ LABEL org.opencontainers.image.source="https://github.com/NHWS-Org/home-inventor
 
 # Install required tools
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash curl gettext-base imagemagick librsvg2-bin fonts-dejavu-core \
+  && apt-get install -y --no-install-recommends bash curl gettext-base imagemagick librsvg2-bin fonts-dejavu-core openssl \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy built frontend files
@@ -32,14 +32,15 @@ COPY nginx.conf.template /etc/nginx/nginx.conf.template
 
 # Copy and prepare entrypoint
 COPY entrypoint.sh /entrypoint.sh
+COPY tls.sh /tls.sh
 COPY apply-env-icons.sh /apply-env-icons.sh
-RUN chmod +x /entrypoint.sh /apply-env-icons.sh
+RUN chmod +x /entrypoint.sh /tls.sh /apply-env-icons.sh
 
-EXPOSE 80
+EXPOSE 443
 
 ENV BACKEND_BASE_URL=http://localhost:8000
 
 ENTRYPOINT ["/entrypoint.sh"]
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
-  CMD curl -fsS -o /dev/null http://localhost/health-check || exit 1
+  CMD curl -kfsS -o /dev/null https://localhost/health-check || exit 1

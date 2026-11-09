@@ -1,4 +1,5 @@
 #!/bin/sh
+set -e
 
 #echo "Generating config.json..."
 #cat <<EOF > /usr/share/nginx/html/config.json
@@ -25,7 +26,20 @@ if [ -n "${APP_ENV_LABEL}" ]; then
 fi
 
 echo "Configuring nginx proxy..."
+/tls.sh
 # Usa envsubst per sostituire BACKEND_BASE_URL nel file di template
 envsubst '${BACKEND_BASE_URL}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+
+if [ -z "${TLS_CERT_FILE:-}" ] && [ -z "${TLS_KEY_FILE:-}" ]; then
+  (
+    while sleep 43200; do
+      if /tls.sh; then
+        nginx -t && nginx -s reload || echo "TLS: nginx reload failed; retrying in 12 hours" >&2
+      else
+        echo "TLS: renewal failed; retrying in 12 hours" >&2
+      fi
+    done
+  ) &
+fi
 
 exec nginx -g "daemon off;"

@@ -93,10 +93,15 @@ services:
     environment:
       BACKEND_BASE_URL: http://backend:8000
       APP_ENV_LABEL: LOCAL
+      TLS_HOSTS: ${TLS_HOSTS:-}
+      TLS_CERT_FILE: ${TLS_CERT_FILE:-}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:-}
     env_file:
       - .env.dev
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:443"
+    volumes:
+      - frontendtls:/var/lib/frontend-tls
     depends_on:
       - backend
 
@@ -104,3 +109,4 @@ volumes:
   backenddata:
   pgdata:
   mysqldata:
+  frontendtls:
