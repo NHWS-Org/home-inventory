@@ -6,6 +6,11 @@ import {
   notificationLink, notifyInboxChanged, type InboxNotification,
 } from "../notificationsApi";
 
+export function NotificationOpenLink({ row }: { row: InboxNotification }) {
+  const kind = row.inventory_type === "CHECKLIST" ? "lista" : "inventario";
+  return <Link to={notificationLink(row)} aria-label={`Apri ${kind} ${row.inventory_name}`} title={`Apri ${kind}`} className="inline-flex h-11 w-11 items-center justify-center rounded border text-blue-700 dark:text-blue-300"><FiArrowRight aria-hidden="true" /></Link>;
+}
+
 export default function NotificationsPage() {
   const [rows, setRows] = useState<InboxNotification[]>([]);
   const [offset, setOffset] = useState(0);
@@ -74,7 +79,7 @@ export default function NotificationsPage() {
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              <Link to={notificationLink(row)} aria-label={`Apri ${row.inventory_type === "CHECKLIST" ? "lista" : "inventario"} ${row.inventory_name}`} title={row.inventory_type === "CHECKLIST" ? "Apri lista" : "Apri inventario"} className="inline-flex h-11 w-11 items-center justify-center rounded border text-blue-700 dark:text-blue-300"><FiArrowRight aria-hidden="true" /></Link>
+              <NotificationOpenLink row={row} />
               <button disabled={busy || !!row.read_at} aria-label={row.read_at ? "Già letta" : "Segna come letta"} title={row.read_at ? "Già letta" : "Segna come letta"} onClick={() => void read(row.id)} className={`inline-flex h-11 w-11 items-center justify-center rounded border ${row.read_at ? "cursor-default border-gray-300 bg-gray-100 text-gray-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-500" : ""}`}><FiCheck aria-hidden="true" /></button>
             </div>
           </li>

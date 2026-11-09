@@ -28,7 +28,8 @@ export const notificationLabels: Record<NotificationEventType, string> = {
 };
 export function notificationLink(row: InboxNotification): string {
   const path = row.inventory_type === "CHECKLIST" ? "checklists" : "inventories";
-  return `/${path}/${row.event.inventory_id}`;
+  const target = `/${path}/${row.event.inventory_id}`;
+  return row.read_at ? target : `${target}?notification_id=${row.id}`;
 }
 export function notificationAction(row: InboxNotification): string {
   const event = row.event;
@@ -62,6 +63,23 @@ export async function markNotificationRead(id: number): Promise<void> {
 }
 export async function markNotificationEventRead(eventKey: string): Promise<void> {
   await api.put(`/notifications/events/${encodeURIComponent(eventKey)}/read`);
+}
+export async function markOpenedNotificationRead(search: string): Promise<boolean> {
+  const params = new URLSearchParams(search);
+  const eventKey = params.get("notification_event");
+  const id = params.get("notification_id");
+  if (eventKey !== null && id !== null) throw new Error("Ambiguous notification link");
+  if (id !== null) {
+    if (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error("Invalid notification id");
+    await markNotificationRead(Number(id));
+  } else if (eventKey !== null) {
+    if (!eventKey) throw new Error("Invalid notification event");
+    await markNotificationEventRead(eventKey);
+  } else {
+    return false;
+  }
+  notifyInboxChanged();
+  return true;
 }
 export async function markAllNotificationsRead(): Promise<void> {
   await api.put("/notifications/read-all");

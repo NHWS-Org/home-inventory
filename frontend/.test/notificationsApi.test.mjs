@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
 import { createServer } from 'vite';
 
 const server = await createServer({
@@ -9,6 +12,7 @@ const server = await createServer({
 after(() => server.close());
 const notifications = await server.ssrLoadModule('/src/notificationsApi.ts');
 const { api } = await server.ssrLoadModule('/src/api.ts');
+const { NotificationOpenLink } = await server.ssrLoadModule('/src/pages/NotificationsPage.tsx');
 
 test('compact actions show signed deltas, checks, historical text and legacy labels', () => {
   assert.equal(notifications.notificationAction({inventory_type:'INVENTORY', event:{event_type:'item_quantity_changed', previous_quantity:2,quantity:3}}), 'Quantità: +1');
@@ -21,8 +25,54 @@ test('compact actions show signed deltas, checks, historical text and legacy lab
 });
 
 test('notification deep links use the authorized inventory type', () => {
-  assert.equal(notifications.notificationLink({ inventory_type: 'CHECKLIST', event: { inventory_id: 7 } }), '/checklists/7');
-  assert.equal(notifications.notificationLink({ inventory_type: 'INVENTORY', event: { inventory_id: 8 } }), '/inventories/8');
+  assert.equal(notifications.notificationLink({ id: 12, read_at: null, inventory_type: 'CHECKLIST', event: { inventory_id: 7 } }), '/checklists/7?notification_id=12');
+  assert.equal(notifications.notificationLink({ id: 13, read_at: null, inventory_type: 'INVENTORY', event: { inventory_id: 8 } }), '/inventories/8?notification_id=13');
+  assert.equal(notifications.notificationLink({ id: 13, read_at: '2026-01-01', inventory_type: 'INVENTORY', event: { inventory_id: 8 } }), '/inventories/8');
+});
+
+test('notification arrow links carry the correct unread id, including for new tabs', () => {
+  for (const [type, name, path] of [['INVENTORY', 'Dispensa', 'inventories'], ['CHECKLIST', 'Spesa', 'checklists']]) {
+    const render = read_at => renderToStaticMarkup(createElement(MemoryRouter, null,
+      createElement(NotificationOpenLink, { row: { id: 21, read_at, inventory_type: type, inventory_name: name, event: { inventory_id: 7 } } }),
+    ));
+    assert.match(render(null), new RegExp(`href="/${path}/7\\?notification_id=21"`));
+    assert.match(render('2026-01-01'), new RegExp(`href="/${path}/7"`));
+    assert.match(render(null), new RegExp(`aria-label="Apri (lista|inventario) ${name}"`));
+  }
+});
+
+test('opening a notification marks only its own row or push event and reports failures', async () => {
+  const oldAdapter = api.defaults.adapter;
+  const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const oldWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const requests = [], events = [];
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dispatchEvent: event => events.push(event.type) } });
+  api.defaults.adapter = async config => {
+    requests.push(config);
+    return { config, data: {}, status: 200, statusText: 'OK', headers: {} };
+  };
+  try {
+    assert.equal(await notifications.markOpenedNotificationRead('?notification_id=12'), true);
+    assert.equal(await notifications.markOpenedNotificationRead('?notification_event=event-key'), true);
+    assert.equal(await notifications.markOpenedNotificationRead('?other=1'), false);
+    assert.deepEqual(requests.map(r => [r.method, r.url]), [
+      ['put', '/notifications/12/read'], ['put', '/notifications/events/event-key/read'],
+    ]);
+    assert.deepEqual(events, [notifications.NOTIFICATIONS_CHANGED, notifications.NOTIFICATIONS_CHANGED]);
+    for (const search of ['?notification_id=0', '?notification_id=abc', '?notification_id=99999999999999999999', '?notification_event=', '?notification_id=12&notification_event=abc']) {
+      await assert.rejects(notifications.markOpenedNotificationRead(search));
+    }
+    api.defaults.adapter = async () => { throw new Error('access revoked'); };
+    await assert.rejects(notifications.markOpenedNotificationRead('?notification_id=12'), /access revoked/);
+    assert.equal(events.length, 2);
+  } finally {
+    api.defaults.adapter = oldAdapter;
+    if (oldStorage) Object.defineProperty(globalThis, 'localStorage', oldStorage);
+    else delete globalThis.localStorage;
+    if (oldWindow) Object.defineProperty(globalThis, 'window', oldWindow);
+    else delete globalThis.window;
+  }
 });
 
 test('inbox client preserves pagination and sends scoped read requests', async () => {

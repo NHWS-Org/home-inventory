@@ -73,8 +73,10 @@ La cancellazione di un inventario/lista o item elimina i relativi eventi e le
 notifiche/code associate: il riutilizzo degli ID SQLite non ricollega vecchi
 avvisi a nuove risorse. Anche gli eventi preesistenti vengono esclusi se la
 risorsa corrente e stata creata dopo l'evento.
-Aprire un contenitore non segna automaticamente la notifica come letta.
-Il click su un banner push, invece, apre la risorsa con l'UUID evento nel link:
+Aprire direttamente un inventario o una lista non segna le notifiche come lette.
+La freccia di una notifica non letta apre la risorsa e segna letta solo quella
+notifica; un errore resta visibile con la possibilità di riprovare. Il click su
+un banner push apre invece la risorsa con l'UUID evento nel link:
 dopo autenticazione l'app segna come letta solo la notifica di quell'evento
 appartenente all'utente corrente e aggiorna la campanella. Il parametro viene
 rimosso dopo il successo; login conserva la destinazione. Account diverso,
