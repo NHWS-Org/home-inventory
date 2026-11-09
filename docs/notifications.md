@@ -73,7 +73,19 @@ La voce è nella sidebar desktop e nella barra di navigazione inferiore mobile;
 il badge mostra solo i conteggi positivi (massimo visibile 99+), mai zero.
 Su mobile il titolo Centro notifiche compare nel header comune alle altre pagine.
 La inbox elenca 50 righe per volta con Carica altre, Aggiorna, lettura singola
-e Segna tutte come lette. La lettura globale riguarda tutte le pagine.
+e Segna tutte come lette. Le checkbox consentono di selezionare singole righe,
+tutte le righe visibili oppure tutte le notifiche, anche non ancora caricate.
+Le selezionate si possono segnare come lette o eliminare definitivamente,
+con conferma prima della cancellazione. Ogni riga ha anche un cestino.
+La lettura e cancellazione globali riguardano tutte le pagine autorizzate.
+L'eliminazione rimuove fisicamente solo le righe inbox dell'utente corrente:
+non cancella gli eventi condivisi, le notifiche degli altri o i banner gia
+consegnati dal sistema. Inbox e push restano indipendenti. Il worker completa
+evento e creazione delle righe in una sola transazione: non riproduce gli
+eventi completati dopo l'eliminazione di una riga.
+Se una selezione esplicita contiene una notifica inesistente, di un altro
+utente o non piu accessibile, l'intera operazione viene rifiutata senza
+modifiche parziali e l'interfaccia invita ad aggiornare l'elenco.
 L'ordine e decrescente per data/ora dell'azione (ID come spareggio), non per
 ordine di consegna del worker, e viene applicato prima della paginazione.
 
@@ -99,7 +111,7 @@ Con solo push e inbox disattivata non c'e una riga inbox da segnare come letta.
 Lo stato letto riguarda la inbox, non certifica consegna o visualizzazione push.
 Le righe compatte mostrano icona inventario/lista, nome, elemento e azione
 (quantita con delta firmato, spunta, titolo/descrizione aggiornati), data/ora
-dell'azione e pulsanti a destra per aprire inventario/lista o segnare letto.
+dell'azione e pulsanti a destra per aprire inventario/lista, segnare letto o eliminare.
 Il pulsante di lettura resta visibile dopo la lettura, grigio e disabilitato
 con etichetta "Gia letta", mantenendo stabile il layout delle azioni.
 Titolo e descrizione sono salvati nell'evento, non ricavati dal valore corrente:
@@ -119,6 +131,8 @@ Tutti gli endpoint sono autenticati e limitati all'utente del token:
 | PUT | `/notifications/{id}/read` | Lettura singola |
 | PUT | `/notifications/events/{event_key}/read` | Lettura dell'evento del banner, solo propria inbox |
 | PUT | `/notifications/read-all` | `{updated}`, tutte le pagine autorizzate |
+| POST | `/notifications/bulk` | `{action: "read" \| "delete", ids: [...]}` oppure `{action: ..., all: true}`; restituisce `{updated}` |
+| DELETE | `/notifications/{id}` | Elimina definitivamente la propria riga inbox |
 | GET | `/notifications/preferences` | Preferenze personali dei tre eventi |
 | PUT | `/notifications/preferences/{event_type}` | Canali e azioni proprie |
 
@@ -213,11 +227,31 @@ Host consentiti: `fcm.googleapis.com`, `updates.push.services.mozilla.com`,
 `web.push.apple.com`. Solo HTTPS, IP pubblici validati e DNS pinning; niente
 redirect, host arbitrari o proxy ambientali.
 
-I banner desktop/mobile mostrano tipo e nome inventario/lista nel titolo,
+I banner desktop/mobile mostrano il nome inventario/lista con `📦` o `☑` nel titolo,
 nome item e modifica nel testo (delta quantita, spunta, titolo/descrizione,
 categorie barcode/metadati). Il click apre direttamente inventario/lista,
-con normale verifica login/accessi. Titolo massimo 80 caratteri e testo 500,
+con normale verifica login/accessi. Titolo massimo 40 caratteri e testo 500,
 con ellissi per valori lunghi; l'OS puo troncare ulteriormente le anteprime.
+Il titolo e generato dall'app usando il nome del contenitore: non viene
+aggiunto un suffisso con il dispositivo. Eventuali nomi dispositivo presenti
+nel nome del contenitore restano parte del titolo; intestazioni e ritorni
+a capo aggiunti da iOS/Android non sono controllabili dall'app.
+
+Inbox e banner usano gli stessi indicatori Unicode, visibili anche su
+iOS/Android senza dipendere dal supporto a immagini personalizzate:
+
+| Simbolo | Operazione |
+|---|---|
+| 🟢＋ | Creazione elemento |
+| 🟡✎ | Modifica elemento o contenitore |
+| 🔴✕ | Eliminazione elemento |
+| 🟢↑ / 🔴↓ | Aumento / diminuzione quantita |
+| 🟢✓ / 🔴↶ | Completamento / rimozione spunta |
+
+Il simbolo sostituisce diciture come "Nuovo elemento"; `×2` indica la quantita
+iniziale, `-1 (2 → 1)` una variazione. Forma e descrizioni accessibili nel
+centro notifiche distinguono le operazioni anche senza colore. Il disegno
+esatto degli emoji e la disposizione del banner dipendono dal sistema.
 I contenuti sono cifrati con Web Push ma visibili anche sulla schermata bloccata
 se le impostazioni OS lo consentono. Il Profilo avvisa esplicitamente di questo
 comportamento. Nessuna nuova sottoscrizione automatica o prompt forzato.

@@ -323,6 +323,114 @@ def test_banner_event_read_is_owner_scoped_idempotent_and_checks_access(setup):
     assert client.put("/notifications/events/not-a-uuid/read").status_code == 422
 
 
+@pytest.mark.parametrize("action", ["read", "delete"])
+def test_bulk_notification_selection_is_personal_and_persistent(setup, action):
+    factory, client, current = setup
+    with factory.begin() as db:
+        for quantity in range(1, 4):
+            enqueue_event(db, ItemQuantityChangedData(
+                inventory_id=1, item_id=1, previous_quantity=quantity, quantity=quantity + 1,
+            ), actor_id=1)
+    settle(factory)
+    current[0] = 5
+    rows = client.get("/notifications").json()
+    ids = [row["id"] for row in rows[:2]]
+    response = client.post("/notifications/bulk", json={"action": action, "ids": [*ids, ids[0]]})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"updated": 2}
+    assert client.get("/notifications/unread-count").json() == {"count": 1}
+    settle(factory)
+    with factory() as db:
+        assert len(db.scalars(select(Notification).where(Notification.user_id == 5)).all()) == (1 if action == "delete" else 3)
+        assert len(db.scalars(select(NotificationEvent)).all()) == 3
+    current[0] = 4
+    assert client.get("/notifications/unread-count").json() == {"count": 3}
+
+
+@pytest.mark.parametrize("action", ["read", "delete"])
+def test_bulk_all_notifications_includes_unloaded_pages_and_skips_revoked_access(setup, action):
+    factory, client, current = setup
+    with factory.begin() as db:
+        for index in range(65):
+            enqueue_event(db, ItemQuantityChangedData(
+                inventory_id=1, item_id=1, previous_quantity=index, quantity=index + 1,
+            ), actor_id=1)
+        enqueue_event(db, ItemQuantityChangedData(
+            inventory_id=2, item_id=2, previous_quantity=0, quantity=1,
+        ), actor_id=1)
+    settle(factory)
+    current[0] = 5
+    assert len(client.get("/notifications").json()) == 50
+    with factory.begin() as db:
+        db.query(SharedInventory).filter_by(inventory_id=2, user_id=5).delete()
+    response = client.post("/notifications/bulk", json={"action": action, "all": True})
+    assert response.status_code == 200
+    assert response.json() == {"updated": 65}
+    assert client.get("/notifications/unread-count").json() == {"count": 0}
+    assert client.post("/notifications/bulk", json={"action": action, "all": True}).json() == {"updated": 0}
+    with factory() as db:
+        rows = db.scalars(select(Notification).where(Notification.user_id == 5)).all()
+        assert len(rows) == (1 if action == "delete" else 66)
+        assert sum(row.read_at is None for row in rows) == 1
+    current[0] = 4
+    assert client.get("/notifications/unread-count").json() == {"count": 66}
+
+
+@pytest.mark.parametrize("action", ["read", "delete"])
+@pytest.mark.parametrize("invalid", ["other_user", "unknown", "revoked"])
+def test_bulk_notification_rejects_invalid_selection_atomically(setup, action, invalid):
+    factory, client, current = setup
+    patch_item(client, 1, quantity=6)
+    patch_item(client, 2, quantity=1)
+    settle(factory)
+    current[0] = 5
+    rows = client.get("/notifications").json()
+    own = next(row["id"] for row in rows if row["event"]["inventory_id"] == 1)
+    bad = next(row["id"] for row in rows if row["event"]["inventory_id"] == 2)
+    with factory.begin() as db:
+        if invalid == "other_user":
+            bad = db.scalar(select(Notification.id).where(Notification.user_id == 4))
+        elif invalid == "unknown":
+            bad = 99999
+        else:
+            db.query(SharedInventory).filter_by(inventory_id=2, user_id=5).delete()
+    response = client.post("/notifications/bulk", json={"action": action, "ids": [own, bad]})
+    assert response.status_code == 404
+    with factory() as db:
+        row = db.get(Notification, own)
+        assert row is not None and row.read_at is None
+
+
+def test_delete_single_notification_is_owner_scoped(setup):
+    factory, client, current = setup
+    patch_item(client, 1, quantity=6)
+    settle(factory)
+    current[0] = 5
+    row = client.get("/notifications").json()[0]
+    current[0] = 4
+    assert client.delete(f"/notifications/{row['id']}").status_code == 404
+    current[0] = 5
+    assert client.delete("/notifications/0").status_code == 422
+    assert client.delete("/notifications/-1").status_code == 422
+    assert client.delete(f"/notifications/{row['id']}").json() == {"updated": 1}
+    assert client.get("/notifications").json() == []
+    assert client.delete(f"/notifications/{row['id']}").status_code == 404
+    with factory() as db:
+        assert db.get(Notification, row["id"]) is None
+
+
+@pytest.mark.parametrize("payload", [
+    {"action": "delete"}, {"action": "read", "ids": []},
+    {"action": "read", "all": True, "ids": [1]},
+    {"action": "read", "ids": [0]}, {"action": "read", "ids": ["1"]},
+    {"action": "read", "ids": [True]}, {"action": "unknown", "all": True},
+    {"action": "delete", "all": True, "user_id": 4},
+])
+def test_bulk_notifications_validate_scope(setup, payload):
+    _factory, client, _current = setup
+    assert client.post("/notifications/bulk", json=payload).status_code == 422
+
+
 @pytest.mark.parametrize("resource", ["inventory", "item"])
 def test_old_event_does_not_attach_to_recreated_resource(setup, resource):
     factory, client, current = setup
@@ -528,9 +636,9 @@ def create_metadata(client):
     return definition_id, response.json()["id"]
 
 @pytest.mark.parametrize("inventory_id,quantity,expected", [
-    (1, 6, "Nuovo elemento · Quantità: 6"),
-    (2, 0, "Nuovo elemento · Spunta: da completare"),
-    (2, 1, "Nuovo elemento · Spunta: completato"),
+    (1, 6, "×6"),
+    (2, 0, "Da fare"),
+    (2, 1, "Completato"),
 ])
 def test_create_with_initial_metadata_emits_one_creation_event(setup, inventory_id, quantity, expected):
     from web_push import notification_push_payload
@@ -561,7 +669,7 @@ def test_create_with_initial_metadata_emits_one_creation_event(setup, inventory_
         assert records[0].payload["operation"] == "created"
         assert records[0].payload["quantity"] == quantity
         assert records[0].payload["details"]["description"] == "Original"
-        assert notification_push_payload(db, records[0])["body"] == f"New · {expected}"
+        assert notification_push_payload(db, records[0])["body"] == f"🟢＋ New · {expected}"
     settle(factory)
     current[0] = 5
     inbox = client.get("/notifications").json()
@@ -738,7 +846,7 @@ def test_deleted_item_notifies_and_opens_container_even_after_id_reuse(setup, it
     with factory() as db:
         record = db.scalar(select(NotificationEvent))
         payload = notification_push_payload(db, record)
-        assert payload["body"] == f"{name} · Elemento eliminato"
+        assert payload["body"] == f"🔴✕ {name}"
         assert payload["url"] == f"/{path}/{inventory_id}"
     assert client.put(f"/notifications/{rows[0]['id']}/read").status_code == 200
     current[0] = 1

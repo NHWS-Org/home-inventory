@@ -33,18 +33,18 @@ export function notificationLink(row: InboxNotification): string {
 }
 export function notificationAction(row: InboxNotification): string {
   const event = row.event;
-  if (event.event_type === "item_updated" && event.operation === "deleted") return "Elemento eliminato";
+  if (event.event_type === "item_updated" && event.operation === "deleted") return "";
   if (event.event_type === "item_updated" && event.operation === "created") {
     const quantity = event.quantity;
     const status = row.inventory_type === "CHECKLIST"
-      ? `Spunta: ${quantity >= 1 ? "completato" : "da completare"}`
-      : `Quantità: ${quantity}`;
-    return `Nuovo elemento · ${status}`;
+      ? quantity >= 1 ? "Completato" : "Da fare"
+      : `×${quantity}`;
+    return status;
   }
   if (event.event_type === "item_quantity_changed") {
-    if (row.inventory_type === "CHECKLIST") return event.quantity >= 1 ? "Spunta: completato" : "Spunta: da completare";
+    if (row.inventory_type === "CHECKLIST") return event.quantity >= 1 ? "Completato" : "Da fare";
     const delta = event.quantity - event.previous_quantity;
-    return `Quantità: ${delta > 0 ? "+" : ""}${delta}`;
+    return `${delta > 0 ? "+" : ""}${delta} (${event.previous_quantity} → ${event.quantity})`;
   }
   const labels: Record<string, string> = {
     name: "Titolo", description: "Descrizione", priority: "Priorità", inventory_id: "Inventario/lista",
@@ -55,6 +55,18 @@ export function notificationAction(row: InboxNotification): string {
     if (event.details && field in event.details) return `${label}: ${event.details[field] ?? "(vuoto)"}`;
     return `${label}: modificato`;
   }).join(" · ");
+}
+export function notificationIndicator(row: InboxNotification): { symbol: string; label: string } {
+  const event = row.event;
+  if (event.event_type === "item_updated" && event.operation === "created") return { symbol: "🟢＋", label: "Elemento creato" };
+  if (event.event_type === "item_updated" && event.operation === "deleted") return { symbol: "🔴✕", label: "Elemento eliminato" };
+  if (event.event_type === "item_quantity_changed") {
+    if (row.inventory_type === "CHECKLIST") return event.quantity >= 1
+      ? { symbol: "🟢✓", label: "Completato" } : { symbol: "🔴↶", label: "Da completare" };
+    return event.quantity > event.previous_quantity
+      ? { symbol: "🟢↑", label: "Quantità aumentata" } : { symbol: "🔴↓", label: "Quantità diminuita" };
+  }
+  return { symbol: "🟡✎", label: event.event_type === "inventory_updated" ? "Contenitore modificato" : "Elemento modificato" };
 }
 export function notificationItemName(row: InboxNotification): string | null {
   const event = row.event;
@@ -98,6 +110,13 @@ export async function markOpenedNotificationRead(search: string): Promise<boolea
 }
 export async function markAllNotificationsRead(): Promise<void> {
   await api.put("/notifications/read-all");
+}
+export type NotificationSelection = { ids: number[]; all?: false } | { all: true; ids?: never };
+export async function changeNotifications(action: "read" | "delete", selection: NotificationSelection): Promise<number> {
+  return (await api.post<{ updated: number }>("/notifications/bulk", { action, ...selection })).data.updated;
+}
+export async function deleteNotification(id: number): Promise<void> {
+  await api.delete(`/notifications/${id}`);
 }
 export async function getNotificationPreferences(): Promise<NotificationPreference[]> {
   return (await api.get<NotificationPreference[]>("/notifications/preferences")).data;

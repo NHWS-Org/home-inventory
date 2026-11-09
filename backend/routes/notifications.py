@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dependencies import get_current_user, get_db
 from models import Inventory, Item, Notification, NotificationEvent, NotificationPreference, User
-from notification_contracts import NotificationEventType, NotificationPreferenceInput
+from notification_contracts import NotificationBulkAction, NotificationEventType, NotificationPreferenceInput
 from notification_outbox import utcnow
 from notification_service import can_receive, default_in_app, event_inventory
 from routes.push import router as push_router
@@ -129,6 +129,45 @@ def read_all(db: Session = Depends(get_db), user=Depends(get_current_user)):
     if updated:
         db.commit()
     return {"updated": updated}
+
+
+def change_notifications(db: Session, user: User, payload: NotificationBulkAction) -> dict[str, int]:
+    if payload.all:
+        rows = [row for row, _record, _inventory in accessible_notifications(db, user)]
+    else:
+        rows = list(db.scalars(select(Notification).where(
+            Notification.user_id == user.id, Notification.id.in_(set(payload.ids)),
+        )))
+        if len(rows) != len(set(payload.ids)) or any(
+            accessible_notification(db, row, user) is None for row in rows
+        ):
+            raise HTTPException(404, "Notifica non trovata o accesso revocato")
+    changed = 0
+    read_at = utcnow()
+    for row in rows:
+        if payload.action == "delete":
+            db.delete(row)
+            changed += 1
+        elif row.read_at is None:
+            row.read_at = read_at
+            changed += 1
+    if changed:
+        db.commit()
+    return {"updated": changed}
+
+
+@router.post("/bulk")
+def bulk_notifications(
+    payload: NotificationBulkAction, db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    return change_notifications(db, user, payload)
+
+
+@router.delete("/{notification_id}")
+def delete_notification(
+    notification_id: int = Path(gt=0), db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    return change_notifications(db, user, NotificationBulkAction(action="delete", ids=[notification_id]))
 
 
 @router.put("/events/{event_key}/read")

@@ -12,12 +12,12 @@ const server = await createServer({
 after(() => server.close());
 const notifications = await server.ssrLoadModule('/src/notificationsApi.ts');
 const { api, createItem } = await server.ssrLoadModule('/src/api.ts');
-const { NotificationOpenLink } = await server.ssrLoadModule('/src/pages/NotificationsPage.tsx');
+const { NotificationOpenLink, NotificationSummary } = await server.ssrLoadModule('/src/pages/NotificationsPage.tsx');
 
 test('compact actions show signed deltas, checks, historical text and legacy labels', () => {
-  assert.equal(notifications.notificationAction({inventory_type:'INVENTORY', event:{event_type:'item_quantity_changed', previous_quantity:2,quantity:3}}), 'Quantità: +1');
-  assert.equal(notifications.notificationAction({inventory_type:'INVENTORY', event:{event_type:'item_quantity_changed', previous_quantity:5,quantity:2}}), 'Quantità: -3');
-  assert.equal(notifications.notificationAction({inventory_type:'CHECKLIST', event:{event_type:'item_quantity_changed', previous_quantity:1,quantity:0}}), 'Spunta: da completare');
+  assert.equal(notifications.notificationAction({inventory_type:'INVENTORY', event:{event_type:'item_quantity_changed', previous_quantity:2,quantity:3}}), '+1 (2 → 3)');
+  assert.equal(notifications.notificationAction({inventory_type:'INVENTORY', event:{event_type:'item_quantity_changed', previous_quantity:5,quantity:2}}), '-3 (5 → 2)');
+  assert.equal(notifications.notificationAction({inventory_type:'CHECKLIST', event:{event_type:'item_quantity_changed', previous_quantity:1,quantity:0}}), 'Da fare');
   assert.equal(notifications.notificationAction({event:{event_type:'item_updated',changed_fields:['description','name'],details:{description:'xxx',name:'yyy'}}}), 'Descrizione: xxx · Titolo: yyy');
   assert.equal(notifications.notificationAction({event:{event_type:'item_updated',changed_fields:['barcodes']}}), 'Barcode: modificato');
   assert.equal(notifications.notificationDate({action_at:'2026-11-07T01:00:00+01:00'}).toISOString(), '2026-11-07T00:00:00.000Z');
@@ -26,10 +26,10 @@ test('compact actions show signed deltas, checks, historical text and legacy lab
 
 test('creation notifications show the initial name and quantity or checklist status', () => {
   for (const [type, quantity, expected] of [
-    ['INVENTORY', 0, 'Nuovo elemento · Quantità: 0'],
-    ['INVENTORY', 6, 'Nuovo elemento · Quantità: 6'],
-    ['CHECKLIST', 0, 'Nuovo elemento · Spunta: da completare'],
-    ['CHECKLIST', 1, 'Nuovo elemento · Spunta: completato'],
+    ['INVENTORY', 0, '×0'],
+    ['INVENTORY', 6, '×6'],
+    ['CHECKLIST', 0, 'Da fare'],
+    ['CHECKLIST', 1, 'Completato'],
   ]) {
     const row = {inventory_type: type, item_name: 'Renamed', event: {
       event_type: 'item_updated', operation: 'created', quantity, changed_fields: ['name'],
@@ -47,11 +47,60 @@ test('deleted notifications show the snapshot and open only their container', ()
       event_type: 'item_updated', inventory_id: 7, operation: 'deleted',
       changed_fields: ['name'], details: { name: 'Deleted' },
     }};
-    assert.equal(notifications.notificationAction(row), 'Elemento eliminato');
+    assert.equal(notifications.notificationAction(row), '');
+    assert.deepEqual(notifications.notificationIndicator(row), { symbol: '🔴✕', label: 'Elemento eliminato' });
     assert.equal(notifications.notificationItemName(row), 'Deleted');
     assert.equal(notifications.notificationLink(row), `/${path}/7?notification_id=21`);
     row.read_at = '2026-01-01';
     assert.equal(notifications.notificationLink(row), `/${path}/7`);
+  }
+});
+
+test('operation symbols are colored, distinguishable and accessible without color', () => {
+  for (const [type, event, symbol, label] of [
+    ['INVENTORY', {event_type: 'item_updated', operation: 'created', quantity: 0}, '🟢＋', 'Elemento creato'],
+    ['INVENTORY', {event_type: 'item_updated', operation: 'deleted'}, '🔴✕', 'Elemento eliminato'],
+    ['INVENTORY', {event_type: 'item_updated', changed_fields: ['metadata']}, '🟡✎', 'Elemento modificato'],
+    ['INVENTORY', {event_type: 'item_quantity_changed', previous_quantity: 1, quantity: 2}, '🟢↑', 'Quantità aumentata'],
+    ['INVENTORY', {event_type: 'item_quantity_changed', previous_quantity: 2, quantity: 1}, '🔴↓', 'Quantità diminuita'],
+    ['CHECKLIST', {event_type: 'item_quantity_changed', previous_quantity: 0, quantity: 1}, '🟢✓', 'Completato'],
+    ['CHECKLIST', {event_type: 'item_quantity_changed', previous_quantity: 1, quantity: 0}, '🔴↶', 'Da completare'],
+    ['INVENTORY', {event_type: 'inventory_updated', changed_fields: ['name']}, '🟡✎', 'Contenitore modificato'],
+  ]) {
+    const row = {inventory_type: type, item_name: 'Riso', event};
+    assert.deepEqual(notifications.notificationIndicator(row), { symbol, label });
+    const html = renderToStaticMarkup(createElement(NotificationSummary, {row}));
+    assert.ok(html.includes(symbol));
+    assert.ok(html.includes(`aria-label="${label}"`));
+    assert.doesNotMatch(html, /Nuovo elemento|Quantità:/);
+  }
+});
+
+test('bulk client sends explicit selection or all scope and propagates errors', async () => {
+  const oldAdapter = api.defaults.adapter;
+  const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
+  const requests = [];
+  api.defaults.adapter = async config => {
+    requests.push(config);
+    return { config, data: { updated: 2 }, status: 200, statusText: 'OK', headers: {} };
+  };
+  try {
+    assert.equal(await notifications.changeNotifications('read', {ids: [1, 2]}), 2);
+    await notifications.changeNotifications('delete', {all: true});
+    await notifications.deleteNotification(3);
+    assert.deepEqual(requests.map(r => [r.method, r.url, r.data && JSON.parse(r.data)]), [
+      ['post', '/notifications/bulk', {action: 'read', ids: [1, 2]}],
+      ['post', '/notifications/bulk', {action: 'delete', all: true}],
+      ['delete', '/notifications/3', undefined],
+    ]);
+    api.defaults.adapter = async () => { throw new Error('Access revoked'); };
+    await assert.rejects(notifications.changeNotifications('delete', {ids: [1]}), /Access revoked/);
+    await assert.rejects(notifications.deleteNotification(3), /Access revoked/);
+  } finally {
+    api.defaults.adapter = oldAdapter;
+    if (oldStorage) Object.defineProperty(globalThis, 'localStorage', oldStorage);
+    else delete globalThis.localStorage;
   }
 });
 

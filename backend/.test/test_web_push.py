@@ -285,7 +285,7 @@ def test_deleted_item_push_respects_container_access(setup, revoke_access):
         assert calls == []
     else:
         assert len(calls) == 1
-        assert calls[0][2]["body"] == "Deleted name · Elemento eliminato"
+        assert calls[0][2]["body"] == "🔴✕ Deleted name"
         assert calls[0][2]["url"].startswith("/checklists/1?notification_event=")
 
 
@@ -489,7 +489,7 @@ def test_standard_encryption_vapid_detailed_payload_and_transport_safety(setup, 
     # Resource details are included only inside the encrypted payload.
     def webpush_mock(**kwargs):
         assert json.loads(kwargs["data"]) == payload
-        assert payload["title"] == "Lista: Private list name"
+        assert payload["title"] == "☑ Private list name"
         assert payload["url"] == "/checklists/1"
         response = requests.Response()
         response.status_code = 202
@@ -515,11 +515,11 @@ def test_detailed_push_identifies_resource_item_action_and_bounds_unicode(setup)
             inventory_id=1, item_id=item.id, previous_quantity=2, quantity=3,
         ), actor_id=1)
         payload = push.notification_push_payload(db, record)
-        assert payload["title"] == "Inventario: Dispensa"
-        assert payload["body"] == "Riso · Quantità: +1 (2 → 3)"
+        assert payload["title"] == "📦 Dispensa"
+        assert payload["body"] == "🟢↑ Riso · +1 (2 → 3)"
         assert payload["url"] == "/inventories/1"
         inventory.type = "CHECKLIST"
-        assert push.notification_push_payload(db, record)["body"] == "Riso · Spunta: completato"
+        assert push.notification_push_payload(db, record)["body"] == "🟢✓ Riso · Completato"
         record.payload = {
             "event_type": "item_updated", "inventory_id": 1, "item_id": item.id,
             "changed_fields": ["description", "name"],
@@ -529,9 +529,37 @@ def test_detailed_push_identifies_resource_item_action_and_bounds_unicode(setup)
         inventory.name = "😀" * 300
         item.name = "😀" * 700
         payload = push.notification_push_payload(db, record)
-        assert len(payload["title"]) <= 80
+        assert len(payload["title"]) <= 40
         assert len(payload["body"]) <= 500
         assert len(json.dumps(payload, ensure_ascii=False).encode()) < 3500
+
+
+@pytest.mark.parametrize("kind,event,body", [
+    ("INVENTORY", {"event_type": "item_updated", "operation": "created", "quantity": 0}, "🟢＋ Riso · ×0"),
+    ("INVENTORY", {"event_type": "item_updated", "operation": "deleted"}, "🔴✕ Riso"),
+    ("INVENTORY", {"event_type": "item_updated"}, "🟡✎ Riso · Titolo: Riso"),
+    ("INVENTORY", {"event_type": "item_quantity_changed", "previous_quantity": 1, "quantity": 2}, "🟢↑ Riso · +1 (1 → 2)"),
+    ("INVENTORY", {"event_type": "item_quantity_changed", "previous_quantity": 2, "quantity": 1}, "🔴↓ Riso · -1 (2 → 1)"),
+    ("CHECKLIST", {"event_type": "item_quantity_changed", "previous_quantity": 0, "quantity": 1}, "🟢✓ Riso · Completato"),
+    ("CHECKLIST", {"event_type": "item_quantity_changed", "previous_quantity": 1, "quantity": 0}, "🔴↶ Riso · Da fare"),
+])
+def test_push_compact_operation_symbols_match_inbox(setup, kind, event, body):
+    from notification_contracts import notification_event_adapter
+    with setup.factory.begin() as db:
+        db.get(Inventory, 1).type = kind
+        item = Item(name="Riso", inventory_id=1, quantity=1)
+        db.add(item)
+        db.flush()
+        data = {"inventory_id": 1, **event}
+        if event.get("operation") != "deleted":
+            data["item_id"] = item.id
+        if event["event_type"] == "item_updated":
+            data.update(changed_fields=["name"], details={"name": "Riso"})
+        record = enqueue_event(db, notification_event_adapter.validate_python(data), actor_id=1)
+        payload = push.notification_push_payload(db, record)
+        assert payload["body"] == body
+        assert "Nuovo elemento" not in body
+        assert "Quantità:" not in body
 
 
 def test_transport_rejects_private_dns_and_redirect_following(monkeypatch):

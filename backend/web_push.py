@@ -266,22 +266,26 @@ def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str
     data = event.payload
     item = db.get(Item, data["item_id"]) if "item_id" in data else None
     item_name = item.name if item is not None else None
+    symbol = "🟡✎"
     if data["event_type"] == "item_updated" and data.get("operation") == "deleted":
         item_name = data["details"]["name"]
-        action = "Elemento eliminato"
+        symbol = "🔴✕"
+        action = ""
     elif data["event_type"] == "item_updated" and data.get("operation") == "created":
         quantity = data["quantity"]
         item_name = data.get("details", {}).get("name", item_name)
+        symbol = "🟢＋"
         action = (
-            f"Nuovo elemento · Spunta: {'completato' if quantity >= 1 else 'da completare'}"
-            if inventory.type == "CHECKLIST" else f"Nuovo elemento · Quantità: {quantity}"
-        )
+            "Completato" if quantity >= 1 else "Da fare"
+        ) if inventory.type == "CHECKLIST" else f"×{quantity}"
     elif data["event_type"] == "item_quantity_changed":
         if inventory.type == "CHECKLIST":
-            action = "Spunta: completato" if data["quantity"] >= 1 else "Spunta: da completare"
+            symbol = "🟢✓" if data["quantity"] >= 1 else "🔴↶"
+            action = "Completato" if data["quantity"] >= 1 else "Da fare"
         else:
             delta = data["quantity"] - data["previous_quantity"]
-            action = f"Quantità: {delta:+d} ({data['previous_quantity']} → {data['quantity']})"
+            symbol = "🟢↑" if delta > 0 else "🔴↓"
+            action = f"{delta:+d} ({data['previous_quantity']} → {data['quantity']})"
     else:
         labels = {
             "name": "Titolo", "description": "Descrizione", "priority": "Priorità",
@@ -297,11 +301,13 @@ def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str
     def compact(value: str, limit: int) -> str:
         text = " ".join(value.split())
         return text if len(text) <= limit else text[:limit - 1] + "…"
-    kind = "Lista" if inventory.type == "CHECKLIST" else "Inventario"
+    kind = "☑" if inventory.type == "CHECKLIST" else "📦"
     path = "checklists" if inventory.type == "CHECKLIST" else "inventories"
     return {
-        "title": compact(f"{kind}: {inventory.name}", 80),
-        "body": compact(f"{item_name} · {action}" if item_name is not None else action, 500),
+        "title": compact(f"{kind} {inventory.name}", 40),
+        "body": compact(f"{symbol} " + " · ".join(
+            part for part in (item_name, action) if part
+        ), 500),
         "url": f"/{path}/{inventory.id}", "tag": event.event_key,
     }
 

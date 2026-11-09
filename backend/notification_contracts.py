@@ -71,3 +71,17 @@ class NotificationPreferenceInput(BaseModel):
     in_app_enabled: bool = True
     push_enabled: bool = False
     include_own_actions: bool = False
+
+
+class NotificationBulkAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    action: Literal["read", "delete"]
+    ids: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list)
+    all: bool = False
+
+    @model_validator(mode="after")
+    def require_scope(self) -> "NotificationBulkAction":
+        if self.all == bool(self.ids):
+            raise ValueError("Specificare gli ID oppure tutte le notifiche")
+        return self
