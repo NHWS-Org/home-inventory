@@ -367,7 +367,7 @@ const ProfilePage = () => {
       {user?.role?.name === "viewer"
         ? <ProfileSection title="Preferenze notifiche"><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></ProfileSection>
         : <>
-            <ProfileSection title="Notifiche push su questo browser" headingId="profile-push-heading"><PushNotificationsPanel /></ProfileSection>
+            <ProfileSection title="Attivazione notifiche push" headingId="profile-push-heading"><PushNotificationsPanel /></ProfileSection>
             <ProfileSection title="Preferenze notifiche" headingId="notification-preferences-heading"><NotificationPreferences /></ProfileSection>
           </>}
 

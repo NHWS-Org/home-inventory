@@ -32,7 +32,7 @@ test('profile sections start collapsed and retain their content for editors', ()
   assert.equal((html.match(/<details class=/g) ?? []).length, 5);
   assert.doesNotMatch(html, /<details[^>]*\sopen(?:[=>\s])/);
   for (const heading of [
-    'Dati Anagrafici', 'Cambia Password', 'Notifiche push su questo browser',
+    'Dati Anagrafici', 'Cambia Password', 'Attivazione notifiche push',
     'Preferenze notifiche', 'Dispositivi connessi',
   ]) {
     assert.match(html, new RegExp(`<summary[^>]*><h2[^>]*>${heading}</h2>`));
@@ -48,5 +48,5 @@ test('viewer profile keeps its notification explanation without push controls', 
   const html = renderProfile('viewer');
   assert.equal((html.match(/<details class=/g) ?? []).length, 4);
   assert.match(html, /Gli utenti con sola lettura non le ricevono/);
-  assert.doesNotMatch(html, /Notifiche push su questo browser/);
+  assert.doesNotMatch(html, /Attivazione notifiche push/);
 });
