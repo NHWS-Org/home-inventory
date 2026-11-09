@@ -195,6 +195,58 @@ test('browser state is active only when native subscription and authenticated se
   }
 });
 
+test('granted browser permission without an existing association is not a stale subscription', async () => {
+  const harness = browserHarness({ permission: 'granted' });
+  try {
+    assert.equal((await push.inspectPushBrowser('alice')).state, 'permission-required');
+    harness.storage.set('web_push_owner', 'alice');
+    harness.storage.set('web_push_subscription_id:alice', '41');
+    assert.equal((await push.inspectPushBrowser('alice')).state, 'expired');
+  } finally {
+    harness.restore();
+  }
+});
+
+test('failed server cleanup retains association for an explicit retry', async () => {
+  const harness = browserHarness({ permission: 'granted' });
+  try {
+    await push.enablePushForBrowser('alice');
+    const successAdapter = api.defaults.adapter;
+    api.defaults.adapter = async (config) => {
+      if (config.method === 'delete') throw new Error('server unavailable');
+      return successAdapter(config);
+    };
+    await assert.rejects(push.disablePushForBrowser('alice'), /server unavailable/);
+    assert.equal(harness.storage.get('web_push_owner'), 'alice');
+    assert.equal(harness.storage.get('web_push_subscription_id:alice'), '41');
+    assert.equal((await push.inspectPushBrowser('alice')).state, 'expired');
+    api.defaults.adapter = successAdapter;
+    await push.disablePushForBrowser('alice');
+    assert.equal(harness.storage.has('web_push_owner'), false);
+    assert.equal(harness.storage.has('web_push_subscription_id:alice'), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('failed native unsubscribe retains association until cleanup succeeds', async () => {
+  const harness = browserHarness({ permission: 'granted' });
+  try {
+    await push.enablePushForBrowser('alice');
+    const subscription = await harness.registration.pushManager.getSubscription();
+    const unsubscribe = subscription.unsubscribe;
+    subscription.unsubscribe = async () => false;
+    await assert.rejects(push.disablePushForBrowser('alice'), /non ha confermato/);
+    assert.equal(harness.storage.get('web_push_subscription_id:alice'), '41');
+    subscription.unsubscribe = unsubscribe;
+    await push.disablePushForBrowser('alice');
+    assert.equal(harness.storage.has('web_push_owner'), false);
+    assert.equal(await harness.registration.pushManager.getSubscription(), null);
+  } finally {
+    harness.restore();
+  }
+});
+
 test('disable removes server record, unsubscribes this browser and clears local association', async () => {
   const harness = browserHarness({ permission: 'granted' });
   try {

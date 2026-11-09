@@ -18,7 +18,7 @@ const stateLabels: Record<PushBrowserState, string> = {
   "ios-version-required": "Su iPhone/iPad serve iOS/iPadOS 16.4 o successivo.",
   denied: "Permesso negato. Modifica le notifiche nelle impostazioni del browser.",
   disabled: "Web Push non è abilitato dall’amministratore dell’installazione.",
-  "permission-required": "Notifiche non ancora attivate su questo browser.",
+  "permission-required": "Notifiche non attivate per questa sessione su questo browser.",
   expired: "Sottoscrizione assente, scaduta o non associata a questa sessione.",
   active: "Notifiche attive su questo browser e su questa sessione.",
   error: "Non è stato possibile verificare le notifiche. Riprova.",
@@ -34,6 +34,7 @@ export default function PushNotificationsPanel() {
   const [state, setState] = useState<PushBrowserState>("checking");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [cleanupFailed, setCleanupFailed] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!username) return;
@@ -84,9 +85,11 @@ export default function PushNotificationsPanel() {
     setMessage("");
     try {
       await disablePushForBrowser(username);
+      setCleanupFailed(false);
       setState(isPermissionDenied() ? "denied" : "permission-required");
       setMessage("Notifiche disattivate su questo browser.");
     } catch {
+      setCleanupFailed(true);
       setState("error");
       setMessage("Disattivazione incompleta. Aggiorna lo stato e riprova.");
     } finally {
@@ -109,7 +112,8 @@ export default function PushNotificationsPanel() {
   }
 
   const canEnable = ["permission-required", "expired"].includes(state);
-  const canDisable = ["active", "denied", "expired"].includes(state);
+  const canDisable = ["active", "denied", "expired"].includes(state)
+    || state === "error" && cleanupFailed;
   const canTest = state === "active";
 
   return (

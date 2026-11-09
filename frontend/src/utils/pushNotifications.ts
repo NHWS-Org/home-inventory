@@ -143,7 +143,11 @@ export async function inspectPushBrowser(username: string): Promise<{
     const registration = await navigator.serviceWorker.register("/push-sw.js", { scope: "/" });
     const subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
-      return { state: Notification.permission === "granted" ? "expired" : "permission-required", configuration };
+      const owner = localStorage.getItem(OWNER_KEY);
+      const storedId = owner === username
+        ? localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username))
+        : null;
+      return { state: storedId ? "expired" : "permission-required", configuration };
     }
     if (subscription.expirationTime !== null && subscription.expirationTime <= Date.now()) {
       await subscription.unsubscribe();
@@ -293,10 +297,9 @@ export async function disablePushForBrowser(username: string): Promise<void> {
     }
   } catch (error) {
     failure ??= error;
-  } finally {
-    clearStoredOwnership(username);
   }
   if (failure) throw failure;
+  clearStoredOwnership(username);
 }
 
 export async function testPushOnBrowser(): Promise<void> {
