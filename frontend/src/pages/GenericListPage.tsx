@@ -449,7 +449,7 @@ export default function GenericListPage() {
           {getSortedItems().map((inv) => (
             <li
               key={inv.id}
-              className={`relative p-4 pb-16 sm:pb-4 border rounded shadow cursor-pointer flex justify-between items-center text-black dark:text-white ${
+              className={`relative p-2 sm:p-4 border rounded shadow cursor-pointer flex justify-between items-center text-black dark:text-white ${
                 selectedItems.includes(inv.id)
                   ? "bg-yellow-100"
                   : "hover:bg-gray-100 dark:hover:bg-gray-600"
@@ -503,31 +503,31 @@ export default function GenericListPage() {
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-grow gap-2">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-semibold">{inv.name}</h2>
-                    <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
-                      v{inv.version_num}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-500 sm:ml-4">
-                    Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
-                  </p>
+                <div className="flow-root min-w-0 flex-1">
                   <button
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
                       setQrTarget({ name: inv.name, path: `/${basePath}/${inv.id}` });
                     }}
-                    className="absolute bottom-4 right-4 grid h-11 w-11 place-items-center rounded-xl bg-indigo-600 text-xl text-white hover:bg-indigo-700 sm:static sm:flex sm:h-10 sm:w-auto sm:items-center sm:justify-center sm:rounded-xl sm:px-3 sm:text-sm"
+                    className="float-right mb-1 ml-3 grid h-11 w-11 place-items-center rounded-xl bg-indigo-600 text-xl text-white hover:bg-indigo-700 sm:flex sm:w-auto sm:items-center sm:justify-center sm:px-3 sm:text-sm"
                     aria-label={`Mostra QR code per ${inv.name}`}
                     title={`Mostra QR code per ${inv.name}`}
                   >
                     <FiGrid className="sm:hidden" aria-hidden="true" />
                     <span className="hidden sm:inline">QR code</span>
                   </button>
+                  <h2 className="break-words text-base font-semibold [overflow-wrap:anywhere] sm:text-lg">
+                    {inv.name}{" "}
+                    <span className="inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle font-mono text-xs font-normal text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                      v{inv.version_num}
+                    </span>
+                  </h2>
+                  <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+                    Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
+                  </p>
                   {inv.matching_items && inv.matching_items.length > 0 && (
-                    <div className="mt-2 p-2 border rounded bg-yellow-50">
+                    <div className="clear-both mt-2 p-2 border rounded bg-yellow-50">
                       <p className="text-xs font-medium text-gray-700">Corrispondenze trovate:</p>
                       <ul className="text-sm list-disc list-inside dark:text-black">
                         {inv.matching_items.map((item: {
