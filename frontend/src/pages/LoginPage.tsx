@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { loginDestination } from '../utils/loginRedirect'
 import { FiEye, FiEyeOff, FiLoader } from 'react-icons/fi'
 import { loginUser, getUserInfo } from '../api'
@@ -55,7 +55,11 @@ function LoginPage() {
     <div className="flex items-center justify-center h-screen bg-gray-100 dark:bg-gray-800">
       <form onSubmit={handleLogin} className="bg-white dark:bg-gray-900 p-8 rounded shadow-md w-full max-w-sm">
         <h2 className="text-2xl font-bold mb-6 text-center">Login</h2>
-        {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+        {error && (
+          <p id="login-error" className="text-red-500 text-sm mb-4" role="alert" aria-live="polite">
+            {error}
+          </p>
+        )}
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1" htmlFor="username">Username</label>
           <input
@@ -66,6 +70,8 @@ function LoginPage() {
             onChange={e => setUsername(e.target.value)}
             autoCapitalize="none"
             autoCorrect="off"
+            autoComplete="username"
+            aria-describedby={error ? 'login-error' : undefined}
             required
           />
         </div>
@@ -78,6 +84,8 @@ function LoginPage() {
               className="w-full border px-3 py-2 pr-10 rounded dark:bg-gray-800 dark:text-white dark:border-gray-700"
               value={password}
               onChange={e => setPassword(e.target.value)}
+              autoComplete="current-password"
+              aria-describedby={error ? 'login-error' : undefined}
               required
             />
             <button
@@ -111,7 +119,7 @@ function LoginPage() {
           )}
         </button>
         <p className="text-sm mt-4 text-center">
-          Non hai un account? <a href={destination === '/' ? '/register' : `/register?${new URLSearchParams({ returnTo: destination })}`} className="text-blue-600 hover:underline">Registrati</a>
+          Non hai un account? <Link to={destination === '/' ? '/register' : `/register?${new URLSearchParams({ returnTo: destination })}`} className="text-blue-600 hover:underline">Registrati</Link>
         </p>
       </form>
     </div>
