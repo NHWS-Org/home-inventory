@@ -106,7 +106,8 @@ export default function RegisterPage() {
               onClick={() => setShowPassword((prev) => !prev)}
               aria-label={showPassword ? "Nascondi password" : "Mostra password"}
               title={showPassword ? "Nascondi password" : "Mostra password"}
-              className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-r"
+              disabled={!registrationEnabled || isLoading}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-r disabled:cursor-not-allowed disabled:opacity-60"
             >
               {showPassword ? (
                 <FiEyeOff className="h-5 w-5" aria-hidden="true" />
@@ -141,9 +142,10 @@ export default function RegisterPage() {
             <button
               type="button"
               onClick={() => setShowConfirmPassword((prev) => !prev)}
-              aria-label={showConfirmPassword ? "Nascondi password di conferma" : "Mostra password di conferma"}
-              title={showConfirmPassword ? "Nascondi password di conferma" : "Mostra password di conferma"}
-              className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-r"
+              aria-label={showConfirmPassword ? "Nascondi conferma password" : "Mostra conferma password"}
+              title={showConfirmPassword ? "Nascondi conferma password" : "Mostra conferma password"}
+              disabled={!registrationEnabled || isLoading}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-r disabled:cursor-not-allowed disabled:opacity-60"
             >
               {showConfirmPassword ? (
                 <FiEyeOff className="h-5 w-5" aria-hidden="true" />
