@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { FiEye, FiEyeOff, FiLoader } from 'react-icons/fi'
 import { loginUser, getUserInfo } from '../api'
 import { useAuth } from '../useAuth'
@@ -108,7 +108,7 @@ function LoginPage() {
           )}
         </button>
         <p className="text-sm mt-4 text-center">
-          Non hai un account? <a href="/register" className="text-blue-600 hover:underline">Registrati</a>
+          Non hai un account? <Link to="/register" className="text-blue-600 hover:underline">Registrati</Link>
         </p>
       </form>
     </div>
