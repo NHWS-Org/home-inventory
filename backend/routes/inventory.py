@@ -14,6 +14,7 @@ from models import (
     InventoryVersion,
     ItemVersion,
     ListAssignment,
+    UserGroupAssociation,
 )
 from assignment_service import build_assignment_summary, pending_assigned_by_source
 from schemas import InventoryCreate, InventoryResponse, InventoryUpdate, ItemMetadataValueResponse, ItemBarcodeResponse, ItemResponse, UserResponse, InventoryResponseWithItemCount, InventoryVersionResponse, VersionBulkDeleteRequest
@@ -612,13 +613,19 @@ def list_group_shares_base(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    inventory = db.query(Inventory).filter_by(id=inventory_id, type=inventory_type).first()
+    # ⚡ Bolt optimization: Eager load shared_with_groups.group to prevent N+1 queries when accessing group.name.
+    inventory = (
+        db.query(Inventory)
+        .options(joinedload(Inventory.shared_with_groups).joinedload(SharedInventoryGroup.group))
+        .filter_by(id=inventory_id, type=inventory_type)
+        .first()
+    )
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventario non trovato")
     if not can_access_inventory(user, inventory, action="edit"):
         raise HTTPException(status_code=403, detail="Accesso negato")
 
-    return [share.group.name for share in inventory.shared_with_groups]
+    return [share.group.name for share in inventory.shared_with_groups if share.group is not None]
 
 #############################################################################
 # Elencare tutti gli utenti che hanno accesso a un inventario, con tipo di accesso e modalità
@@ -628,7 +635,24 @@ def list_access_details_base(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    inventory = db.query(Inventory).filter_by(id=inventory_id, type=inventory_type).first()
+    # ⚡ Bolt optimization: Eager-load owner, direct shares, and group shares with user roles
+    # in a single query to eliminate O(N) queries inside loops.
+    inventory = (
+        db.query(Inventory)
+        .options(
+            joinedload(Inventory.owner),
+            joinedload(Inventory.shared_with_users)
+            .joinedload(SharedInventory.user)
+            .joinedload(User.role),
+            joinedload(Inventory.shared_with_groups)
+            .joinedload(SharedInventoryGroup.group)
+            .joinedload(Group.user_associations)
+            .joinedload(UserGroupAssociation.user)
+            .joinedload(User.role),
+        )
+        .filter_by(id=inventory_id, type=inventory_type)
+        .first()
+    )
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventario non trovato")
     if not can_access_inventory(user, inventory, action="view"):
@@ -636,8 +660,8 @@ def list_access_details_base(
 
     access_details = []
 
-    # Utente proprietario
-    owner = db.query(User).get(inventory.owner_id)
+    # Utente proprietario (precaricato via joinedload)
+    owner = inventory.owner
     if owner is not None:
         access_details.append({
             "username": owner.username,
@@ -646,8 +670,8 @@ def list_access_details_base(
             "group": None
         })
 
-    # Amministratori
-    admins = db.query(User).filter(User.role.has(name=RoleEnum.admin.value)).all()
+    # Amministratori (caricati con ruolo già eager-loaded)
+    admins = db.query(User).options(joinedload(User.role)).filter(User.role.has(name=RoleEnum.admin.value)).all()
     for admin in admins:
         if cast(int | None, admin.id) != cast(int | None, inventory.owner_id):
             access_details.append({
@@ -657,9 +681,9 @@ def list_access_details_base(
                 "group": None
             })
 
-    # Utenti condivisione diretta
+    # Utenti condivisione diretta (precaricati via joinedload)
     for share in inventory.shared_with_users:
-        shared_user = db.query(User).get(share.user_id)
+        shared_user = share.user
         if shared_user is None or shared_user.role is None:
             continue
         access = "edit" if shared_user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
@@ -670,12 +694,14 @@ def list_access_details_base(
             "group": None
         })
 
-    # Utenti condivisione tramite gruppo
+    # Utenti condivisione tramite gruppo (precaricati via joinedload)
     for shared_group in inventory.shared_with_groups:
-        group = db.query(Group).get(shared_group.group_id)
+        group = shared_group.group
         if group is None:
             continue
         for assoc in group.user_associations:
+            if assoc.user is None or assoc.user.role is None:
+                continue
             access = "edit" if assoc.user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
             access_details.append({
                 "username": assoc.user.username,
@@ -694,7 +720,24 @@ def count_access_by_type_base(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    inventory = db.query(Inventory).filter_by(id=inventory_id, type=inventory_type).first()
+    # ⚡ Bolt optimization: Eager-load owner, direct shares, and group shares with user roles
+    # in a single query to eliminate O(N) queries inside loops.
+    inventory = (
+        db.query(Inventory)
+        .options(
+            joinedload(Inventory.owner),
+            joinedload(Inventory.shared_with_users)
+            .joinedload(SharedInventory.user)
+            .joinedload(User.role),
+            joinedload(Inventory.shared_with_groups)
+            .joinedload(SharedInventoryGroup.group)
+            .joinedload(Group.user_associations)
+            .joinedload(UserGroupAssociation.user)
+            .joinedload(User.role),
+        )
+        .filter_by(id=inventory_id, type=inventory_type)
+        .first()
+    )
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventario non trovato")
     if not can_access_inventory(user, inventory, action="view"):
@@ -702,31 +745,33 @@ def count_access_by_type_base(
 
     access_by_user = {}
 
-    # Owner
-    owner = db.query(User).get(inventory.owner_id)
+    # Owner (precaricato via joinedload)
+    owner = inventory.owner
     if owner is not None:
         access_by_user[owner.username] = "edit"
 
     # Admin (aggiunti solo se non già presenti)
-    admins = db.query(User).filter(User.role.has(name=RoleEnum.admin.value)).all()
+    admins = db.query(User).options(joinedload(User.role)).filter(User.role.has(name=RoleEnum.admin.value)).all()
     for admin in admins:
         if admin.username not in access_by_user:
             access_by_user[admin.username] = "admin"
 
-    # Dirette
+    # Dirette (precaricati via joinedload)
     for share in inventory.shared_with_users:
-        shared_user = db.query(User).get(share.user_id)
+        shared_user = share.user
         if shared_user is None or shared_user.role is None:
             continue
         access = "edit" if shared_user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
         access_by_user[shared_user.username] = access
 
-    # Gruppi
+    # Gruppi (precaricati via joinedload)
     for shared_group in inventory.shared_with_groups:
-        group = db.query(Group).get(shared_group.group_id)
+        group = shared_group.group
         if group is None:
             continue
         for assoc in group.user_associations:
+            if assoc.user is None or assoc.user.role is None:
+                continue
             access = "edit" if assoc.user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
             # Se già presente come 'edit' non sovrascrivere
             if assoc.user.username not in access_by_user or access_by_user[assoc.user.username] != "edit":

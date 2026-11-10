@@ -1,3 +1,7 @@
+## 2026-11-07 - [Eager Load Shares and Group Users to Fix N+1 in Inventory Access Details]
+**Learning:** In `backend/routes/inventory.py`, `list_access_details_base` and `count_access_by_type_base` looped over `inventory.shared_with_users` and `inventory.shared_with_groups`, issuing separate queries via `db.query(User).get()` and `db.query(Group).get()`, plus lazy-loading roles and group associations for each member (O(N_shares + N_groups) queries).
+**Action:** Add explicit relationship `user = relationship("User", foreign_keys=[user_id])` on `SharedInventory` (explicit `foreign_keys` prevents AmbiguousForeignKeysError due to `LoggingData` foreign keys), and chain `joinedload` for owner, direct share users/roles, and group share associations/users/roles to keep query counts constant O(1).
+
 ## 2026-11-06 - [Batch Item Assignment Lookups to Fix N+1 in Item Listing]
 **Learning:** In `backend/routes/inventory.py`, `_list_item_assignment_fields` accessed `len(item.source_assignments)` for standard inventory items and `assignment.source_item.inventory` for checklist items during response serialization, triggering unbatched lazy load queries for every item in the inventory (N queries).
 **Action:** Pre-calculate assignment counts using a batched `GROUP BY ListAssignment.source_item_id` query, and chain `joinedload(Item.list_assignment).joinedload(ListAssignment.source_item).joinedload(Item.inventory)` in `list_items_base` to keep database query counts constant O(1).
