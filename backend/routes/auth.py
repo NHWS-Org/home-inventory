@@ -365,7 +365,7 @@ def get_current_user_info(request: Request, db: Session = Depends(get_db)):
     if token:
         try:
             payload = jwt.decode(token, current_secret_key(), algorithms=[ALGORITHM])
-            username: str = payload.get("sub")
+            username = payload.get("sub")
             if not username:
                 raise jwt.InvalidTokenError()
         except jwt.InvalidTokenError:
@@ -373,37 +373,27 @@ def get_current_user_info(request: Request, db: Session = Depends(get_db)):
     else:
         username = None
 
-    if not username:
-        return {
+    unauthenticated_response = {
+        "id": None,
+        "username": None,
+        "email_masked": "",
+        "email": "",
+        "role": {
             "id": None,
-            "username": None,
-            "email_masked": "",
-            "email": "",
-            "role": {
-                "id": None,
-                "name": None
-            },
-            "is_blocked": None,
-            "data_ins": None,
-            "data_mod": None
-        }
+            "name": None
+        },
+        "is_blocked": None,
+        "data_ins": None,
+        "data_mod": None
+    }
+
+    if not username:
+        return unauthenticated_response
 
     user = authenticated_user(db, payload)
 
     if not user or user.is_blocked:
-        return {
-            "id": None,
-            "username": None,
-            "email_masked": "",
-            "email": "",
-            "role": {
-                "id": None,
-                "name": None
-            },
-            "is_blocked": None,
-            "data_ins": None,
-            "data_mod": None
-        }
+        return unauthenticated_response
 
     def mask_email(email: str) -> str:
         if not email or "@" not in email:
