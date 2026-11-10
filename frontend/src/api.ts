@@ -231,6 +231,10 @@ export async function getApiVersion(): Promise<{ version: string }> {
   return response.data;
 }
 
+export async function getRecentItemsLimit(): Promise<number> {
+  return (await api.get<{ limit: number }>("/system/recent-items-limit")).data.limit;
+}
+
 export interface AboutStats {
   available: boolean;
   active_installations: number | null;

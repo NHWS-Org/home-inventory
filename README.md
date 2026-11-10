@@ -24,6 +24,10 @@ docker-compose up --build -d
 - Frontend: <https://localhost>
 - Credenziali predefinite: `admin` / `12345`
 
+La homepage mostra agli utenti autenticati gli inventari e le liste accessibili
+piu recenti. Il limite `UI_RECENT_ITEMS_LIMIT` e configurato dall'admin; gli
+altri utenti possono leggerne solo il valore necessario alla homepage.
+
 ### HTTPS e certificati frontend
 
 Nginx espone HTTP sulla porta 80 solo per il redirect permanente (308) verso
@@ -481,6 +485,10 @@ docker-compose up --build -d
 - Backend API: <https://localhost/api>
 - Frontend: <https://localhost>
 - Default credentials: `admin` / `12345`
+
+The home page shows authenticated users their most recently modified accessible
+inventories and lists. The admin configures `UI_RECENT_ITEMS_LIMIT`; other users
+can read only the value needed by the home page.
 
 ### Frontend HTTPS
 
