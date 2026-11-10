@@ -10,6 +10,7 @@ from models import (
     SharedInventory,
     Group,
     SharedInventoryGroup,
+    UserGroupAssociation,
     RoleEnum,
     InventoryVersion,
     ItemVersion,
@@ -639,20 +640,12 @@ def list_access_details_base(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    # ⚡ Bolt optimization: Eager-load owner, direct shares, and group shares with user roles
-    # in a single query to eliminate O(N) queries inside loops.
     inventory = (
         db.query(Inventory)
         .options(
             joinedload(Inventory.owner),
-            joinedload(Inventory.shared_with_users)
-            .joinedload(SharedInventory.user)
-            .joinedload(User.role),
-            joinedload(Inventory.shared_with_groups)
-            .joinedload(SharedInventoryGroup.group)
-            .joinedload(Group.user_associations)
-            .joinedload(UserGroupAssociation.user)
-            .joinedload(User.role),
+            joinedload(Inventory.shared_with_users),
+            joinedload(Inventory.shared_with_groups),
         )
         .filter_by(id=inventory_id, type=inventory_type)
         .first()
@@ -664,7 +657,7 @@ def list_access_details_base(
 
     access_details = []
 
-    # Utente proprietario (precaricato via joinedload)
+    # Utente proprietario
     owner = inventory.owner
     if owner is not None:
         access_details.append({
@@ -685,10 +678,17 @@ def list_access_details_base(
                 "group": None
             })
 
-    # Utenti condivisione diretta (precaricati via joinedload)
-    for share in inventory.shared_with_users:
-        shared_user = share.user
-        if shared_user is None or shared_user.role is None:
+    # Fetch users and roles in batches instead of lazy-loading each share.
+    direct_shared_users = (
+        db.query(User)
+        .join(SharedInventory, SharedInventory.user_id == User.id)
+        .filter(SharedInventory.inventory_id == inventory_id)
+        .options(joinedload(User.role))
+        .order_by(SharedInventory.id)
+        .all()
+    )
+    for shared_user in direct_shared_users:
+        if shared_user.role is None:
             continue
         access = "edit" if shared_user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
         access_details.append({
@@ -698,21 +698,27 @@ def list_access_details_base(
             "group": None
         })
 
-    # Utenti condivisione tramite gruppo (precaricati via joinedload)
-    for shared_group in inventory.shared_with_groups:
-        group = shared_group.group
-        if group is None:
+    # Utenti condivisione tramite gruppo
+    group_shared_rows = (
+        db.query(User, Group.name)
+        .join(UserGroupAssociation, UserGroupAssociation.user_id == User.id)
+        .join(Group, Group.id == UserGroupAssociation.group_id)
+        .join(SharedInventoryGroup, SharedInventoryGroup.group_id == Group.id)
+        .filter(SharedInventoryGroup.inventory_id == inventory_id)
+        .options(joinedload(User.role))
+        .order_by(SharedInventoryGroup.id, Group.id, User.id)
+        .all()
+    )
+    for shared_user, group_name in group_shared_rows:
+        if shared_user.role is None:
             continue
-        for assoc in group.user_associations:
-            if assoc.user is None or assoc.user.role is None:
-                continue
-            access = "edit" if assoc.user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
-            access_details.append({
-                "username": assoc.user.username,
-                "access": access,
-                "via": "group",
-                "group": group.name
-            })
+        access = "edit" if shared_user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
+        access_details.append({
+            "username": shared_user.username,
+            "access": access,
+            "via": "group",
+            "group": group_name
+        })
 
     return access_details
 
