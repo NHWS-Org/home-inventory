@@ -42,17 +42,21 @@ def override_get_db():
 
 @pytest.fixture
 def setup_db():
+    previous_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_db] = override_get_db
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     init_roles_and_admin(db)
     db.close()
     yield
+    Base.metadata.drop_all(bind=engine)
     app.dependency_overrides.clear()
+    app.dependency_overrides.update(previous_overrides)
 
 client = TestClient(app)
 
-def test_list_access_details_query_count_is_constant(setup_db):
+@pytest.mark.parametrize("inventory_type", ["INVENTORY", "CHECKLIST"])
+def test_list_access_details_query_count_is_constant(setup_db, inventory_type):
     """Verify that listing inventory access details executes O(1) queries rather than O(U + G*M) queries."""
     db = TestingSessionLocal()
     admin_role = db.query(Role).filter(Role.name == RoleEnum.admin.value).first()
@@ -63,7 +67,7 @@ def test_list_access_details_query_count_is_constant(setup_db):
     db.add(owner)
     db.commit()
 
-    inv = Inventory(name="Access Test Inventory", owner_id=owner.id, type="INVENTORY")
+    inv = Inventory(name="Access Test Inventory", owner_id=owner.id, type=inventory_type)
     db.add(inv)
     db.commit()
     inv_id = inv.id
@@ -109,7 +113,7 @@ def test_list_access_details_query_count_is_constant(setup_db):
 
     try:
         res = client.get(
-            f"/inventory/access_details/{inv_id}",
+            f"/{inventory_type.lower()}/access_details/{inv_id}",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert res.status_code == 200
@@ -132,10 +136,23 @@ def test_list_access_details_query_count_is_constant(setup_db):
         # Check direct share entries
         direct_entries = [d for d in data if d["via"] == "share"]
         assert len(direct_entries) == 10
+        assert [(d["username"], d["access"]) for d in direct_entries] == [
+            (f"direct_user_{i}", "edit" if i % 2 == 0 else "view")
+            for i in range(10)
+        ]
 
         # Check group entries
         group_entries = [d for d in data if d["via"] == "group"]
         assert len(group_entries) == 9
+        assert [(d["username"], d["access"], d["group"]) for d in group_entries] == [
+            (
+                f"group_user_{g_idx}_{u_idx}",
+                "edit" if u_idx == 0 else "view",
+                f"access_group_{g_idx}",
+            )
+            for g_idx in range(3)
+            for u_idx in range(3)
+        ]
 
         # Without batching, query count would be > 30 queries:
         # auth (1) + inventory (1) + owner lookup (1) + admins (1) +
