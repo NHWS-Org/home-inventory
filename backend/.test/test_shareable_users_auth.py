@@ -110,6 +110,47 @@ def test_moderator_cannot_get_shareable_users_for_unauthorized_inventory(setup_d
     )
     assert res.status_code == 403
 
+def test_blocked_users_are_excluded_from_shareable_users(setup_db):
+    db = TestingSessionLocal()
+    mod_role = db.query(Role).filter(Role.name == RoleEnum.moderator.value).first()
+    viewer_role = db.query(Role).filter(Role.name == RoleEnum.viewer.value).first()
+
+    mod_user = User(
+        username="mod_active",
+        hashed_password=hash_password("password"),
+        role_id=mod_role.id
+    )
+    active_viewer = User(
+        username="viewer_active",
+        hashed_password=hash_password("password"),
+        role_id=viewer_role.id,
+        is_blocked=False
+    )
+    blocked_viewer = User(
+        username="viewer_blocked",
+        hashed_password=hash_password("password"),
+        role_id=viewer_role.id,
+        is_blocked=True
+    )
+    db.add_all([mod_user, active_viewer, blocked_viewer])
+    db.commit()
+
+    inv = Inventory(name="Active Mod Inventory", owner_id=mod_user.id, type="INVENTORY")
+    db.add(inv)
+    db.commit()
+    inv_id = inv.id
+    db.close()
+
+    token = create_access_token({"sub": "mod_active"})
+    res = client.get(
+        f"/user/users/shareable/{inv_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert res.status_code == 200
+    usernames = [u["username"] for u in res.json()]
+    assert "viewer_active" in usernames
+    assert "viewer_blocked" not in usernames
+
 def test_viewer_cannot_get_shareable_users(setup_db):
     db = TestingSessionLocal()
     mod_role = db.query(Role).filter(Role.name == RoleEnum.moderator.value).first()
