@@ -424,13 +424,17 @@ def get_item_history(item_id: int, db: Session = Depends(get_db), user=Depends(g
             .order_by(ItemVersion.version_num.desc())
             .first()
         )
-        if latest:
-            source_inventory = db.query(Inventory).filter(Inventory.id == latest.inventory_id).first()
-            if source_inventory and not can_access_inventory(user, source_inventory, action="view"):
-                raise HTTPException(status_code=403, detail="Accesso negato")
-            # Se l'inventario non esiste più, limitiamo la visibilità agli admin
-            if not source_inventory and user.role.name != "admin":
-                raise HTTPException(status_code=403, detail="Accesso negato")
+        if not latest:
+            raise HTTPException(status_code=404, detail="Item non trovato")
+        # Security: Consistent with deleted inventory history, reject users with viewer role
+        if user.role.name == "viewer":
+            raise HTTPException(status_code=403, detail="Accesso negato")
+        source_inventory = db.query(Inventory).filter(Inventory.id == latest.inventory_id).first()
+        if source_inventory and not can_access_inventory(user, source_inventory, action="view"):
+            raise HTTPException(status_code=403, detail="Accesso negato")
+        # Se l'inventario non esiste più, limitiamo la visibilità agli admin
+        if not source_inventory and user.role.name != "admin":
+            raise HTTPException(status_code=403, detail="Accesso negato")
 
     versions = (
         db.query(ItemVersion)
