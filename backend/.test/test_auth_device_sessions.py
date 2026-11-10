@@ -154,3 +154,48 @@ def test_user_cannot_revoke_another_users_device_session(setup_db):
         headers={"Authorization": "Bearer " + own_token},
     )
     assert response.status_code == 404
+
+
+def test_revoked_session_returns_unauthenticated_on_me(setup_db):
+    login_response = client.post(
+        "/auth/login",
+        data={"username": "device_user", "password": "password123"},
+    )
+    token = login_response.json()["access_token"]
+    auth_headers = {"Authorization": "Bearer " + token}
+
+    me_before = client.get("/auth/me", headers=auth_headers)
+    assert me_before.status_code == 200
+    assert me_before.json()["username"] == "device_user"
+
+    sessions = client.get("/auth/sessions", headers=auth_headers).json()
+    session_id = sessions[0]["id"]
+
+    revoke_resp = client.delete(f"/auth/sessions/{session_id}", headers=auth_headers)
+    assert revoke_resp.status_code == 200
+
+    me_after = client.get("/auth/me", headers=auth_headers)
+    assert me_after.status_code == 200
+    assert me_after.json()["id"] is None
+    assert me_after.json()["username"] is None
+
+
+def test_logout_invalidates_me(setup_db):
+    login_response = client.post(
+        "/auth/login",
+        data={"username": "device_user", "password": "password123"},
+    )
+    token = login_response.json()["access_token"]
+    auth_headers = {"Authorization": "Bearer " + token}
+
+    me_before = client.get("/auth/me", headers=auth_headers)
+    assert me_before.status_code == 200
+    assert me_before.json()["username"] == "device_user"
+
+    logout_resp = client.post("/auth/logout", headers=auth_headers)
+    assert logout_resp.status_code == 200
+
+    me_after = client.get("/auth/me", headers=auth_headers)
+    assert me_after.status_code == 200
+    assert me_after.json()["id"] is None
+    assert me_after.json()["username"] is None

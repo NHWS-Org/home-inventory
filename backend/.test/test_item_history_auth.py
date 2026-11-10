@@ -7,185 +7,91 @@ from sqlalchemy.pool import StaticPool
 from main import app
 from database import Base
 from dependencies import get_db
-from models import User, Role, RoleEnum, Inventory, Item, ItemVersion, SharedInventory
+from models import User, Role, Inventory, Item, ItemVersion, SharedInventory
 from routes.auth import get_current_user
 
 
 @pytest.fixture
 def auth_ctx():
     engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
+        "sqlite:///:memory:", connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    db = Session()
+    factory = sessionmaker(bind=engine)
+    with factory.begin() as db:
+        db.add_all([Role(id=1, name="admin"), Role(id=2, name="moderator"), Role(id=3, name="viewer")])
+        db.flush()
+        db.add_all([
+            User(id=1, username="admin", role_id=1),
+            User(id=2, username="owner", role_id=2),
+            User(id=3, username="other", role_id=2),
+            User(id=4, username="viewer", role_id=3),
+            User(id=5, username="shared_viewer", role_id=3),
+        ])
+        db.flush()
+        db.add(Inventory(id=1, name="Owner inventory", owner_id=2, type="INVENTORY"))
+        db.flush()
+        db.add(SharedInventory(user_id=5, inventory_id=1))
+        db.add(Item(id=10, name="Active", inventory_id=1, quantity=5))
+        db.add_all([
+            ItemVersion(item_id=10, inventory_id=1, name="Active", quantity=5,
+                        version_num=1, operation="CREATE", changed_by_id=2),
+            ItemVersion(item_id=20, inventory_id=1, name="Deleted", quantity=5,
+                        version_num=1, operation="CREATE", changed_by_id=2),
+            ItemVersion(item_id=20, inventory_id=1, name="Deleted", quantity=5,
+                        version_num=2, operation="DELETE", changed_by_id=2),
+            ItemVersion(item_id=30, inventory_id=999, name="Orphan", quantity=1,
+                        version_num=1, operation="CREATE", changed_by_id=2),
+        ])
+    current = [2]
 
-    admin_role = Role(name=RoleEnum.admin.value)
-    mod_role = Role(name=RoleEnum.moderator.value)
-    viewer_role = Role(name=RoleEnum.viewer.value)
-    db.add_all([admin_role, mod_role, viewer_role])
-    db.commit()
+    def database():
+        with factory() as db:
+            yield db
 
-    admin_user = User(username="admin", hashed_password="x", role_id=admin_role.id)
-    mod_owner = User(username="mod_owner", hashed_password="x", role_id=mod_role.id)
-    mod_other = User(username="mod_other", hashed_password="x", role_id=mod_role.id)
-    viewer_user = User(username="viewer", hashed_password="x", role_id=viewer_role.id)
-    viewer_shared = User(username="viewer_shared", hashed_password="x", role_id=viewer_role.id)
-    db.add_all([admin_user, mod_owner, mod_other, viewer_user, viewer_shared])
-    db.commit()
-
-    # Active inventory owned by mod_owner
-    inv1 = Inventory(name="Owner Inv", type="INVENTORY", owner_id=mod_owner.id, user_ins=mod_owner.id)
-    # Another inventory not accessible to viewer_user or mod_other
-    inv2 = Inventory(name="Other Inv", type="INVENTORY", owner_id=mod_other.id, user_ins=mod_other.id)
-    db.add_all([inv1, inv2])
-    db.commit()
-
-    # Share inv1 with viewer_shared
-    shared = SharedInventory(user_id=viewer_shared.id, inventory_id=inv1.id)
-    db.add(shared)
-    db.commit()
-
-    # Live item in inv1
-    item_live = Item(id=1, name="Live Item", quantity=5, inventory_id=inv1.id, user_ins=mod_owner.id)
-    # Live item in inv2
-    item_other = Item(id=2, name="Other Item", quantity=2, inventory_id=inv2.id, user_ins=mod_other.id)
-    db.add_all([item_live, item_other])
-    db.commit()
-
-    # Versions for live item 1
-    ver_live = ItemVersion(
-        item_id=1,
-        inventory_id=inv1.id,
-        name="Live Item",
-        quantity=5,
-        version_num=1,
-        operation="CREATE",
-        changed_by_id=mod_owner.id,
-    )
-
-    # Deleted item history: item_id = 100, formerly in inv1 (no live item row in items table)
-    ver_del1 = ItemVersion(
-        item_id=100,
-        inventory_id=inv1.id,
-        name="Deleted Item",
-        quantity=10,
-        version_num=1,
-        operation="CREATE",
-        changed_by_id=mod_owner.id,
-    )
-    ver_del2 = ItemVersion(
-        item_id=100,
-        inventory_id=inv1.id,
-        name="Deleted Item",
-        quantity=0,
-        version_num=2,
-        operation="DELETE",
-        changed_by_id=mod_owner.id,
-    )
-
-    db.add_all([ver_live, ver_del1, ver_del2])
-    db.commit()
-
-    state = {"user_id": mod_owner.id}
-
-    def override_db():
-        session = Session()
-        try:
-            yield session
-        finally:
-            session.close()
-
-    def override_user():
-        session = Session()
-        try:
-            yield session.get(User, state["user_id"])
-        finally:
-            session.close()
+    def user():
+        with factory() as db:
+            row = db.get(User, current[0])
+            row.role
+            row.group_associations
+            return row
 
     previous = dict(app.dependency_overrides)
-    app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[get_current_user] = override_user
-
-    yield {
-        "client": TestClient(app),
-        "db": db,
-        "admin_user": admin_user,
-        "mod_owner": mod_owner,
-        "mod_other": mod_other,
-        "viewer_user": viewer_user,
-        "viewer_shared": viewer_shared,
-        "state": state,
-    }
-
-    app.dependency_overrides.clear()
-    app.dependency_overrides.update(previous)
+    app.dependency_overrides[get_db] = database
+    app.dependency_overrides[get_current_user] = user
+    try:
+        yield TestClient(app), current
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(previous)
+        engine.dispose()
 
 
-def test_nonexistent_item_history_returns_404(auth_ctx):
-    client = auth_ctx["client"]
-    auth_ctx["state"]["user_id"] = auth_ctx["mod_owner"].id
-
-    res = client.get("/item/9999/history")
-    assert res.status_code == 404
-    assert res.json()["detail"] == "Item non trovato"
-
-
-def test_live_item_history_unauthorized_user_forbidden(auth_ctx):
-    client = auth_ctx["client"]
-    # mod_other cannot view item 1 in inv1
-    auth_ctx["state"]["user_id"] = auth_ctx["mod_other"].id
-
-    res = client.get("/item/1/history")
-    assert res.status_code == 403
-    assert res.json()["detail"] == "Accesso negato"
+@pytest.mark.parametrize("user_id", [1, 2, 3, 4, 5])
+def test_nonexistent_item_history_returns_404(auth_ctx, user_id):
+    client, current = auth_ctx
+    current[0] = user_id
+    response = client.get("/item/99999/history")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Item non trovato"
 
 
-def test_deleted_item_history_unauthorized_user_forbidden(auth_ctx):
-    client = auth_ctx["client"]
-    # mod_other cannot view deleted item 100 from inv1
-    auth_ctx["state"]["user_id"] = auth_ctx["mod_other"].id
-
-    res = client.get("/item/100/history")
-    assert res.status_code == 403
-    assert res.json()["detail"] == "Accesso negato"
-
-
-def test_deleted_item_history_viewer_forbidden(auth_ctx):
-    client = auth_ctx["client"]
-    # viewer_shared has view access to inv1, but viewers cannot access deleted entity history
-    auth_ctx["state"]["user_id"] = auth_ctx["viewer_shared"].id
-
-    res = client.get("/item/100/history")
-    assert res.status_code == 403
-    assert res.json()["detail"] == "Accesso negato"
-
-
-def test_authorized_users_can_access_live_and_deleted_item_history(auth_ctx):
-    client = auth_ctx["client"]
-
-    # mod_owner can view live item history
-    auth_ctx["state"]["user_id"] = auth_ctx["mod_owner"].id
-    res_live = client.get("/item/1/history")
-    assert res_live.status_code == 200
-    assert len(res_live.json()) == 1
-
-    # viewer_shared can view live item history in shared inv1
-    auth_ctx["state"]["user_id"] = auth_ctx["viewer_shared"].id
-    res_live_viewer = client.get("/item/1/history")
-    assert res_live_viewer.status_code == 200
-    assert len(res_live_viewer.json()) == 1
-
-    # mod_owner can view deleted item history
-    auth_ctx["state"]["user_id"] = auth_ctx["mod_owner"].id
-    res_del_owner = client.get("/item/100/history")
-    assert res_del_owner.status_code == 200
-    assert len(res_del_owner.json()) == 2
-
-    # admin can view deleted item history
-    auth_ctx["state"]["user_id"] = auth_ctx["admin_user"].id
-    res_del_admin = client.get("/item/100/history")
-    assert res_del_admin.status_code == 200
-    assert len(res_del_admin.json()) == 2
+@pytest.mark.parametrize("user_id,item_id,status,count", [
+    (1, 10, 200, 1), (2, 10, 200, 1), (3, 10, 403, 0),
+    (4, 10, 403, 0), (5, 10, 200, 1),
+    (1, 20, 200, 2), (2, 20, 200, 2), (3, 20, 403, 0),
+    (4, 20, 403, 0), (5, 20, 403, 0),
+    (1, 30, 200, 1), (2, 30, 403, 0), (3, 30, 403, 0),
+    (4, 30, 403, 0), (5, 30, 403, 0),
+])
+def test_history_access_for_active_deleted_and_orphan_items(auth_ctx, user_id, item_id, status, count):
+    client, current = auth_ctx
+    current[0] = user_id
+    response = client.get(f"/item/{item_id}/history")
+    assert response.status_code == status
+    if status == 200:
+        assert len(response.json()) == count
+        assert response.json()[0]["version_num"] == 1
+    else:
+        assert response.json()["detail"] == "Accesso negato"
