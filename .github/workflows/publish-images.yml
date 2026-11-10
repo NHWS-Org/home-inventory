@@ -1,13 +1,6 @@
 name: Publish Docker images
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - ".github/workflows/publish-images.yml"
-      - "!**/*.md"
   workflow_dispatch:
     inputs:
       channel:
@@ -47,7 +40,7 @@ jobs:
           backend_version="$(grep '^API_VERSION=' backend/.env | cut -d '=' -f2)"
           frontend_version="$(node -p "require('./frontend/package.json').version")"
 
-          # Il push su main pubblica sempre la release; "dev" solo da avvio manuale
+          # Il canale selezionato manualmente determina i tag pubblicati.
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$INPUT_CHANNEL" == "dev" ]]; then
             suffix="-dev"
             channel="dev"
