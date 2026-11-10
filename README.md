@@ -301,11 +301,10 @@ Le immagini multi-architettura (amd64 e arm64) vengono pubblicate sia su Docker 
 
 #### Con GitHub Actions (consigliato)
 
-Il workflow [publish-images.yml](.github/workflows/publish-images.yml) pubblica le immagini in questi casi:
+Il workflow [publish-images.yml](.github/workflows/publish-images.yml) pubblica le immagini solo su avvio manuale; i push non avviano build e non sono previste esecuzioni schedulate:
 
 | Evento | Tag pubblicati |
 |---|---|
-| Push su `main` (solo se cambiano `backend/`, `frontend/` o il workflow; i file `.md` sono ignorati) | `latest` e `<versione>` |
 | Avvio manuale con canale `dev` (**Actions → Publish Docker images → Run workflow**, da qualsiasi branch) | `dev` e `<versione>-dev` |
 | Avvio manuale con canale `release` | `latest` e `<versione>` |
 
@@ -578,11 +577,10 @@ Multi-platform images (amd64 and arm64) are published to both Docker Hub and Git
 
 #### With GitHub Actions (recommended)
 
-The [publish-images.yml](.github/workflows/publish-images.yml) workflow publishes images in these cases:
+The [publish-images.yml](.github/workflows/publish-images.yml) workflow publishes images only when manually dispatched; pushes do not trigger builds and there are no scheduled runs:
 
 | Event | Published tags |
 |---|---|
-| Push to `main` (only if `backend/`, `frontend/` or the workflow change; `.md` files are ignored) | `latest` and `<version>` |
 | Manual run with `dev` channel (**Actions → Publish Docker images → Run workflow**, from any branch) | `dev` and `<version>-dev` |
 | Manual run with `release` channel | `latest` and `<version>` |
 

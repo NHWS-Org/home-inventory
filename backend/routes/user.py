@@ -252,11 +252,12 @@ def get_shareable_users(inventory_id: int, db: Session = Depends(get_db), curren
         )
         shared_user_ids.update(uid for (uid,) in group_user_ids)
 
-    # Tutti gli utenti non admin, con ruolo pre-caricato per evitare N+1 in fase di serializzazione UserResponse
+    # Security: Defense-in-depth to exclude blocked/deactivated users from being discovered or shared with.
+    # Tutti gli utenti non admin attivi, con ruolo pre-caricato per evitare N+1 in fase di serializzazione UserResponse
     all_users = (
         db.query(User)
         .options(joinedload(User.role))
-        .filter(User.role.has(Role.name != "admin"))
+        .filter(User.role.has(Role.name != "admin"), User.is_blocked.is_(False))
         .all()
     )
 

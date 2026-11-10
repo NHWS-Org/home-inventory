@@ -470,6 +470,7 @@ class SharedInventory(Base, LoggingData):
     user_id = Column(Integer, ForeignKey("users.id"))
 
     inventory = relationship("Inventory", back_populates="shared_with_users")
+    user = relationship("User", foreign_keys=[user_id])
 
 ################################################
 class SharedInventoryGroup(Base, LoggingData):
