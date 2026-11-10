@@ -10,6 +10,7 @@ from models import (
     SharedInventory,
     Group,
     SharedInventoryGroup,
+    UserGroupAssociation,
     RoleEnum,
     InventoryVersion,
     ItemVersion,
@@ -638,7 +639,17 @@ def list_access_details_base(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    inventory = db.query(Inventory).filter_by(id=inventory_id, type=inventory_type).first()
+    # ⚡ Bolt optimization: Eager load owner, shared_with_users, and shared_with_groups to eliminate N+1 queries.
+    inventory = (
+        db.query(Inventory)
+        .options(
+            joinedload(Inventory.owner),
+            joinedload(Inventory.shared_with_users),
+            joinedload(Inventory.shared_with_groups),
+        )
+        .filter_by(id=inventory_id, type=inventory_type)
+        .first()
+    )
     if not inventory:
         raise HTTPException(status_code=404, detail="Inventario non trovato")
     if not can_access_inventory(user, inventory, action="view"):
@@ -647,7 +658,7 @@ def list_access_details_base(
     access_details = []
 
     # Utente proprietario
-    owner = db.query(User).get(inventory.owner_id)
+    owner = inventory.owner
     if owner is not None:
         access_details.append({
             "username": owner.username,
@@ -667,10 +678,19 @@ def list_access_details_base(
                 "group": None
             })
 
-    # Utenti condivisione diretta
-    for share in inventory.shared_with_users:
-        shared_user = db.query(User).get(share.user_id)
-        if shared_user is None or shared_user.role is None:
+    # ⚡ Bolt optimization: Batch load direct shares and group shares with joined roles
+    # instead of issuing individual User/Group queries per share (eliminates O(U + G*M) N+1 queries).
+    # Impact: Reduces query count from O(U + G*M) to O(1) constant queries.
+    direct_shared_users = (
+        db.query(User)
+        .join(SharedInventory, SharedInventory.user_id == User.id)
+        .filter(SharedInventory.inventory_id == inventory_id)
+        .options(joinedload(User.role))
+        .order_by(SharedInventory.id)
+        .all()
+    )
+    for shared_user in direct_shared_users:
+        if shared_user.role is None:
             continue
         access = "edit" if shared_user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
         access_details.append({
@@ -681,18 +701,26 @@ def list_access_details_base(
         })
 
     # Utenti condivisione tramite gruppo
-    for shared_group in inventory.shared_with_groups:
-        group = db.query(Group).get(shared_group.group_id)
-        if group is None:
+    group_shared_rows = (
+        db.query(User, Group.name)
+        .join(UserGroupAssociation, UserGroupAssociation.user_id == User.id)
+        .join(Group, Group.id == UserGroupAssociation.group_id)
+        .join(SharedInventoryGroup, SharedInventoryGroup.group_id == Group.id)
+        .filter(SharedInventoryGroup.inventory_id == inventory_id)
+        .options(joinedload(User.role))
+        .order_by(SharedInventoryGroup.id, Group.id, User.id)
+        .all()
+    )
+    for shared_user, group_name in group_shared_rows:
+        if shared_user.role is None:
             continue
-        for assoc in group.user_associations:
-            access = "edit" if assoc.user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
-            access_details.append({
-                "username": assoc.user.username,
-                "access": access,
-                "via": "group",
-                "group": group.name
-            })
+        access = "edit" if shared_user.role.name in (RoleEnum.admin.value, RoleEnum.moderator.value) else "view"
+        access_details.append({
+            "username": shared_user.username,
+            "access": access,
+            "via": "group",
+            "group": group_name
+        })
 
     return access_details
 
