@@ -95,7 +95,7 @@ def test_defaults_and_single_inbox_entry_per_event_user(engine):
         assert record.attempts == 0
         assert record.created_at is not None
         assert record.available_at is not None
-        assert preference.in_app_enabled is True
+        assert preference.in_app_enabled is False
         assert preference.push_enabled is False
         assert preference.include_own_actions is False
         db.add(Notification(event_id=record.id, user_id=1))

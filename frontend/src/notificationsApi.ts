@@ -62,9 +62,9 @@ export function notificationIndicator(row: InboxNotification): { symbol: string;
   if (event.event_type === "item_updated" && event.operation === "deleted") return { symbol: "🔴✕", label: "Elemento eliminato" };
   if (event.event_type === "item_quantity_changed") {
     if (row.inventory_type === "CHECKLIST") return event.quantity >= 1
-      ? { symbol: "🟢✓", label: "Completato" } : { symbol: "🔴↶", label: "Da completare" };
+      ? { symbol: "🟡☑", label: "Completato" } : { symbol: "🟡☐", label: "Da completare" };
     return event.quantity > event.previous_quantity
-      ? { symbol: "🟢↑", label: "Quantità aumentata" } : { symbol: "🔴↓", label: "Quantità diminuita" };
+      ? { symbol: "🟡↑", label: "Quantità aumentata" } : { symbol: "🟡↓", label: "Quantità diminuita" };
   }
   return { symbol: "🟡✎", label: event.event_type === "inventory_updated" ? "Contenitore modificato" : "Elemento modificato" };
 }

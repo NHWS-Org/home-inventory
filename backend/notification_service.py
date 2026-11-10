@@ -14,7 +14,7 @@ from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 
 
 def default_in_app(event_type: str) -> bool:
-    return event_type == "item_quantity_changed"
+    return False
 
 
 def can_receive(user: User, inventory: Inventory) -> bool:

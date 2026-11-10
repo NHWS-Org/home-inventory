@@ -67,7 +67,7 @@ test('notification selection handles pages, all, read, permanent deletion, cance
   };
   await act(async () => root.render(createElement(MemoryRouter, null, createElement(NotificationsPage))));
   assert.equal(checkboxes().length, 50);
-  assert.match(document.body.textContent, /🔴↓/);
+  assert.match(document.body.textContent, /🟡↓/);
   assert.ok(button('Elimina selezionate').disabled);
   await click(checkboxes()[0]);
   await click(checkboxes()[1]);

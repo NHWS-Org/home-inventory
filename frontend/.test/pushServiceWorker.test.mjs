@@ -43,7 +43,7 @@ test('push displays detailed payload without touching authenticated API or cache
   let wait;
   listeners.get('push')({
     data: { json: () => ({
-      title: '📦 Dispensa', body: '🟢↑ Riso · +1 (2 → 3)',
+      title: '📦 Dispensa', body: '🟡↑ Riso · +1 (2 → 3)',
       tag: 'event-123', url: '/inventories/12',
     }) },
     waitUntil: (promise) => { wait = promise; },
@@ -52,7 +52,7 @@ test('push displays detailed payload without touching authenticated API or cache
   const [name, title, options] = calls[0];
   assert.equal(name, 'showNotification');
   assert.equal(title, '📦 Dispensa');
-  assert.equal(options.body, '🟢↑ Riso · +1 (2 → 3)');
+  assert.equal(options.body, '🟡↑ Riso · +1 (2 → 3)');
   assert.equal(options.data.url, 'https://inventory.example/inventories/12');
   assert.equal(options.tag, 'event-123');
 });
@@ -71,7 +71,7 @@ test('malformed payload uses generic safe defaults', async () => {
 });
 
 test('all operation symbols reach native notifications unchanged', async () => {
-  for (const symbol of ['🟢＋', '🟡✎', '🔴✕', '🟢↑', '🔴↓', '🟢✓', '🔴↶']) {
+  for (const symbol of ['🟢＋', '🟡✎', '🔴✕', '🟡↑', '🟡↓', '🟡☑', '🟡☐']) {
     const { listeners, calls } = createWorker();
     let wait;
     listeners.get('push')({

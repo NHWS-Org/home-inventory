@@ -230,11 +230,7 @@ class NotificationPreference(Base, LoggingData):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(32), nullable=False)
-    in_app_enabled = Column(
-        Boolean, nullable=False,
-        default=lambda context: context.get_current_parameters().get("event_type") == "item_quantity_changed",
-        server_default="0",
-    )
+    in_app_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
     push_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
     include_own_actions = Column(Boolean, nullable=False, default=False, server_default="0")
 

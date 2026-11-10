@@ -23,12 +23,14 @@ preferenza o richiesta del consenso push per eventi che non possono ricevere.
 
 | Evento | Quando | Inbox predefinita |
 |---|---|---|
-| `item_quantity_changed` | Qualsiasi variazione di quantita o spunta di una singola riga | Attiva |
+| `item_quantity_changed` | Qualsiasi variazione di quantita o spunta di una singola riga | Disattiva |
 | `item_updated` | Creazione o eliminazione di un elemento oppure modifica effettiva dei suoi dettagli | Disattiva |
 | `inventory_updated` | Modifica effettiva del contenitore, attualmente il nome | Disattiva |
 
-I valori predefiniti valgono per utenti nuovi e per l'inizializzazione della
-migrazione. Il push e sempre disattivato di default e richiede due consensi:
+Tutti gli eventi sono disattivati per inbox e push per gli utenti nuovi e
+all'inizializzazione della migrazione. La migrazione a preferenze personali
+elimina le vecchie preferenze; se e gia stata applicata, non viene rieseguita
+e le preferenze personali gia salvate restano invariate. Il push richiede due consensi:
 preferenza personale per evento e attivazione esplicita del browser.
 Le azioni proprie sono escluse salvo scelta di **Mie azioni**.
 Inbox e push sono indipendenti.
@@ -67,6 +69,9 @@ usano il grace period delle quantita.
 
 La campanella mostra il numero di notifiche non lette accessibili, aggiornato
 ogni 30 secondi, al focus e dopo la lettura. Un errore non viene mostrato come zero.
+La voce Notifiche e nascosta quando tutte le preferenze inbox e push sono
+disattivate; riappare dopo l'attivazione di almeno una preferenza. La
+disattivazione non cancella le notifiche gia ricevute.
 Con notifiche non lette l'icona oscilla su desktop e mobile; l'animazione si
 ferma a zero e rispetta la preferenza di sistema per ridurre il movimento.
 La voce è nella sidebar desktop e nella barra di navigazione inferiore mobile;
@@ -245,8 +250,8 @@ iOS/Android senza dipendere dal supporto a immagini personalizzate:
 | 🟢＋ | Creazione elemento |
 | 🟡✎ | Modifica elemento o contenitore |
 | 🔴✕ | Eliminazione elemento |
-| 🟢↑ / 🔴↓ | Aumento / diminuzione quantita |
-| 🟢✓ / 🔴↶ | Completamento / rimozione spunta |
+| 🟡↑ / 🟡↓ | Aumento / diminuzione quantita |
+| 🟡☑ / 🟡☐ | Completato / non completato (casella vuota) |
 
 Il simbolo sostituisce diciture come "Nuovo elemento"; `×2` indica la quantita
 iniziale, `-1 (2 → 1)` una variazione. Forma e descrizioni accessibili nel

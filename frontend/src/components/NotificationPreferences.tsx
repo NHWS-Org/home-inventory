@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getNotificationPreferences, notificationLabels, saveNotificationPreference, type NotificationPreference } from "../notificationsApi";
+import { getNotificationPreferences, notificationLabels, notifyInboxChanged, saveNotificationPreference, type NotificationPreference } from "../notificationsApi";
 
 export default function NotificationPreferences() {
   const [rows, setRows] = useState<NotificationPreference[]>([]);
@@ -27,6 +27,7 @@ export default function NotificationPreferences() {
     setNotice("");
     try {
       await saveNotificationPreference(next);
+      notifyInboxChanged();
       setNotice(`Preferenze salvate: ${notificationLabels[row.event_type]}.`);
     } catch {
       setRows(previous => previous.map(p => p.event_type === row.event_type ? row : p));

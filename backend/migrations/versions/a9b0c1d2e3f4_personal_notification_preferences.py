@@ -39,7 +39,7 @@ def upgrade() -> None:
     for kind in ("item_quantity_changed", "item_updated", "inventory_updated"):
         bind.execute(preferences.insert().from_select(
             ["user_id", "event_type", "in_app_enabled", "push_enabled", "include_own_actions"],
-            sa.select(users.c.id, sa.literal(kind), sa.literal(kind == "item_quantity_changed"),
+            sa.select(users.c.id, sa.literal(kind), sa.literal(False),
                       sa.literal(False), sa.literal(False)),
         ))
 

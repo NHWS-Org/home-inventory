@@ -61,10 +61,10 @@ test('operation symbols are colored, distinguishable and accessible without colo
     ['INVENTORY', {event_type: 'item_updated', operation: 'created', quantity: 0}, '🟢＋', 'Elemento creato'],
     ['INVENTORY', {event_type: 'item_updated', operation: 'deleted'}, '🔴✕', 'Elemento eliminato'],
     ['INVENTORY', {event_type: 'item_updated', changed_fields: ['metadata']}, '🟡✎', 'Elemento modificato'],
-    ['INVENTORY', {event_type: 'item_quantity_changed', previous_quantity: 1, quantity: 2}, '🟢↑', 'Quantità aumentata'],
-    ['INVENTORY', {event_type: 'item_quantity_changed', previous_quantity: 2, quantity: 1}, '🔴↓', 'Quantità diminuita'],
-    ['CHECKLIST', {event_type: 'item_quantity_changed', previous_quantity: 0, quantity: 1}, '🟢✓', 'Completato'],
-    ['CHECKLIST', {event_type: 'item_quantity_changed', previous_quantity: 1, quantity: 0}, '🔴↶', 'Da completare'],
+    ['INVENTORY', {event_type: 'item_quantity_changed', previous_quantity: 1, quantity: 2}, '🟡↑', 'Quantità aumentata'],
+    ['INVENTORY', {event_type: 'item_quantity_changed', previous_quantity: 2, quantity: 1}, '🟡↓', 'Quantità diminuita'],
+    ['CHECKLIST', {event_type: 'item_quantity_changed', previous_quantity: 0, quantity: 1}, '🟡☑', 'Completato'],
+    ['CHECKLIST', {event_type: 'item_quantity_changed', previous_quantity: 1, quantity: 0}, '🟡☐', 'Da completare'],
     ['INVENTORY', {event_type: 'inventory_updated', changed_fields: ['name']}, '🟡✎', 'Contenitore modificato'],
   ]) {
     const row = {inventory_type: type, item_name: 'Riso', event};

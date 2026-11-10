@@ -7,7 +7,7 @@ from alembic.operations import Operations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
-from sqlalchemy import create_engine, event, inspect, select
+from sqlalchemy import create_engine, delete, event, inspect, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -70,6 +70,10 @@ def setup():
             Item(id=2, name="A", quantity=0, inventory_id=2),
             Item(id=3, name="B", quantity=0, inventory_id=2),
         ])
+        db.add_all([
+            NotificationPreference(user_id=user_id, event_type="item_quantity_changed", in_app_enabled=True)
+            for user_id in range(1, 8)
+        ])
     app = FastAPI()
     for route, prefix in (
         (router, "/notifications"), (item_router, "/item"),
@@ -127,8 +131,10 @@ def patch_item(client, item_id, **payload):
 
 def test_fallback_and_new_user_defaults_and_orm_defaults(setup):
     factory, client, current = setup
+    with factory.begin() as db:
+        db.execute(delete(NotificationPreference))
     expected = [{
-        "event_type": kind, "in_app_enabled": kind == "item_quantity_changed",
+        "event_type": kind, "in_app_enabled": False,
         "push_enabled": False, "include_own_actions": False,
     } for kind in KINDS]
     assert client.get("/notifications/preferences").json() == expected
@@ -142,9 +148,20 @@ def test_fallback_and_new_user_defaults_and_orm_defaults(setup):
         rows = [NotificationPreference(user_id=8, event_type=kind) for kind in KINDS]
         db.add_all(rows)
         db.flush()
-        assert [row.in_app_enabled for row in rows] == [True, False, False]
+        assert [row.in_app_enabled for row in rows] == [False, False, False]
         assert all(not row.push_enabled and not row.include_own_actions for row in rows)
     assert client.get("/notifications/preferences").json() == expected
+
+
+def test_default_preferences_do_not_deliver_quantity_notifications(setup):
+    factory, client, _ = setup
+    with factory.begin() as db:
+        db.execute(delete(NotificationPreference))
+    patch_item(client, 1, quantity=6)
+    settle(factory)
+    with factory() as db:
+        assert db.scalars(select(Notification)).all() == []
+        assert db.scalars(select(PushDelivery)).all() == []
 
 
 @pytest.mark.parametrize("item_id,initial,new", [(1, 5, 9), (1, 5, 2), (2, 0, 1), (2, 1, 0)])
@@ -952,7 +969,7 @@ def test_forward_migration_resets_old_choices_preserves_sessions_and_subscriptio
         rows = connection.execute(select(NotificationPreference.__table__)).mappings().all()
         assert len(rows) == 6
         assert {(row["user_id"], row["event_type"], row["in_app_enabled"]) for row in rows} == {
-            (user, kind, kind == "item_quantity_changed") for user in (1, 2) for kind in KINDS
+            (user, kind, False) for user in (1, 2) for kind in KINDS
         }
         assert all(not row["push_enabled"] and not row["include_own_actions"] for row in rows)
         with Operations.context(context), pytest.raises(RuntimeError, match="irreversible"):

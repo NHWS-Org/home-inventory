@@ -280,11 +280,11 @@ def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str
         ) if inventory.type == "CHECKLIST" else f"×{quantity}"
     elif data["event_type"] == "item_quantity_changed":
         if inventory.type == "CHECKLIST":
-            symbol = "🟢✓" if data["quantity"] >= 1 else "🔴↶"
+            symbol = "🟡☑" if data["quantity"] >= 1 else "🟡☐"
             action = "Completato" if data["quantity"] >= 1 else "Da fare"
         else:
             delta = data["quantity"] - data["previous_quantity"]
-            symbol = "🟢↑" if delta > 0 else "🔴↓"
+            symbol = "🟡↑" if delta > 0 else "🟡↓"
             action = f"{delta:+d} ({data['previous_quantity']} → {data['quantity']})"
     else:
         labels = {

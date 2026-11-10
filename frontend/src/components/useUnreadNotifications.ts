@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { getUnreadCount, NOTIFICATIONS_CHANGED } from "../notificationsApi";
+import { getNotificationPreferences, getUnreadCount, NOTIFICATIONS_CHANGED } from "../notificationsApi";
 
 export function useUnreadNotifications(userId: number | null) {
-  const [result, setResult] = useState<{ userId: number; count: number | null; error: boolean } | null>(null);
+  const [result, setResult] = useState<{ userId: number; count: number | null; error: boolean; enabled: boolean } | null>(null);
   const [previousUserId, setPreviousUserId] = useState(userId);
   if (previousUserId !== userId) {
     setPreviousUserId(userId);
@@ -17,10 +17,12 @@ export function useUnreadNotifications(userId: number | null) {
       if (fetching) { pending = true; return; }
       fetching = true;
       try {
-        const next = await getUnreadCount();
-        if (active) setResult({ userId, count: next, error: false });
+        const preferences = await getNotificationPreferences();
+        const enabled = preferences.some(row => row.in_app_enabled || row.push_enabled);
+        const next = enabled ? await getUnreadCount() : 0;
+        if (active) setResult({ userId, count: next, error: false, enabled });
       } catch {
-        if (active) setResult({ userId, count: null, error: true });
+        if (active) setResult({ userId, count: null, error: true, enabled: true });
       } finally {
         fetching = false;
         if (pending && active) { pending = false; void refresh(); }
@@ -37,5 +39,5 @@ export function useUnreadNotifications(userId: number | null) {
       window.removeEventListener("focus", refresh);
     };
   }, [userId]);
-  return result?.userId === userId ? result : { count: null, error: false };
+  return result?.userId === userId ? result : { count: null, error: false, enabled: true };
 }

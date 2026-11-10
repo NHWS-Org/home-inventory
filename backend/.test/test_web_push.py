@@ -516,10 +516,10 @@ def test_detailed_push_identifies_resource_item_action_and_bounds_unicode(setup)
         ), actor_id=1)
         payload = push.notification_push_payload(db, record)
         assert payload["title"] == "📦 Dispensa"
-        assert payload["body"] == "🟢↑ Riso · +1 (2 → 3)"
+        assert payload["body"] == "🟡↑ Riso · +1 (2 → 3)"
         assert payload["url"] == "/inventories/1"
         inventory.type = "CHECKLIST"
-        assert push.notification_push_payload(db, record)["body"] == "🟢✓ Riso · Completato"
+        assert push.notification_push_payload(db, record)["body"] == "🟡☑ Riso · Completato"
         record.payload = {
             "event_type": "item_updated", "inventory_id": 1, "item_id": item.id,
             "changed_fields": ["description", "name"],
@@ -538,10 +538,10 @@ def test_detailed_push_identifies_resource_item_action_and_bounds_unicode(setup)
     ("INVENTORY", {"event_type": "item_updated", "operation": "created", "quantity": 0}, "🟢＋ Riso · ×0"),
     ("INVENTORY", {"event_type": "item_updated", "operation": "deleted"}, "🔴✕ Riso"),
     ("INVENTORY", {"event_type": "item_updated"}, "🟡✎ Riso · Titolo: Riso"),
-    ("INVENTORY", {"event_type": "item_quantity_changed", "previous_quantity": 1, "quantity": 2}, "🟢↑ Riso · +1 (1 → 2)"),
-    ("INVENTORY", {"event_type": "item_quantity_changed", "previous_quantity": 2, "quantity": 1}, "🔴↓ Riso · -1 (2 → 1)"),
-    ("CHECKLIST", {"event_type": "item_quantity_changed", "previous_quantity": 0, "quantity": 1}, "🟢✓ Riso · Completato"),
-    ("CHECKLIST", {"event_type": "item_quantity_changed", "previous_quantity": 1, "quantity": 0}, "🔴↶ Riso · Da fare"),
+    ("INVENTORY", {"event_type": "item_quantity_changed", "previous_quantity": 1, "quantity": 2}, "🟡↑ Riso · +1 (1 → 2)"),
+    ("INVENTORY", {"event_type": "item_quantity_changed", "previous_quantity": 2, "quantity": 1}, "🟡↓ Riso · -1 (2 → 1)"),
+    ("CHECKLIST", {"event_type": "item_quantity_changed", "previous_quantity": 0, "quantity": 1}, "🟡☑ Riso · Completato"),
+    ("CHECKLIST", {"event_type": "item_quantity_changed", "previous_quantity": 1, "quantity": 0}, "🟡☐ Riso · Da fare"),
 ])
 def test_push_compact_operation_symbols_match_inbox(setup, kind, event, body):
     from notification_contracts import notification_event_adapter

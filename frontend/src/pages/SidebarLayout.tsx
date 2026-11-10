@@ -177,7 +177,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
               <span>Liste</span>
             </NavLink>
           )}
-          {user && <NotificationBell {...notificationStatus} variant="desktop" navItemClass={navItemClass} />}
+          {user && notificationStatus.enabled && <NotificationBell {...notificationStatus} variant="desktop" navItemClass={navItemClass} />}
           {user && user.username && user.role?.name === 'admin' && (
             <NavLink
               to="/settings"
@@ -250,7 +250,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         {user?.username && <NavLink to="/checklists" className={({ isActive }) => navItemClass(isActive)}>
           <FiCheckSquare className="text-xl" aria-hidden="true" /><span className="flex h-4 items-center text-[11px] leading-tight">Liste</span>
         </NavLink>}
-        {user && <NotificationBell {...notificationStatus} variant="mobile" navItemClass={navItemClass} />}
+        {user && notificationStatus.enabled && <NotificationBell {...notificationStatus} variant="mobile" navItemClass={navItemClass} />}
         {user?.username && user.role?.name === 'admin' && <NavLink to="/settings" className={({ isActive }) => navItemClass(isActive)}>
           <FiSettings className="text-xl" aria-hidden="true" /><span className="flex h-4 items-center whitespace-nowrap text-[8px] leading-tight min-[375px]:text-[10px]">Impostazioni</span>
         </NavLink>}
