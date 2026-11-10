@@ -1162,15 +1162,19 @@ useEffect(() => {
       {inventory ? (
         <div>
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
-            <label className="hidden sm:inline text-sm font-medium">Ordina per:</label>
+            <label htmlFor="sort-by-select" className="hidden sm:inline text-sm font-medium">Ordina per:</label>
             {isChecklist && (
               <button
+                type="button"
                 onClick={() => {
                   const next = prioritySortOrder === 'desc' ? 'asc' : 'desc';
                   localStorage.setItem('item_prioritySortOrder', next);
                   setPrioritySortOrder(next);
                 }}
                 className="min-h-10 rounded border px-2 sm:min-h-0 sm:py-1 whitespace-nowrap"
+                aria-label={prioritySortOrder === 'desc'
+                  ? 'Priorità: prima alta (tocca per invertire)'
+                  : 'Priorità: prima bassa (tocca per invertire)'}
                 title={prioritySortOrder === 'desc'
                   ? 'Priorità: prima alta (tocca per invertire)'
                   : 'Priorità: prima bassa (tocca per invertire)'}
@@ -1179,6 +1183,8 @@ useEffect(() => {
               </button>
             )}
             <select
+              id="sort-by-select"
+              aria-label="Ordina per"
               value={isChecklist && sortBy === "quantity" ? "name" : sortBy}
               onChange={(e) => {
                 const value = e.target.value as 'name' | 'date' | 'quantity';
