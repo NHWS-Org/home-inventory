@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FiLoader } from "react-icons/fi";
+import { FiEye, FiEyeOff, FiLoader } from "react-icons/fi";
 import { registerUser, getSetting } from "../api";
 
 export default function RegisterPage() {
@@ -8,6 +8,8 @@ export default function RegisterPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordMatch, setPasswordMatch] = useState<null | boolean>(null);
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
@@ -81,45 +83,75 @@ export default function RegisterPage() {
           <label htmlFor="reg-password" className="block text-sm font-medium mb-1">
             Password <span className="text-red-500">*</span>
           </label>
-          <input
-            id="reg-password"
-            type="password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              setPasswordMatch(
-                e.target.value && confirmPassword
-                  ? e.target.value === confirmPassword
-                  : null
-              );
-            }}
-            className="w-full border p-2 rounded dark:bg-gray-800 dark:border-gray-700"
-            required
-            autoComplete="new-password"
-            disabled={!registrationEnabled || isLoading}
-          />
+          <div className="relative">
+            <input
+              id="reg-password"
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordMatch(
+                  e.target.value && confirmPassword
+                    ? e.target.value === confirmPassword
+                    : null
+                );
+              }}
+              className="w-full border p-2 pr-10 rounded dark:bg-gray-800 dark:border-gray-700"
+              required
+              autoComplete="new-password"
+              disabled={!registrationEnabled || isLoading}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? "Nascondi password" : "Mostra password"}
+              title={showPassword ? "Nascondi password" : "Mostra password"}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-r"
+            >
+              {showPassword ? (
+                <FiEyeOff className="h-5 w-5" aria-hidden="true" />
+              ) : (
+                <FiEye className="h-5 w-5" aria-hidden="true" />
+              )}
+            </button>
+          </div>
         </div>
         <div>
           <label htmlFor="reg-confirm-password" className="block text-sm font-medium mb-1">
             Conferma Password <span className="text-red-500">*</span>
           </label>
-          <input
-            id="reg-confirm-password"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => {
-              setConfirmPassword(e.target.value);
-              setPasswordMatch(
-                password && e.target.value
-                  ? password === e.target.value
-                  : null
-              );
-            }}
-            className="w-full border p-2 rounded dark:bg-gray-800 dark:border-gray-700"
-            required
-            autoComplete="new-password"
-            disabled={!registrationEnabled || isLoading}
-          />
+          <div className="relative">
+            <input
+              id="reg-confirm-password"
+              type={showConfirmPassword ? "text" : "password"}
+              value={confirmPassword}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value);
+                setPasswordMatch(
+                  password && e.target.value
+                    ? password === e.target.value
+                    : null
+                );
+              }}
+              className="w-full border p-2 pr-10 rounded dark:bg-gray-800 dark:border-gray-700"
+              required
+              autoComplete="new-password"
+              disabled={!registrationEnabled || isLoading}
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword((prev) => !prev)}
+              aria-label={showConfirmPassword ? "Nascondi password di conferma" : "Mostra password di conferma"}
+              title={showConfirmPassword ? "Nascondi password di conferma" : "Mostra password di conferma"}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-r"
+            >
+              {showConfirmPassword ? (
+                <FiEyeOff className="h-5 w-5" aria-hidden="true" />
+              ) : (
+                <FiEye className="h-5 w-5" aria-hidden="true" />
+              )}
+            </button>
+          </div>
         </div>
         {passwordMatch === false && (
           <p className="text-red-500 text-sm" role="status" aria-live="polite">Le password non coincidono.</p>
