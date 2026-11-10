@@ -27,8 +27,15 @@ fi
 
 echo "Configuring nginx proxy..."
 /tls.sh
-# Usa envsubst per sostituire BACKEND_BASE_URL nel file di template
-envsubst '${BACKEND_BASE_URL}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+export FRONTEND_HTTPS_PORT="${FRONTEND_HTTPS_PORT:-443}"
+case "$FRONTEND_HTTPS_PORT" in
+  ''|*[!0-9]*) echo "Invalid FRONTEND_HTTPS_PORT: expected a port from 1 to 65535" >&2; exit 1 ;;
+esac
+if [ "$FRONTEND_HTTPS_PORT" -lt 1 ] || [ "$FRONTEND_HTTPS_PORT" -gt 65535 ]; then
+  echo "Invalid FRONTEND_HTTPS_PORT: expected a port from 1 to 65535" >&2
+  exit 1
+fi
+envsubst '${BACKEND_BASE_URL} ${FRONTEND_HTTPS_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 
 if [ -z "${TLS_CERT_FILE:-}" ] && [ -z "${TLS_KEY_FILE:-}" ]; then
   (

@@ -20,17 +20,19 @@ Per avviare il progetto con Docker, clona questo repository ed esegui:
 docker-compose up --build -d
 ```
 
-- API backend: <https://localhost:3000/api>
-- Frontend: <https://localhost:3000>
+- API backend: <https://localhost/api>
+- Frontend: <https://localhost>
 - Credenziali predefinite: `admin` / `12345`
 
 ### HTTPS e certificati frontend
 
-Nginx espone solo HTTPS: il passaggio da HTTP cambia l'URL e il vecchio
-`http://localhost:3000` non funziona più. Entrambi i Compose pubblicano la porta
-container 443 sulla porta host 3000, modificabile con `FRONTEND_PORT`. Aggiornare
-eventuali reverse proxy che prima collegavano il container sulla porta 80;
-la connessione verso il backend nella rete Docker resta HTTP.
+Nginx espone HTTP sulla porta 80 solo per il redirect permanente (308) verso
+HTTPS sulla porta 443, conservando percorso e query string.
+Entrambi i Compose pubblicano di default le porte host 80 e 443, modificabili
+con `FRONTEND_HTTP_PORT` e `FRONTEND_PORT`. Un eventuale `FRONTEND_PORT=3000`
+gia configurato resta valido: il redirect punta a HTTPS sulla porta 3000.
+I reverse proxy devono collegarsi alla porta HTTPS, non alla porta HTTP di
+redirect, per evitare cicli. La connessione al backend nella rete Docker resta HTTP.
 HTTP e HTTPS sono origini browser diverse: occorre accedere nuovamente e
 riattivare le notifiche push su ciascun dispositivo dopo il passaggio a HTTPS.
 
@@ -41,7 +43,8 @@ privato root o nella shell, prima di creare il container:
 
 ```dotenv
 TLS_HOSTS=192.168.1.10,inventario.example.com
-FRONTEND_PORT=3000
+FRONTEND_HTTP_PORT=80
+FRONTEND_PORT=443
 ```
 
 Indicare gli IP e/o nomi DNS effettivamente usati dai browser, separati da
@@ -475,16 +478,19 @@ To run this project with Docker, clone this repository and run:
 docker-compose up --build -d
 ```
 
-- Backend API: <https://localhost:3000/api>
-- Frontend: <https://localhost:3000>
+- Backend API: <https://localhost/api>
+- Frontend: <https://localhost>
 - Default credentials: `admin` / `12345`
 
 ### Frontend HTTPS
 
-The frontend now serves HTTPS only on container port 443, published as host
-port 3000 (override with `FRONTEND_PORT`). Old HTTP URLs and reverse proxies
-targeting container port 80 must be updated. Traffic from nginx to the backend
-within Docker remains HTTP. HTTP and HTTPS are different browser origins:
+The frontend listens on HTTP port 80 only to permanently redirect (308) to
+HTTPS port 443, preserving the path and query string. Both Compose files publish
+host ports 80 and 443 by default (override with `FRONTEND_HTTP_PORT` and
+`FRONTEND_PORT`). An existing `FRONTEND_PORT=3000` remains supported: redirects
+target HTTPS port 3000. Reverse proxies must target HTTPS rather than the HTTP
+redirect port to avoid loops. Traffic from nginx to the backend within Docker
+remains HTTP. HTTP and HTTPS are different browser origins:
 users must log in again and re-enable push notifications on each device.
 
 By default a persistent local CA in Docker volume `frontendtls` signs a

@@ -36,7 +36,7 @@ COPY tls.sh /tls.sh
 COPY apply-env-icons.sh /apply-env-icons.sh
 RUN chmod +x /entrypoint.sh /tls.sh /apply-env-icons.sh
 
-EXPOSE 443
+EXPOSE 80 443
 
 ENV BACKEND_BASE_URL=http://localhost:8000
 
