@@ -242,10 +242,12 @@ def get_current_user_info(request: Request, db: Session = Depends(get_db)):
     if not token or scheme.lower() != "bearer":
         token = None
 
+    session_token_id = None
     if token:
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username: str = payload.get("sub")
+            username = payload.get("sub")
+            session_token_id = payload.get("jti")
             if not username:
                 raise jwt.InvalidTokenError()
         except jwt.InvalidTokenError:
@@ -253,37 +255,37 @@ def get_current_user_info(request: Request, db: Session = Depends(get_db)):
     else:
         username = None
 
-    if not username:
-        return {
+    unauthenticated_response = {
+        "id": None,
+        "username": None,
+        "email_masked": "",
+        "email": "",
+        "role": {
             "id": None,
-            "username": None,
-            "email_masked": "",
-            "email": "",
-            "role": {
-                "id": None,
-                "name": None
-            },
-            "is_blocked": None,
-            "data_ins": None,
-            "data_mod": None
-        }
+            "name": None
+        },
+        "is_blocked": None,
+        "data_ins": None,
+        "data_mod": None
+    }
+
+    if not username:
+        return unauthenticated_response
 
     user = db.query(User).filter(User.username == username).first()
 
     if not user or user.is_blocked:
-        return {
-            "id": None,
-            "username": None,
-            "email_masked": "",
-            "email": "",
-            "role": {
-                "id": None,
-                "name": None
-            },
-            "is_blocked": None,
-            "data_ins": None,
-            "data_mod": None
-        }
+        return unauthenticated_response
+
+    # Security: Validate active session token status to prevent revoked/expired sessions from accessing profile data
+    if session_token_id:
+        device_session = db.query(DeviceSession).filter(
+            DeviceSession.session_token_id == session_token_id,
+            DeviceSession.user_id == user.id,
+        ).first()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        if not device_session or device_session.revoked_at or device_session.expires_at <= now:
+            return unauthenticated_response
 
     def mask_email(email: str) -> str:
         if not email or "@" not in email:
