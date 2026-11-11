@@ -203,6 +203,28 @@ Entrambi i Compose controllano heartbeat e query DB. Una coda vuota e sana;
 `completed` significa elaborazione DB conclusa, non consegna push.
 Non usare vecchie immagini backend prive del contratto aggiornato.
 
+Il comando `python -m notification_worker --healthcheck` controlla prima
+heartbeat (massimo 120 secondi) e PID, poi esegue due query DB. Non carica
+outbox, VAPID o librerie di invio push. I log della sonda indicano la fase
+raggiunta e, in caso di successo, il tempo impiegato. Se il controllo scade,
+questo output si trova nella cronologia health di Docker, non nei normali log
+del processo worker.
+
+Lo stato `unhealthy` non riavvia da solo un container Docker Compose:
+`restart: always`/`unless-stopped` agiscono quando il processo termina.
+In caso di avvii ripetuti verificare contatore riavvii, exit code, OOM ed
+eventuali strumenti esterni di auto-healing. Ad esempio, per il container DEV:
+
+```sh
+docker inspect --format 'status={{.State.Status}} restarts={{.RestartCount}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' notification-worker-dev
+docker inspect --format '{{range .State.Health.Log}}{{.End}} exit={{.ExitCode}} {{.Output}}{{println}}{{end}}' notification-worker-dev
+docker exec notification-worker-dev python -m notification_worker --healthcheck
+```
+
+Il worker registra PID e data/ora all'avvio, il segnale ricevuto per gli
+arresti ordinati e la conclusione del processo. Un `SIGKILL`/OOM non consente
+di scrivere il log finale e va verificato tramite lo stato/eventi di Docker.
+
 ## Fase 4: Web Push backend e sessioni
 
 ### Configurazione dell'installazione

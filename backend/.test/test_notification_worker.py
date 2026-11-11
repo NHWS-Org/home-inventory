@@ -7,6 +7,7 @@ import time
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from models import Base
@@ -66,7 +67,7 @@ def test_healthcheck_does_not_log_private_exception_content(health, caplog):
     worker.write_heartbeat(path)
 
     def unavailable():
-        raise worker.SQLAlchemyError("private database connection details")
+        raise SQLAlchemyError("private database connection details")
 
     assert not worker.check_health(unavailable, path)
     assert "private database" not in caplog.text
@@ -101,11 +102,58 @@ def test_running_worker_cli_healthcheck_and_clean_shutdown(tmp_path):
         assert result.returncode == 0, result.stderr.decode()
     finally:
         process.terminate()
-        process.communicate(timeout=10)
+        _stdout, stderr = process.communicate(timeout=10)
     assert process.returncode == 0
+    assert b"received signal 15; stopping" in stderr
+    assert b"Notification worker stopped" in stderr
     assert not path.exists()
     result = subprocess.run(
         [*command, "--healthcheck"], cwd=directory, env=environment,
         capture_output=True, timeout=10,
     )
     assert result.returncode == 1
+
+
+@pytest.mark.parametrize("healthy", [False, True])
+def test_cli_probe_finishes_within_docker_timeout_without_delivery_imports(tmp_path, healthy):
+    database = tmp_path / "probe.db"
+    if healthy:
+        engine = create_engine(f"sqlite:///{database}")
+        Base.metadata.create_all(engine)
+        engine.dispose()
+        worker.write_heartbeat(tmp_path / worker.HEARTBEAT_PATH.name)
+    script = """
+import importlib.abc
+import runpy
+import sys
+
+missing = sys.argv[1] == "missing"
+
+class ProbeImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        forbidden = {"web_push", "push_config", "notification_outbox"}
+        if missing:
+            forbidden.update({"database", "models", "sqlalchemy"})
+        if fullname.split(".")[0] in forbidden:
+            raise AssertionError("Healthcheck loaded unnecessary module: " + fullname)
+
+sys.meta_path.insert(0, ProbeImports())
+sys.argv = ["notification_worker", "--healthcheck"]
+runpy.run_module("notification_worker", run_name="__main__")
+"""
+    environment = {
+        **os.environ, "DATABASE_TYPE": "SQLITE", "DATABASE_URL": f"sqlite:///{database}",
+        "TMPDIR": str(tmp_path),
+    }
+    started = time.monotonic()
+    result = subprocess.run(
+        [sys.executable, "-c", script, "healthy" if healthy else "missing"],
+        cwd=Path(__file__).resolve().parents[1], env=environment,
+        capture_output=True, text=True, timeout=5,
+    )
+    assert time.monotonic() - started < 5
+    assert result.returncode == (0 if healthy else 1), result.stderr
+    assert "Traceback" not in result.stderr
+    assert "Healthcheck: checking worker heartbeat" in result.stderr
+    if healthy:
+        assert "Healthcheck: checking database" in result.stderr

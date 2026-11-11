@@ -243,7 +243,7 @@ def test_worker_once_processes_missing_inventory_without_sending(factory, monkey
 
     with factory.begin() as db:
         enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
-    monkeypatch.setattr(notification_worker, "SessionLocal", factory)
+    monkeypatch.setattr("database.SessionLocal", factory)
     monkeypatch.setattr("sys.argv", ["notification_worker", "--once"])
     monkeypatch.setattr(notification_worker.signal, "signal", lambda *args: None)
     notification_worker.main()
@@ -256,7 +256,7 @@ def test_worker_status_does_not_claim_pending_event(factory, monkeypatch, caplog
     import notification_worker
 
     event_id = enqueue(factory)
-    monkeypatch.setattr(notification_worker, "SessionLocal", factory)
+    monkeypatch.setattr("database.SessionLocal", factory)
     monkeypatch.setattr("sys.argv", ["notification_worker", "--status"])
     with caplog.at_level("INFO"):
         notification_worker.main()
