@@ -95,3 +95,30 @@ def test_history_access_for_active_deleted_and_orphan_items(auth_ctx, user_id, i
         assert response.json()[0]["version_num"] == 1
     else:
         assert response.json()["detail"] == "Accesso negato"
+
+
+@pytest.mark.parametrize("user_id", [1, 2, 3, 4, 5])
+def test_nonexistent_item_rollback_returns_404(auth_ctx, user_id):
+    client, current = auth_ctx
+    current[0] = user_id
+    response = client.post("/item/99999/rollback/1")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Item non trovato"
+
+
+@pytest.mark.parametrize("version_num", [1, 999])
+def test_unauthorized_user_rollback_blocked_without_probing_oracle(auth_ctx, version_num):
+    client, current = auth_ctx
+    current[0] = 3  # "other" moderator has no access to item 10
+    response = client.post(f"/item/10/rollback/{version_num}")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Accesso negato"
+
+
+@pytest.mark.parametrize("user_id", [3, 4, 5])
+def test_rollback_deleted_item_rejects_unauthorized_and_viewers(auth_ctx, user_id):
+    client, current = auth_ctx
+    current[0] = user_id
+    response = client.post("/item/20/rollback/1")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Accesso negato"
