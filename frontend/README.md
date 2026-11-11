@@ -11,6 +11,14 @@ Currently, two official plugins are available:
 
 Run the frontend regression tests with `npm test` from the `frontend` directory.
 
+## Dependency security
+
+The scoped `minimatch` override for `@typescript-eslint/typescript-estree` fixes
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).
+Keep it until the upstream dependency range excludes affected versions.
+After dependency changes, run `npm ci`, `npm audit`, `npm test`, `npm run lint`,
+and `npm run build`.
+
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
