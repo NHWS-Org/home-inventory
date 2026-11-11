@@ -5,7 +5,6 @@ export interface NotificationPreference {
   event_type: NotificationEventType;
   in_app_enabled: boolean;
   push_enabled: boolean;
-  include_own_actions: boolean;
 }
 export type InboxEvent =
   | { event_type: "item_quantity_changed"; inventory_id: number; item_id: number; previous_quantity: number; quantity: number }

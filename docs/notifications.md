@@ -17,7 +17,7 @@ Nel modello attuale non esistono permessi lettura/scrittura per singola
 condivisione: il ruolo viewer e in sola lettura, il moderator puo modificare
 i contenitori propri o condivisi e l'admin puo modificare tutti i contenitori.
 Di conseguenza, le preferenze operative degli admin riguardano tutti i
-contenitori; le loro azioni restano escluse di default.
+contenitori; nessun utente riceve notifiche delle proprie modifiche.
 Nel Profilo dei viewer viene mostrata una spiegazione, senza controlli di
 preferenza o richiesta del consenso push per eventi che non possono ricevere.
 
@@ -32,8 +32,9 @@ all'inizializzazione della migrazione. La migrazione a preferenze personali
 elimina le vecchie preferenze; se e gia stata applicata, non viene rieseguita
 e le preferenze personali gia salvate restano invariate. Il push richiede due consensi:
 preferenza personale per evento e attivazione esplicita del browser.
-Le azioni proprie sono escluse salvo scelta di **Mie azioni**.
-Inbox e push sono indipendenti.
+Per ogni evento si sceglie una sola modalita: **Disattivate**, **Solo Inbox**
+oppure **Inbox + Push**. Push senza Inbox non e consentito, anche via API.
+L'autore della modifica e sempre escluso dai destinatari, sia inbox sia push.
 
 La preferenza **Creazione, eliminazione e dettagli degli elementi** include le
 nuove righe e le cancellazioni.
@@ -46,8 +47,8 @@ La notifica di eliminazione conserva il nome dell'elemento e apre il suo
 inventario o lista, non l'elemento cancellato. Anche per essa sono richiesti
 accesso corrente e preferenze personali.
 
-La sezione e compatta: ogni tocco su Inbox, Push o Mie azioni salva
-automaticamente. Durante la richiesta i controlli sono disabilitati per evitare
+La sezione e compatta: una tendina per evento salva automaticamente la
+modalita selezionata. Durante la richiesta i controlli sono disabilitati per evitare
 scritture concorrenti. Un errore ripristina il valore precedente e mostra
 esplicitamente come riprovare.
 
@@ -85,7 +86,8 @@ con conferma prima della cancellazione. Ogni riga ha anche un cestino.
 La lettura e cancellazione globali riguardano tutte le pagine autorizzate.
 L'eliminazione rimuove fisicamente solo le righe inbox dell'utente corrente:
 non cancella gli eventi condivisi, le notifiche degli altri o i banner gia
-consegnati dal sistema. Inbox e push restano indipendenti. Il worker completa
+consegnati dal sistema. Lettura/eliminazione inbox non ritirano i banner push.
+Il worker completa
 evento e creazione delle righe in una sola transazione: non riproduce gli
 eventi completati dopo l'eliminazione di una riga.
 Se una selezione esplicita contiene una notifica inesistente, di un altro
@@ -112,7 +114,8 @@ appartenente all'utente corrente e aggiorna la campanella. Il parametro viene
 rimosso dopo il successo; login conserva la destinazione. Account diverso,
 accesso revocato o errore di rete non marcano altre notifiche e mostrano errore
 con possibilita di riprovare. Il worker non accede a token o API autenticate.
-Con solo push e inbox disattivata non c'e una riga inbox da segnare come letta.
+Inbox + Push crea anche una riga inbox per ogni evento; se l'utente l'ha gia
+eliminata, non viene ricreata dal click sul banner.
 Lo stato letto riguarda la inbox, non certifica consegna o visualizzazione push.
 Le righe compatte mostrano icona inventario/lista, nome, elemento e azione
 (quantita con delta firmato, spunta, titolo/descrizione aggiornati), data/ora
@@ -123,7 +126,8 @@ Titolo e descrizione sono salvati nell'evento, non ricavati dal valore corrente:
 una modifica successiva non riscrive il dettaglio storico. Per eventi precedenti
 senza dettagli viene indicato il campo modificato; per barcode/metadati e
 assegnazioni viene indicata la categoria, senza inventare valori storici.
-Il payload push di sistema include i dettagli descritti sotto. Non serve una migrazione DB.
+Il payload push di sistema include i dettagli descritti sotto senza colonne
+aggiuntive per i singoli dettagli.
 
 ### API
 
@@ -139,9 +143,11 @@ Tutti gli endpoint sono autenticati e limitati all'utente del token:
 | POST | `/notifications/bulk` | `{action: "read" \| "delete", ids: [...]}` oppure `{action: ..., all: true}`; restituisce `{updated}` |
 | DELETE | `/notifications/{id}` | Elimina definitivamente la propria riga inbox |
 | GET | `/notifications/preferences` | Preferenze personali dei tre eventi |
-| PUT | `/notifications/preferences/{event_type}` | Canali e azioni proprie |
+| PUT | `/notifications/preferences/{event_type}` | `{in_app_enabled, push_enabled}`; Push richiede Inbox |
 
 Non esistono endpoint o editor per configurazioni condivise di notifica.
+Entrambi i canali hanno default `false`. Push senza Inbox e campi rimossi
+vengono rifiutati con `422`, senza modificare le preferenze.
 
 ## Aggiornamento del database
 
@@ -155,6 +161,15 @@ gli stessi default all'accesso alle preferenze e alla valutazione degli eventi.
 Le revisioni Alembic gia applicate
 restano nella catena storica, per aggiornare anche installazioni esistenti;
 non fanno parte del modello ORM o delle API attuali.
+
+La successiva migrazione `c1d2e3f4a5b6` conserva preferenze, eventi, inbox,
+sessioni e sottoscrizioni. Converte le preferenze solo Push in Inbox + Push,
+senza creare retroattivamente righe inbox per gli eventi gia elaborati.
+Elimina la colonna `include_own_actions` e aggiunge il vincolo DB che richiede
+Inbox quando Push e attivo. I timestamp delle preferenze non cambiano.
+Gli invii pendenti per modifiche dell'utente stesso vengono annullati dal worker;
+le righe inbox gia ricevute restano storiche. Per installazioni nuove viene
+supportato anche il bootstrap ORM prima delle migrazioni.
 
 Prima dell'aggiornamento fare un backup e fermare API/worker. Ricostruire i
 container e lasciare applicare le migrazioni al backend prima di riavviare il
@@ -229,7 +244,7 @@ richiede `consent: true`, endpoint HTTPS e chiavi P-256 valide.
 Una sottoscrizione non viene trasferita ad altro account.
 
 Prima di ogni tentativo si ricontrollano sessione, blocco utente, generazione,
-VAPID, preferenza, azioni proprie e permesso di modifica. Logout/revoca/blocco
+VAPID, preferenza, esclusione dell'autore e permesso di modifica. Logout/revoca/blocco
 impediscono nuovi invii; un messaggio gia affidato al provider non e ritirabile.
 Eventi precedenti al consenso non producono push retroattivi.
 

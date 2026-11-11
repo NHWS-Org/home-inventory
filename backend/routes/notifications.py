@@ -24,7 +24,6 @@ def preferences(db: Session = Depends(get_db), user=Depends(get_current_user)):
         "event_type": kind.value,
         "in_app_enabled": stored[kind.value].in_app_enabled if kind.value in stored else default_in_app(kind.value),
         "push_enabled": stored[kind.value].push_enabled if kind.value in stored else False,
-        "include_own_actions": stored[kind.value].include_own_actions if kind.value in stored else False,
     } for kind in NotificationEventType]
 
 
@@ -43,11 +42,8 @@ def set_preference(
         )
         db.add(row)
     settings = payload.model_dump()
-    if "in_app_enabled" not in payload.model_fields_set:
-        settings["in_app_enabled"] = default_in_app(event_type.value)
-    row.in_app_enabled = settings["in_app_enabled"]
+    row.in_app_enabled = payload.in_app_enabled
     row.push_enabled = payload.push_enabled
-    row.include_own_actions = payload.include_own_actions
     row.user_mod = user.id
     db.commit()
     return {"event_type": event_type.value, **settings}

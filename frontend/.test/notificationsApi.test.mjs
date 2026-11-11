@@ -215,20 +215,20 @@ test('personal change preferences never send user/session identities or request 
   };
   try {
     await notifications.saveNotificationPreference({
-      event_type: 'item_quantity_changed', in_app_enabled: true, push_enabled: false, include_own_actions: false,
+      event_type: 'item_quantity_changed', in_app_enabled: true, push_enabled: false,
     });
     assert.deepEqual(JSON.parse(requests[0].data), {
-      in_app_enabled: true, push_enabled: false, include_own_actions: false,
+      in_app_enabled: true, push_enabled: false,
     });
     assert.equal(requests[0].url, '/notifications/preferences/item_quantity_changed');
     assert.deepEqual(Object.keys(notifications.notificationLabels).sort(), [
       'inventory_updated', 'item_quantity_changed', 'item_updated',
     ]);
     await notifications.saveNotificationPreference({
-      event_type: 'item_updated', in_app_enabled: false, push_enabled: true, include_own_actions: false,
+      event_type: 'item_updated', in_app_enabled: true, push_enabled: true,
     });
     await notifications.saveNotificationPreference({
-      event_type: 'inventory_updated', in_app_enabled: false, push_enabled: false, include_own_actions: true,
+      event_type: 'inventory_updated', in_app_enabled: false, push_enabled: false,
     });
     assert.deepEqual(requests.map(r => r.url), [
       '/notifications/preferences/item_quantity_changed', '/notifications/preferences/item_updated',
@@ -238,7 +238,7 @@ test('personal change preferences never send user/session identities or request 
     await assert.rejects(notifications.getInbox(), /access revoked/);
     await assert.rejects(notifications.markAllNotificationsRead(), /access revoked/);
     await assert.rejects(notifications.saveNotificationPreference({
-      event_type: 'item_updated', in_app_enabled: true, push_enabled: false, include_own_actions: false,
+      event_type: 'item_updated', in_app_enabled: true, push_enabled: false,
     }), /access revoked/);
   } finally {
     api.defaults.adapter = oldAdapter;

@@ -97,7 +97,6 @@ def test_defaults_and_single_inbox_entry_per_event_user(engine):
         assert record.available_at is not None
         assert preference.in_app_enabled is False
         assert preference.push_enabled is False
-        assert preference.include_own_actions is False
         db.add(Notification(event_id=record.id, user_id=1))
         db.commit()
         event_id = record.id
@@ -140,6 +139,9 @@ def test_deleting_recipient_removes_inbox_and_preferences_not_event(engine):
     (NotificationEvent, {"payload": {}, "status": "invalid"}),
     (NotificationEvent, {"payload": {}, "attempts": -1}),
     (NotificationPreference, {"user_id": 1, "event_type": "invalid"}),
+    (NotificationPreference, {
+        "user_id": 1, "event_type": "item_updated", "in_app_enabled": False, "push_enabled": True,
+    }),
 ])
 def test_database_constraints(engine, model, values):
     with Session(engine) as db:
@@ -192,6 +194,8 @@ def test_migration_upgrade_matches_models_and_downgrade_preserves_users(engine, 
             worker_migration.upgrade()
             redesign = load_migration(MIGRATION.parent / "a9b0c1d2e3f4_personal_notification_preferences.py")
             redesign.upgrade()
+            channels = load_migration(MIGRATION.parent / "c1d2e3f4a5b6_notification_channels.py")
+            channels.upgrade()
             assert compare_metadata(context, Base.metadata) == []
             worker_migration.downgrade()
             migration.downgrade()
@@ -248,7 +252,7 @@ def test_alembic_cli_bootstrap_upgrade_downgrade(tmp_path, bootstrap_current_mod
         with migrated_engine.connect() as connection:
             assert connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
-            ).scalar_one() == "b0c1d2e3f4a5"
+            ).scalar_one() == "c1d2e3f4a5b6"
     finally:
         migrated_engine.dispose()
 

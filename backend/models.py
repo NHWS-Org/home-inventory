@@ -225,6 +225,10 @@ class NotificationPreference(Base, LoggingData):
             "event_type IN ('item_quantity_changed', 'item_updated', 'inventory_updated')",
             name="ck_notification_preferences_event_type",
         ),
+        CheckConstraint(
+            "NOT push_enabled OR in_app_enabled",
+            name="ck_notification_preferences_push_requires_inbox",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -232,7 +236,6 @@ class NotificationPreference(Base, LoggingData):
     event_type = Column(String(32), nullable=False)
     in_app_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
     push_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
-    include_own_actions = Column(Boolean, nullable=False, default=False, server_default="0")
 
 ################################################
 class SecurityAudit(Base):

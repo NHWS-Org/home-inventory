@@ -1,7 +1,7 @@
 """Replace rule-based notification data with personal event defaults.
 
-Historical revisions remain immutable. Old event semantics are not translatable:
-discard inbox/outbox work, but preserve device sessions and push subscriptions.
+Old event semantics are not translatable: discard inbox/outbox work, but
+preserve device sessions and push subscriptions.
 """
 
 from alembic import op
@@ -29,18 +29,18 @@ def upgrade() -> None:
             "event_type IN ('item_quantity_changed', 'item_updated', 'inventory_updated')",
         )
         batch.alter_column("in_app_enabled", existing_type=sa.Boolean(), server_default="0")
+    # Omit the retired column so ORM bootstrap works with both schema versions.
     preferences = sa.table(
         "notification_preferences",
         sa.column("user_id", sa.Integer()), sa.column("event_type", sa.String()),
         sa.column("in_app_enabled", sa.Boolean()), sa.column("push_enabled", sa.Boolean()),
-        sa.column("include_own_actions", sa.Boolean()),
     )
     users = sa.table("users", sa.column("id", sa.Integer()))
     for kind in ("item_quantity_changed", "item_updated", "inventory_updated"):
         bind.execute(preferences.insert().from_select(
-            ["user_id", "event_type", "in_app_enabled", "push_enabled", "include_own_actions"],
+            ["user_id", "event_type", "in_app_enabled", "push_enabled"],
             sa.select(users.c.id, sa.literal(kind), sa.literal(False),
-                      sa.literal(False), sa.literal(False)),
+                      sa.literal(False)),
         ))
 
 

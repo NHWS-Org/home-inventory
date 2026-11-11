@@ -201,9 +201,9 @@ def authorized_subscription(
         NotificationPreference.event_type == data.event_type,
     ))
     if (
-        preference is None or not preference.push_enabled
+        preference is None or not preference.in_app_enabled or not preference.push_enabled
         or preference.data_mod > event.created_at
-        or event.actor_id == user.id and not preference.include_own_actions
+        or event.actor_id == user.id
     ):
         return None
     return subscription

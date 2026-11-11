@@ -346,17 +346,16 @@ def test_endpoint_deduplication_cross_account_and_session_ownership(setup):
     ).status_code == 404
 
 
-def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
-    with setup.factory.begin() as db:
-        db.scalar(select(NotificationPreference)).in_app_enabled = False
+def test_push_includes_inbox_and_reprocessing_is_deduplicated(setup):
     _, delivery_id, event_id = queued(setup)
     with setup.factory.begin() as db:
-        assert db.scalars(select(Notification)).all() == []
+        assert len(db.scalars(select(Notification)).all()) == 1
         from notification_service import evaluate_event
 
         evaluate_event(db, db.get(NotificationEvent, event_id))
     with setup.factory() as db:
         assert len(db.scalars(select(PushDelivery)).all()) == 1
+        assert len(db.scalars(select(Notification)).all()) == 1
     claim = push.claim_push(setup.factory)
     assert push.claim_push(setup.factory) is None
     calls = []
@@ -365,7 +364,7 @@ def test_push_and_inbox_are_independent_and_reprocessing_deduplicated(setup):
         lambda *args: calls.append(args) or push.SendResult(201),
     )
     assert len(calls) == 1
-    assert "notification_event=" not in calls[0][2]["url"]
+    assert "notification_event=" in calls[0][2]["url"]
     assert delivery(setup, delivery_id).status == "accepted"
     assert delivery(setup, delivery_id).accepted_at is not None
     assert not push.process_push(setup.factory, claim, lambda *args: pytest.fail("Duplicate send"))

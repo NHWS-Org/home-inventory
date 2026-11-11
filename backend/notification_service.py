@@ -158,9 +158,7 @@ def evaluate_event(db: Session, record: NotificationEvent) -> None:
             NotificationPreference.user_id == user_id,
             NotificationPreference.event_type == data.event_type,
         ))
-        if user_id == record.actor_id and (
-            preference is None or not preference.include_own_actions
-        ):
+        if user_id == record.actor_id:
             continue
         in_app = preference.in_app_enabled if preference is not None else default_in_app(data.event_type)
         if in_app:
@@ -169,7 +167,7 @@ def evaluate_event(db: Session, record: NotificationEvent) -> None:
             ))
             if existing is None:
                 db.add(Notification(event_id=record.id, user_id=user_id))
-        if preference is not None and preference.push_enabled and preference.data_mod <= record.created_at:
+        if in_app and preference is not None and preference.push_enabled and preference.data_mod <= record.created_at:
             from web_push import queue_push
 
             queue_push(db, record, user_id)

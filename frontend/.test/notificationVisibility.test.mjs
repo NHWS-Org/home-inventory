@@ -42,7 +42,7 @@ function Screen({ userId }) {
 
 test('preference changes show and hide both navigation entries after successful saves', async () => {
   let rows = ['item_quantity_changed', 'item_updated', 'inventory_updated'].map(event_type => ({
-    event_type, in_app_enabled: false, push_enabled: false, include_own_actions: false,
+    event_type, in_app_enabled: false, push_enabled: false,
   }));
   let fail = false;
   api.defaults.adapter = async config => {
@@ -56,22 +56,35 @@ test('preference changes show and hide both navigation entries after successful 
     return { config, data, status: 200, statusText: 'OK', headers: {} };
   };
   const bells = () => document.querySelectorAll('a[href="/notifications"]');
-  const inputs = () => document.querySelectorAll('input[type="checkbox"]');
+  const inputs = () => document.querySelectorAll('select');
+  const choose = async mode => {
+    await act(async () => {
+      inputs()[0].value = mode;
+      inputs()[0].dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  };
   await act(async () => root.render(createElement(Screen, { userId: 1 })));
+  assert.equal(inputs().length, 3);
+  assert.deepEqual([...inputs()[0].options].map(option => option.text), ['Disattivate', 'Solo Inbox', 'Inbox + Push']);
+  assert.equal(document.querySelectorAll('input[type="checkbox"]').length, 0);
   assert.equal(bells().length, 0);
-  await act(async () => inputs()[0].click());
+  await choose('inbox');
+  assert.deepEqual(rows[0], { event_type: 'item_quantity_changed', in_app_enabled: true, push_enabled: false });
   assert.equal(bells().length, 2);
   assert.match(bells()[0].getAttribute('aria-label'), /2 da leggere/);
-  await act(async () => inputs()[0].click());
+  await choose('off');
   assert.equal(bells().length, 0);
-  await act(async () => inputs()[1].click());
+  await choose('inbox_push');
+  assert.deepEqual(rows[0], { event_type: 'item_quantity_changed', in_app_enabled: true, push_enabled: true });
   assert.equal(bells().length, 2);
   fail = true;
-  await act(async () => inputs()[1].click());
+  await choose('off');
+  assert.equal(inputs()[0].value, 'inbox_push');
   assert.equal(bells().length, 2);
   assert.match(document.body.textContent, /Salvataggio non riuscito/);
   fail = false;
-  await act(async () => inputs()[1].click());
+  await choose('off');
+  assert.deepEqual(rows[0], { event_type: 'item_quantity_changed', in_app_enabled: false, push_enabled: false });
   assert.equal(bells().length, 0);
   fail = true;
   await act(async () => window.dispatchEvent(new Event('focus')));

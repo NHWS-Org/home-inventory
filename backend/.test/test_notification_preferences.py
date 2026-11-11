@@ -115,7 +115,7 @@ def events(factory):
 
 def enable(client, kind, **options):
     response = client.put(f"/notifications/preferences/{kind}", json={
-        "in_app_enabled": True, "push_enabled": False, "include_own_actions": False, **options,
+        "in_app_enabled": True, "push_enabled": False, **options,
     })
     assert response.status_code == 200, response.text
 
@@ -135,7 +135,7 @@ def test_fallback_and_new_user_defaults_and_orm_defaults(setup):
         db.execute(delete(NotificationPreference))
     expected = [{
         "event_type": kind, "in_app_enabled": False,
-        "push_enabled": False, "include_own_actions": False,
+        "push_enabled": False,
     } for kind in KINDS]
     assert client.get("/notifications/preferences").json() == expected
     for entry in expected:
@@ -149,7 +149,7 @@ def test_fallback_and_new_user_defaults_and_orm_defaults(setup):
         db.add_all(rows)
         db.flush()
         assert [row.in_app_enabled for row in rows] == [False, False, False]
-        assert all(not row.push_enabled and not row.include_own_actions for row in rows)
+        assert all(not row.push_enabled for row in rows)
     assert client.get("/notifications/preferences").json() == expected
 
 
@@ -162,6 +162,66 @@ def test_default_preferences_do_not_deliver_quantity_notifications(setup):
     with factory() as db:
         assert db.scalars(select(Notification)).all() == []
         assert db.scalars(select(PushDelivery)).all() == []
+
+
+@pytest.mark.parametrize("in_app,push", [(False, False), (True, False), (True, True)])
+def test_preferences_support_only_disabled_inbox_and_inbox_push(setup, in_app, push):
+    _factory, client, _ = setup
+    expected = {"event_type": "item_updated", "in_app_enabled": in_app, "push_enabled": push}
+    response = client.put("/notifications/preferences/item_updated", json={
+        "in_app_enabled": in_app, "push_enabled": push,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json() == expected
+    assert expected in client.get("/notifications/preferences").json()
+
+
+@pytest.mark.parametrize("payload", [
+    {"in_app_enabled": False, "push_enabled": True},
+    {"push_enabled": True},
+    {"include_own_actions": True},
+])
+def test_preferences_reject_push_only_and_removed_fields_without_changing_settings(setup, payload):
+    _factory, client, _ = setup
+    before = client.get("/notifications/preferences").json()
+    response = client.put("/notifications/preferences/item_updated", json=payload)
+    assert response.status_code == 422, response.text
+    assert client.get("/notifications/preferences").json() == before
+
+
+def test_channel_migration_preserves_data_and_normalizes_push_only(setup):
+    factory, _, _ = setup
+    revision = importlib.import_module("migrations.versions.c1d2e3f4a5b6_notification_channels")
+    with factory.begin() as db:
+        connection = db.connection()
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            revision.downgrade()
+        before = utcnow() - timedelta(days=1)
+        for user_id, inbox, push in ((1, 0, 0), (2, 1, 0), (3, 0, 1), (4, 1, 1)):
+            connection.exec_driver_sql(
+                "UPDATE notification_preferences SET in_app_enabled=?, push_enabled=?, "
+                "include_own_actions=1, data_mod=? WHERE user_id=?",
+                (inbox, push, before, user_id),
+            )
+        record = enqueue_event(db, InventoryUpdatedData(inventory_id=1, changed_fields=["name"]), actor_id=1)
+        db.flush()
+        db.add(Notification(event_id=record.id, user_id=4))
+        db.flush()
+        saved = connection.execute(select(NotificationPreference.__table__)).mappings().all()
+        with Operations.context(context):
+            revision.upgrade()
+            revision.upgrade()
+        assert "include_own_actions" not in {
+            column["name"] for column in inspect(connection).get_columns("notification_preferences")
+        }
+        expected = [{**row, "in_app_enabled": row["in_app_enabled"] or row["push_enabled"]} for row in saved]
+        assert [dict(row) for row in connection.execute(
+            select(NotificationPreference.__table__),
+        ).mappings()] == expected
+        assert db.scalar(select(Notification.id)) is not None
+        assert db.get(NotificationEvent, record.id) is not None
+        assert compare_metadata(context, Base.metadata) == []
 
 
 @pytest.mark.parametrize("item_id,initial,new", [(1, 5, 9), (1, 5, 2), (2, 0, 1), (2, 1, 0)])
@@ -512,9 +572,11 @@ def test_inventory_rename_rollback_noops_and_default_off(setup, route):
 
 
 @pytest.mark.parametrize("kind", KINDS)
-def test_preferences_own_actions_and_idempotent_delivery(setup, kind):
+def test_actor_is_always_excluded_and_delivery_is_idempotent(setup, kind):
     factory, client, current = setup
-    enable(client, kind, include_own_actions=True)
+    enable(client, kind, push_enabled=True)
+    current[0] = 4
+    enable(client, kind)
     current[0] = 5
     enable(client, kind, in_app_enabled=False)
     with factory.begin() as db:
@@ -530,7 +592,7 @@ def test_preferences_own_actions_and_idempotent_delivery(setup, kind):
         evaluate_event(db, record)
     with factory() as db:
         ids = sorted(row.user_id for row in db.scalars(select(Notification)))
-        assert ids == ([1, 4, 6] if kind == "item_quantity_changed" else [1])
+        assert ids == ([4, 6] if kind == "item_quantity_changed" else [4])
 
 
 @pytest.mark.parametrize("change", ["user_share", "group_share", "blocked", "viewer", "deleted_item", "moved_item"])
@@ -876,16 +938,21 @@ def test_deleted_item_notifies_and_opens_container_even_after_id_reuse(setup, it
     assert client.get("/notifications").json() == []
 
 
-def test_deleted_item_uses_opt_in_and_actor_preferences(setup):
+def test_deleted_item_uses_opt_in_and_never_notifies_actor(setup):
     factory, client, current = setup
     assert client.request("DELETE", "/item/1", json={"confirm": True}).status_code == 200
     settle(factory)
     with factory() as db:
         assert db.scalars(select(Notification)).all() == []
-    enable(client, "item_updated", include_own_actions=True)
+    enable(client, "item_updated")
+    current[0] = 5
+    enable(client, "item_updated")
+    current[0] = 1
     assert client.request("DELETE", "/item/2", json={"confirm": True}).status_code == 200
     settle(factory)
     current[0] = 1
+    assert client.get("/notifications").json() == []
+    current[0] = 5
     rows = client.get("/notifications").json()
     assert len(rows) == 1
     assert rows[0]["event"]["details"]["name"] == "A"
@@ -960,6 +1027,7 @@ def test_forward_migration_resets_old_choices_preserves_sessions_and_subscriptio
         revision = importlib.import_module("migrations.versions.a9b0c1d2e3f4_personal_notification_preferences")
         with Operations.context(context):
             revision.upgrade()
+            importlib.import_module("migrations.versions.c1d2e3f4a5b6_notification_channels").upgrade()
         assert "notification_rules" not in inspect(connection).get_table_names()
         assert compare_metadata(context, Base.metadata) == []
         for table in (NotificationEvent, Notification, PushDelivery):
@@ -971,7 +1039,7 @@ def test_forward_migration_resets_old_choices_preserves_sessions_and_subscriptio
         assert {(row["user_id"], row["event_type"], row["in_app_enabled"]) for row in rows} == {
             (user, kind, False) for user in (1, 2) for kind in KINDS
         }
-        assert all(not row["push_enabled"] and not row["include_own_actions"] for row in rows)
+        assert all(not row["push_enabled"] for row in rows)
         with Operations.context(context), pytest.raises(RuntimeError, match="irreversible"):
             revision.downgrade()
     engine.dispose()

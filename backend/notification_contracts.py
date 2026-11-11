@@ -68,9 +68,14 @@ notification_event_adapter = TypeAdapter(NotificationEventData)
 class NotificationPreferenceInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    in_app_enabled: bool = True
+    in_app_enabled: bool = False
     push_enabled: bool = False
-    include_own_actions: bool = False
+
+    @model_validator(mode="after")
+    def require_inbox_for_push(self) -> "NotificationPreferenceInput":
+        if self.push_enabled and not self.in_app_enabled:
+            raise ValueError("Le notifiche Push richiedono anche Inbox")
+        return self
 
 
 class NotificationBulkAction(BaseModel):
