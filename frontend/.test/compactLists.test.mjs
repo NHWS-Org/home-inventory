@@ -99,3 +99,67 @@ test('inventory and checklist item versions appear with modification details, no
     }
   }
 });
+
+test('compact inventory controls preserve quantity updates and editing without selecting the row', async () => {
+  const updates = [];
+  const edited = [];
+  let selections = 0;
+  let item = {
+    id: 2, inventory_id: 1, name: 'Hamburger pollo/tacchino x2', description: 'Fileni',
+    quantity: 1, version_num: 4, username_mod: 'angela', data_mod: '2026-11-03T19:09:30',
+  };
+  const render = async (isEditMode = false) => act(async () => root.render(createElement(SwipeableItemRow, {
+    key: 'compact-inventory', item, isMobile: true, isChecklist: false, isInventory: true,
+    user: { role: { name: 'admin' } }, isEditMode, selectedItems: [],
+    setSelectedItems() { selections++; },
+    setItemBeingEdited(value) { edited.push(value); },
+    async updateItem(id, value) { updates.push({ id, quantity: value.quantity }); return value; },
+    setItems(updater) { [item] = updater([item]); },
+    deleteItem() {}, setIsCloning() {},
+  })));
+  const click = async label => act(async () => document.querySelector(`button[aria-label="${label}"]`).click());
+  await render();
+  await click('Aumenta quantità');
+  await render();
+  assert.equal(item.quantity, 2);
+  await click('Diminuisci quantità');
+  await render(true);
+  assert.equal(item.quantity, 1);
+  await click('Diminuisci quantità');
+  await render(true);
+  assert.equal(item.quantity, 0);
+  assert.equal(document.querySelector('button[aria-label="Diminuisci quantità"]').disabled, true);
+  await click('Diminuisci quantità');
+  assert.deepEqual(updates, [{ id: 2, quantity: 2 }, { id: 2, quantity: 1 }, { id: 2, quantity: 0 }]);
+  await click('Modifica item');
+  await click('Clona item');
+  assert.equal(edited[0].name, item.name);
+  assert.equal(edited[1].name, `${item.name} (copia)`);
+  assert.equal(selections, 0);
+});
+
+test('compact checklist keeps completion usable and exposes assignment only to editors', async () => {
+  let item = {
+    id: 3, inventory_id: 1, name: 'Riso', quantity: 0,
+    version_num: 1, data_mod: '2026-11-03T19:09:30',
+  };
+  const quantities = [];
+  const render = async role => act(async () => root.render(createElement(SwipeableItemRow, {
+    key: 'compact-checklist', item, isMobile: true, isChecklist: true, isInventory: false,
+    user: { role: { name: role } }, isEditMode: false, selectedItems: [],
+    setSelectedItems() {}, setItemBeingEdited() {}, deleteItem() {}, setIsCloning() {},
+    async updateItem(id, value) { quantities.push(value.quantity); return value; },
+    setItems(updater) { [item] = updater([item]); },
+  })));
+  await render('admin');
+  assert.ok(document.querySelector('button[aria-label="Assegna da inventario"]'));
+  assert.ok(document.querySelector('button[aria-label="Visualizza cronologia item"]'));
+  await act(async () => document.querySelector('input[aria-label="Completato"]').click());
+  await render('admin');
+  assert.equal(document.querySelector('input').checked, true);
+  await act(async () => document.querySelector('input').click());
+  assert.deepEqual(quantities, [1, 0]);
+  await render('viewer');
+  assert.equal(document.querySelector('input').disabled, true);
+  assert.equal(document.querySelector('button[aria-label="Assegna da inventario"]'), null);
+});

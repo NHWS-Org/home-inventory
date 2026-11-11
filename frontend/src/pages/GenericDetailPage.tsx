@@ -414,12 +414,6 @@ export function SwipeableItemRow({
     }
   };
 
-  const actionGridColumns = isEditMode && !isViewer
-    ? (isInventory ? 'grid-cols-6' : 'grid-cols-4')
-    : isInventory && !isViewer
-      ? 'grid-cols-5'
-      : 'grid-cols-2';
-
   return (
     <div
       ref={combinedRef}
@@ -462,7 +456,7 @@ export function SwipeableItemRow({
 
       {/* Actual list item */}
       <li
-        className={`relative border p-2 rounded shadow-sm flex flex-col md:flex-row md:justify-between md:items-center
+        className={`relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 border px-2 py-1.5 rounded shadow-sm md:items-center md:gap-y-0 md:p-2
     ${isEditMode && selectedItems.includes(item.id) ? "bg-blue-100 dark:bg-blue-900" : "bg-white dark:bg-gray-800"}
     md:hover:bg-gray-100 dark:md:hover:bg-gray-700
     ${(isChecklist && item.quantity > 0) || (isInventory && item.quantity === 0) ? "text-gray-400" : ""}`}
@@ -476,7 +470,7 @@ export function SwipeableItemRow({
           }
         }}
       >
-        <div className="flex w-full flex-row items-start gap-2 md:w-auto md:items-center">
+        <div className="col-start-1 row-start-1 flex min-w-0 flex-row items-start gap-2 md:items-center">
           {isEditMode && (
             <div className="flex shrink-0 items-center md:mr-1">
               <span className="text-base">
@@ -484,9 +478,9 @@ export function SwipeableItemRow({
               </span>
             </div>
           )}
-          <div className="flex flex-col">
-            <div className="font-semibold flex items-center gap-2">
-              <span>{item.name}</span>
+          <div className="flex min-w-0 flex-col">
+            <div className="font-semibold flex flex-wrap items-center gap-x-2 gap-y-1 leading-5 md:leading-normal">
+              <span className="min-w-0 break-words [overflow-wrap:anywhere]">{item.name}</span>
               {isChecklist && (
                 <span ref={priorityMenuRef} className="relative inline-flex">
                   <button
@@ -538,14 +532,14 @@ export function SwipeableItemRow({
               )}
             </div>
             {item.description && (
-              <div className="text-sm text-gray-500 dark:text-gray-200">{item.description}</div>
+              <div className="break-words text-sm leading-tight text-gray-500 dark:text-gray-200 md:leading-5">{item.description}</div>
             )}
             {isChecklist && item.assignment && (
               <button
                 type="button"
                 disabled={isViewer}
                 onClick={(e) => { e.stopPropagation(); setAssignDialog('edit'); }}
-                className={`mt-1 min-h-11 max-w-full self-start rounded-xl px-3 py-2 text-sm ${
+                className={`mt-1 min-h-9 max-w-full self-start break-words rounded-lg px-2 py-1 text-xs md:min-h-11 md:rounded-xl md:px-3 md:py-2 md:text-sm ${
                   item.quantity === 0 && ((item.assignment.source_stock ?? 0) < item.assignment.qty || (item.assignment.source_net_qty ?? 0) < 0)
                     ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
@@ -560,7 +554,7 @@ export function SwipeableItemRow({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setAssignDialog('link'); }}
-                className="mt-1 min-h-11 self-start rounded-xl bg-blue-100 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                className="mt-1 hidden min-h-11 self-start rounded-xl bg-blue-100 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900 dark:text-blue-200 md:block"
               >
                 📥 Assegna
               </button>
@@ -569,7 +563,7 @@ export function SwipeableItemRow({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setAssignDialog('sources'); }}
-                className={`mt-1 min-h-11 max-w-full self-start rounded-xl px-3 py-2 text-sm ${
+                className={`mt-1 min-h-9 max-w-full self-start break-words rounded-lg px-2 py-1 text-xs md:min-h-11 md:rounded-xl md:px-3 md:py-2 md:text-sm ${
                   (item.net_qty ?? 0) < 0
                     ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
@@ -587,75 +581,89 @@ export function SwipeableItemRow({
                   .map((value) => (
                     <span
                       key={value.id}
-                      className="rounded-full bg-slate-100 px-2 py-0.5 text-sm text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+                      className="max-w-full break-words rounded-full bg-slate-100 px-1.5 py-0.5 text-xs leading-4 text-slate-700 dark:bg-slate-700 dark:text-slate-100 md:px-2 md:text-sm md:leading-5"
                     >
                       {value.definition_label}: {formatItemMetadataValue(value)}
                     </span>
                   ))}
               </div>
             )}
-            <div className="mt-1 text-xs text-gray-400">
-              Ultima modifica: {item.username_mod} - {new Date(item.data_mod).toLocaleString()}{" "}
-              <span className="whitespace-nowrap">· v{item.version_num}</span>
-            </div>
           </div>
         </div>
-        <div className={`mt-2 grid w-full ${actionGridColumns} gap-1.5 md:mt-0 md:flex md:w-auto md:items-center md:justify-end`}>
-          <button
-            type="button"
-            className="col-span-1 min-h-11 w-full rounded-lg bg-gray-200 px-1 text-base text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm md:whitespace-nowrap"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsItemHistoryOpen(true);
-            }}
-            title="Visualizza cronologia item"
-            aria-label="Visualizza cronologia item"
-          >
-            <span className="inline md:hidden">🕓</span>
-            <span className="hidden md:inline">Cronologia</span>
-          </button>
-          {isInventory && !isViewer && !isEditMode && (
+        <div className="col-start-1 row-start-2 min-w-0 self-center break-words text-[11px] leading-4 text-gray-400 md:mt-1 md:text-xs">
+          <span className="sr-only md:not-sr-only">Ultima modifica: </span>
+          {item.username_mod} - {new Date(item.data_mod).toLocaleString()}{" "}
+          <span className="whitespace-nowrap">· v{item.version_num}</span>
+        </div>
+        <div className="contents md:col-start-2 md:row-start-1 md:row-span-2 md:flex md:items-center md:justify-end md:gap-1.5">
+          <div className="col-start-2 row-start-2 flex flex-wrap justify-end gap-1 md:contents">
             <button
               type="button"
-            className="col-span-1 min-h-11 w-full rounded-lg bg-gray-200 px-1 text-base text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm md:whitespace-nowrap"
-              onClick={(e) => { e.stopPropagation(); setAssignDialog('assign'); }}
-              title="Assegna a una lista"
-              aria-label="Assegna a una lista"
+              className="h-9 w-9 shrink-0 rounded-lg bg-gray-200 text-sm text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:h-auto md:w-auto md:rounded md:px-3 md:py-1 md:whitespace-nowrap"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsItemHistoryOpen(true);
+              }}
+              title="Visualizza cronologia item"
+              aria-label="Visualizza cronologia item"
             >
-              <span className="inline md:hidden">📋</span>
-              <span className="hidden md:inline">📋 Assegna</span>
+              <span className="inline md:hidden">🕓</span>
+              <span className="hidden md:inline">Cronologia</span>
             </button>
-          )}
-          {isEditMode && !isViewer && (
-            <>
+            {isInventory && !isViewer && !isEditMode && (
               <button
                 type="button"
-                className="col-span-1 min-h-11 w-full rounded-lg bg-yellow-500 px-1 text-lg text-white md:min-h-0 md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cloneItem();
-                }}
-                aria-label="Clona item"
+                className="h-9 w-9 shrink-0 rounded-lg bg-gray-200 text-sm text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:h-auto md:w-auto md:rounded md:px-3 md:py-1 md:whitespace-nowrap"
+                onClick={(e) => { e.stopPropagation(); setAssignDialog('assign'); }}
+                title="Assegna a una lista"
+                aria-label="Assegna a una lista"
               >
-                <span className="inline md:hidden">📄</span>
-                <span className="hidden md:inline">📄 Clona</span>
+                <span className="inline md:hidden">📋</span>
+                <span className="hidden md:inline">📋 Assegna</span>
               </button>
+            )}
+            {isChecklist && !item.assignment && !isViewer && !isEditMode && (
               <button
                 type="button"
-                className="col-span-1 min-h-11 w-full rounded-lg bg-blue-500 px-1 text-lg text-white md:min-h-0 md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setItemBeingEdited(item);
-                }}
-                aria-label="Modifica item"
+                onClick={(e) => { e.stopPropagation(); setAssignDialog('link'); }}
+                className="h-9 w-9 shrink-0 rounded-lg bg-blue-100 text-sm text-blue-800 dark:bg-blue-900 dark:text-blue-200 md:hidden"
+                title="Assegna da inventario"
+                aria-label="Assegna da inventario"
               >
-                <span className="inline md:hidden">✏️</span>
-                <span className="hidden md:inline">✏️ Modifica</span>
+                📥
               </button>
-            </>
-          )}
+            )}
+            {isEditMode && !isViewer && (
+              <>
+                <button
+                  type="button"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-yellow-500 text-base text-white md:h-auto md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cloneItem();
+                  }}
+                  aria-label="Clona item"
+                >
+                  <span className="inline md:hidden">📄</span>
+                  <span className="hidden md:inline">📄 Clona</span>
+                </button>
+                <button
+                  type="button"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-blue-500 text-base text-white md:h-auto md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setItemBeingEdited(item);
+                  }}
+                  aria-label="Modifica item"
+                >
+                  <span className="inline md:hidden">✏️</span>
+                  <span className="hidden md:inline">✏️ Modifica</span>
+                </button>
+              </>
+            )}
+          </div>
           {isChecklist ? (
-            <div className="col-span-1 flex min-h-11 w-full items-center justify-center md:h-full">
+            <label className="col-start-2 row-start-1 flex h-11 min-w-11 items-center justify-end self-center md:h-full md:min-w-0">
               <input
                 type="checkbox"
                 checked={item.quantity > 0}
@@ -664,13 +672,12 @@ export function SwipeableItemRow({
                   if (isViewer) return;
                   toggleChecked(e.target.checked);
                 }}
-                className="h-10 w-10 accent-blue-600 focus:ring-2 rounded shadow-sm border-2 border-gray-400 dark:border-gray-600"
-                style={{ minWidth: '2.5rem', minHeight: '2.5rem' }}
+                className="h-11 w-11 accent-blue-600 focus:ring-2 rounded shadow-sm border-2 border-gray-400 dark:border-gray-600 md:h-10 md:w-10"
                 aria-label="Completato"
               />
-            </div>
+            </label>
           ) : isInventory && !isViewer ? (
-            <div className="col-span-3 grid w-full grid-cols-3 gap-1.5 md:col-span-1 md:flex md:w-auto md:items-center">
+            <div className="col-start-2 row-start-1 grid grid-cols-[44px_minmax(28px,auto)_44px] items-center gap-1 self-center md:flex md:gap-1.5">
               <button
                 type="button"
                 aria-label="Diminuisci quantità"
@@ -709,7 +716,7 @@ export function SwipeableItemRow({
               </button>
             </div>
           ) : (
-            <span className="min-w-[24px] text-center">{item.quantity}</span>
+            <span className="col-start-2 row-start-1 min-w-[36px] self-center text-center md:min-w-[24px]">{item.quantity}</span>
           )}
         </div>
       </li>
