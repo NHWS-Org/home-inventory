@@ -35,7 +35,9 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 # Elenco utenti
 @admin_router.get("/users/", response_model=list[schemas.UserResponse])
 def list_users(db: Session = Depends(get_db)):
-    return db.query(User).all()
+    # ⚡ Bolt optimization: Preload User.role via joinedload to prevent N+1 queries during UserResponse serialization.
+    # Impact: Reduces query count from O(N_roles) to O(1) constant query.
+    return db.query(User).options(joinedload(User.role)).all()
 
 # Modifica utente
 @admin_router.put("/users/{user_id}", response_model=schemas.UserResponse)
@@ -124,7 +126,16 @@ def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db)):
 # Elenco gruppi
 @admin_router.get("/groups/", response_model=list[schemas.GroupResponse])
 def list_groups(db: Session = Depends(get_db)):
-    return db.query(Group).all()
+    # ⚡ Bolt optimization: Eager load Group.role and Group.users with User.role.
+    # Impact: Reduces query count from O(G + U) to O(1) constant query during GroupResponse serialization.
+    return (
+        db.query(Group)
+        .options(
+            joinedload(Group.role),
+            joinedload(Group.users).joinedload(User.role),
+        )
+        .all()
+    )
 
 # Modifica gruppo
 @admin_router.put("/groups/{group_id}", response_model=schemas.GroupResponse)
