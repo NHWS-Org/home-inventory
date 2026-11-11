@@ -23,6 +23,9 @@
     "react-swipeable": "^7.0.2"
   },
   "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    },
     "follow-redirects": "^1.16.0"
   },
   "devDependencies": {
