@@ -429,12 +429,18 @@ export function SwipeableItemRow({
       {(action === 'left') && !isViewer && (
         <>
           <button
+            type="button"
+            aria-label="Clona item"
+            title="Clona item"
             className="swipe-button absolute transition-transform duration-300 ease-in-out transform translate-x-0 right-1/4 top-0 h-full w-1/4 bg-yellow-500 text-white font-bold z-20"
             onClick={handleClone}
           >
             📄
           </button>
           <button
+            type="button"
+            aria-label="Modifica item"
+            title="Modifica item"
             className="swipe-button absolute transition-transform duration-300 ease-in-out transform translate-x-0 right-0 top-0 h-full w-1/4 bg-blue-600 text-white font-bold z-20"
             onClick={handleEdit}
           >
@@ -444,6 +450,9 @@ export function SwipeableItemRow({
       )}
       {(action === 'right') && !isViewer && (
         <button
+          type="button"
+          aria-label="Elimina item"
+          title="Elimina item"
           className="swipe-button absolute transition-transform duration-300 ease-in-out transform translate-x-0 left-0 top-0 h-full w-1/4 bg-red-600 text-white font-bold z-20"
           onClick={handleDelete}
         >
