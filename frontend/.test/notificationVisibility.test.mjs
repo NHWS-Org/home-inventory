@@ -37,6 +37,7 @@ function Screen({ userId }) {
     status.enabled && createElement(NotificationBell, { ...status, variant: 'desktop', navItemClass: () => '' }),
     status.enabled && createElement(NotificationBell, { ...status, variant: 'mobile', navItemClass: () => '' }),
     createElement(NotificationPreferences),
+    createElement('button', { type: 'button', id: 'other-control' }, 'Altro controllo'),
   );
 }
 
@@ -45,10 +46,13 @@ test('preference changes show and hide both navigation entries after successful 
     event_type, in_app_enabled: false, push_enabled: false,
   }));
   let fail = false;
+  let pauseSave = false;
+  let finishSave;
   api.defaults.adapter = async config => {
     if (fail) throw new Error('offline');
     let data;
     if (config.method === 'put') {
+      if (pauseSave) await new Promise(resolve => { finishSave = resolve; });
       const eventType = config.url.split('/').pop();
       rows = rows.map(row => row.event_type === eventType ? { ...row, ...JSON.parse(config.data) } : row);
       data = {};
@@ -56,30 +60,48 @@ test('preference changes show and hide both navigation entries after successful 
     return { config, data, status: 200, statusText: 'OK', headers: {} };
   };
   const bells = () => document.querySelectorAll('a[href="/notifications"]');
-  const inputs = () => document.querySelectorAll('select');
+  const inputs = () => document.querySelectorAll('fieldset:first-of-type input[type="radio"]');
   const choose = async mode => {
     await act(async () => {
-      inputs()[0].value = mode;
-      inputs()[0].dispatchEvent(new Event('change', { bubbles: true }));
+      const input = [...inputs()].find(input => input.value === mode);
+      input.focus();
+      input.click();
     });
   };
   await act(async () => root.render(createElement(Screen, { userId: 1 })));
   assert.equal(inputs().length, 3);
-  assert.deepEqual([...inputs()[0].options].map(option => option.text), ['Disattivate', 'Solo Inbox', 'Inbox + Push']);
+  assert.deepEqual([...inputs()].map(input => input.parentElement.textContent), ['Disattivate', 'Solo Inbox', 'Inbox + Push']);
+  assert.equal(document.querySelectorAll('select').length, 0);
+  assert.equal(document.querySelectorAll('input[type="radio"]:checked').length, 3);
   assert.equal(document.querySelectorAll('input[type="checkbox"]').length, 0);
   assert.equal(bells().length, 0);
+  pauseSave = true;
   await choose('inbox');
+  assert.equal(inputs()[1].closest('fieldset').disabled, true);
+  await act(async () => {
+    inputs()[1].blur();
+    finishSave();
+  });
+  pauseSave = false;
+  assert.equal(document.activeElement?.getAttribute('value'), 'inbox');
   assert.deepEqual(rows[0], { event_type: 'item_quantity_changed', in_app_enabled: true, push_enabled: false });
   assert.equal(bells().length, 2);
   assert.match(bells()[0].getAttribute('aria-label'), /2 da leggere/);
+  pauseSave = true;
   await choose('off');
+  await act(async () => {
+    document.getElementById('other-control').focus();
+    finishSave();
+  });
+  pauseSave = false;
+  assert.equal(document.activeElement.id, 'other-control');
   assert.equal(bells().length, 0);
   await choose('inbox_push');
   assert.deepEqual(rows[0], { event_type: 'item_quantity_changed', in_app_enabled: true, push_enabled: true });
   assert.equal(bells().length, 2);
   fail = true;
   await choose('off');
-  assert.equal(inputs()[0].value, 'inbox_push');
+  assert.equal([...inputs()].find(input => input.checked).value, 'inbox_push');
   assert.equal(bells().length, 2);
   assert.match(document.body.textContent, /Salvataggio non riuscito/);
   fail = false;

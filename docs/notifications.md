@@ -47,10 +47,21 @@ La notifica di eliminazione conserva il nome dell'elemento e apre il suo
 inventario o lista, non l'elemento cancellato. Anche per essa sono richiesti
 accesso corrente e preferenze personali.
 
-La sezione e compatta: una tendina per evento salva automaticamente la
-modalita selezionata. Durante la richiesta i controlli sono disabilitati per evitare
+La sezione usa un selettore segmentato per evento, con tre opzioni sempre
+visibili, icone ed etichette: non richiede l'apertura di una tendina.
+I radio nativi consentono anche la scelta con le frecce della tastiera.
+La modalita selezionata viene salvata automaticamente.
+Durante la richiesta i controlli sono disabilitati per evitare
 scritture concorrenti. Un errore ripristina il valore precedente e mostra
-esplicitamente come riprovare.
+esplicitamente come riprovare. A salvataggio concluso viene ripristinato il
+focus perso per la disabilitazione, senza sottrarlo a un altro controllo.
+
+Su mobile Gestione profilo mantiene le sezioni richiudibili. Da 768 px usa
+tutta la larghezza disponibile e sezioni in tab, con lo stesso stile delle
+Impostazioni. Le frecce sinistra/destra e Home/End navigano tra i tab.
+Il cambio tab o layout non rimonta i form e conserva le sezioni aperte su mobile.
+Gli utenti viewer continuano a vedere la spiegazione delle notifiche senza
+controlli push.
 
 ### Quantita e spunte: grace period
 

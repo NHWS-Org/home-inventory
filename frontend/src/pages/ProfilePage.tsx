@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
 import { FiAlertCircle, FiCheckCircle, FiChevronDown, FiClock, FiSlash } from "react-icons/fi";
@@ -8,25 +8,57 @@ import { disablePushForBrowser, type PushBrowserState } from "../utils/pushNotif
 import { SESSION_RENEWED } from "../utils/sessionRenewal";
 import { useAuth } from "../useAuth";
 
-function ProfileSection({ title, headingId, badge, children }: {
+const desktopQuery = "(min-width: 768px)";
+
+function subscribeDesktopLayout(onChange: () => void) {
+  const media = window.matchMedia(desktopQuery);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
+function isDesktopLayout() {
+  return window.matchMedia(desktopQuery).matches;
+}
+
+type ProfileTab = "personal" | "password" | "push" | "notifications" | "devices";
+
+function ProfileSection({ title, headingId, badge, children, sectionId, desktop, active }: {
   title: string;
   headingId?: string;
   badge?: ReactNode;
   children: ReactNode;
+  sectionId: ProfileTab;
+  desktop: boolean;
+  active: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <details className="group rounded-xl border border-gray-200 dark:border-gray-700">
-      <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-blue-500 dark:hover:bg-gray-800">
-        <h2 id={headingId} className="text-base font-bold">{title}</h2>
-        <span className="flex shrink-0 items-center gap-3">
-          {badge}
-          <FiChevronDown aria-hidden="true" className="transition-transform group-open:rotate-180" />
-        </span>
-      </summary>
-      <div className="space-y-4 border-t border-gray-200 p-4 dark:border-gray-700">
-        {children}
-      </div>
-    </details>
+    <div
+      id={`profile-panel-${sectionId}`}
+      role={desktop ? "tabpanel" : undefined}
+      aria-labelledby={desktop ? `profile-tab-${sectionId}` : undefined}
+      hidden={desktop && !active}
+      tabIndex={desktop ? 0 : undefined}
+      className="min-w-0 focus-visible:outline-2 focus-visible:outline-blue-500"
+    >
+      <details
+        className={desktop ? "group" : "group rounded-xl border border-gray-200 dark:border-gray-700"}
+        open={desktop || expanded}
+        onToggle={event => { if (!desktop) setExpanded(event.currentTarget.open); }}
+      >
+        <summary hidden={desktop} className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-blue-500 dark:hover:bg-gray-800">
+          <h2 id={desktop ? undefined : headingId} className="text-base font-bold">{title}</h2>
+          <span className="flex shrink-0 items-center gap-3">
+            {badge}
+            <FiChevronDown aria-hidden="true" className="transition-transform group-open:rotate-180" />
+          </span>
+        </summary>
+        <div className={desktop ? "space-y-4" : "space-y-4 border-t border-gray-200 p-4 dark:border-gray-700"}>
+          {desktop && <h2 id={headingId} className="text-lg font-bold">{title}</h2>}
+          {children}
+        </div>
+      </details>
+    </div>
   );
 }
 
@@ -90,9 +122,34 @@ const ProfilePage = () => {
   const [sessionsBusy, setSessionsBusy] = useState(false);
   const [sessionsStatus, setSessionsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [pushState, setPushState] = useState<PushBrowserState>("checking");
+  const desktop = useSyncExternalStore(subscribeDesktopLayout, isDesktopLayout, () => false);
+  const [activeTab, setActiveTab] = useState<ProfileTab>("personal");
   const sessionsRequest = useRef(0);
 
   const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const tabs = ([
+    { id: "personal", title: "Dati Anagrafici", badge: null },
+    { id: "password", title: "Cambia Password", badge: null },
+    { id: "push", title: "Attivazione notifiche push", badge: <PushStatusBadge state={pushState} /> },
+    { id: "notifications", title: "Preferenze notifiche", badge: null },
+    { id: "devices", title: "Dispositivi connessi", badge: <DeviceCountBadge status={sessionsStatus} sessions={deviceSessions} /> },
+  ] satisfies { id: ProfileTab; title: string; badge: ReactNode }[])
+    .filter(tab => tab.id !== "push" || user?.role?.name !== "viewer");
+  const selectedTab = tabs.some(tab => tab.id === activeTab) ? activeTab : "personal";
+
+  function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight": next = (index + 1) % tabs.length; break;
+      case "ArrowLeft": next = (index + tabs.length - 1) % tabs.length; break;
+      case "Home": next = 0; break;
+      case "End": next = tabs.length - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    setActiveTab(tabs[next].id);
+    document.getElementById(`profile-tab-${tabs[next].id}`)?.focus();
+  }
 
   useEffect(() => {
     getUserInfo()
@@ -309,11 +366,35 @@ const ProfilePage = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-4 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-3">
+    <div className="w-full min-w-0 max-w-md mx-auto mt-4 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-3 md:max-w-full md:mx-0 md:mt-0 md:shadow-none md:rounded-none">
       <Link to={returnPath} className="inline-flex min-h-11 items-center rounded-xl bg-gray-100 px-4 font-medium text-blue-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-gray-700">
         ← Torna indietro
       </Link>
-      <ProfileSection title="Dati Anagrafici">
+      {desktop && (
+        <div role="tablist" aria-label="Sezioni profilo" className="sticky top-0 z-10 mb-4 flex flex-wrap gap-2 border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+          {tabs.map((tab, index) => (
+            <button
+              key={tab.id}
+              id={`profile-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={selectedTab === tab.id}
+              aria-controls={`profile-panel-${tab.id}`}
+              tabIndex={selectedTab === tab.id ? 0 : -1}
+              onClick={() => setActiveTab(tab.id)}
+              onKeyDown={event => navigateTabs(event, index)}
+              className={`flex min-h-11 items-center gap-2 px-4 py-2 transition-colors focus-visible:outline-2 focus-visible:outline-blue-500 ${
+                selectedTab === tab.id
+                  ? "border-b-2 border-blue-500 font-semibold text-blue-600 dark:border-blue-400 dark:text-blue-400"
+                  : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+            >
+              {tab.title}{tab.badge}
+            </button>
+          ))}
+        </div>
+      )}
+      <ProfileSection title="Dati Anagrafici" sectionId="personal" desktop={desktop} active={selectedTab === "personal"}>
         <form onSubmit={handleProfileSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-100">Email</label>
@@ -359,7 +440,7 @@ const ProfilePage = () => {
         )}
       </ProfileSection>
 
-      <ProfileSection title="Cambia Password">
+      <ProfileSection title="Cambia Password" sectionId="password" desktop={desktop} active={selectedTab === "password"}>
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-100">Nuova Password</label>
@@ -418,13 +499,13 @@ const ProfilePage = () => {
       </ProfileSection>
 
       {user?.role?.name === "viewer"
-        ? <ProfileSection title="Preferenze notifiche"><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></ProfileSection>
+        ? <ProfileSection title="Preferenze notifiche" sectionId="notifications" desktop={desktop} active={selectedTab === "notifications"}><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></ProfileSection>
         : <>
-            <ProfileSection title="Attivazione notifiche push" headingId="profile-push-heading" badge={<PushStatusBadge state={pushState} />}><PushNotificationsPanel state={pushState} setState={setPushState} /></ProfileSection>
-            <ProfileSection title="Preferenze notifiche" headingId="notification-preferences-heading"><NotificationPreferences /></ProfileSection>
+            <ProfileSection title="Attivazione notifiche push" sectionId="push" desktop={desktop} active={selectedTab === "push"} headingId="profile-push-heading" badge={<PushStatusBadge state={pushState} />}><PushNotificationsPanel state={pushState} setState={setPushState} /></ProfileSection>
+            <ProfileSection title="Preferenze notifiche" sectionId="notifications" desktop={desktop} active={selectedTab === "notifications"} headingId="notification-preferences-heading"><NotificationPreferences /></ProfileSection>
           </>}
 
-      <ProfileSection title="Dispositivi connessi" headingId="profile-devices-heading" badge={<DeviceCountBadge status={sessionsStatus} sessions={deviceSessions} />}>
+      <ProfileSection title="Dispositivi connessi" sectionId="devices" desktop={desktop} active={selectedTab === "devices"} headingId="profile-devices-heading" badge={<DeviceCountBadge status={sessionsStatus} sessions={deviceSessions} />}>
         <p className="mb-2 text-sm">Elimina subito solo le tue sessioni scadute o disconnesse, senza disconnettere i dispositivi attivi.</p>
         <button type="button" onClick={handleCleanupSessions} disabled={sessionsBusy}
           className="mb-3 min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">

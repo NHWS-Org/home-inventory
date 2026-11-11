@@ -1,13 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { FiBell, FiBellOff, FiInbox } from "react-icons/fi";
 import { getNotificationPreferences, notificationLabels, notifyInboxChanged, saveNotificationPreference, type NotificationPreference } from "../notificationsApi";
 
+const modes = [
+  { value: "off", label: "Disattivate", Icon: FiBellOff },
+  { value: "inbox", label: "Solo Inbox", Icon: FiInbox },
+  { value: "inbox_push", label: "Inbox + Push", Icon: FiBell },
+] as const;
+
 export default function NotificationPreferences() {
+  const groupId = useId();
   const [rows, setRows] = useState<NotificationPreference[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const saving = useRef(false);
+  const focusAfterSave = useRef<HTMLInputElement | null>(null);
   async function load() {
     setLoading(true);
     setError("");
@@ -17,9 +26,19 @@ export default function NotificationPreferences() {
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
-  async function changeMode(row: NotificationPreference, mode: string) {
+  useEffect(() => {
+    if (busy) return;
+    const input = focusAfterSave.current;
+    focusAfterSave.current = null;
+    if (input?.isConnected && document.activeElement === document.body
+        && !input.closest("[hidden], details:not([open])")) {
+      input.focus({ preventScroll: true });
+    }
+  }, [busy]);
+  async function changeMode(row: NotificationPreference, mode: typeof modes[number]["value"], input: HTMLInputElement) {
     if (saving.current) return;
     saving.current = true;
+    focusAfterSave.current = document.activeElement === input ? input : null;
     const next = { ...row, in_app_enabled: mode !== "off", push_enabled: mode === "inbox_push" };
     setRows(previous => previous.map(p => p.event_type === row.event_type ? next : p));
     setBusy(true);
@@ -44,23 +63,31 @@ export default function NotificationPreferences() {
       {loading && <p role="status">Caricamento...</p>}
       {error && <p role="alert">{error}</p>}
       {error && <button type="button" disabled={busy || loading} onClick={() => void load()} className="min-h-11 rounded border px-3">Ricarica preferenze</button>}
-      {rows.map(row => (
-        <fieldset key={row.event_type} disabled={busy || loading} className="rounded border px-2 pb-2">
-          <legend className="font-semibold">{notificationLabels[row.event_type]}</legend>
-          <label className="block">
-            <span className="sr-only">Ricezione notifiche: {notificationLabels[row.event_type]}</span>
-            <select
-              value={row.push_enabled ? "inbox_push" : row.in_app_enabled ? "inbox" : "off"}
-              onChange={event => void changeMode(row, event.currentTarget.value)}
-              className="min-h-11 w-full rounded border border-gray-300 bg-white px-3 text-sm disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900"
-            >
-              <option value="off">Disattivate</option>
-              <option value="inbox">Solo Inbox</option>
-              <option value="inbox_push">Inbox + Push</option>
-            </select>
-          </label>
-        </fieldset>
-      ))}
+      <div className="grid gap-3 xl:grid-cols-3">
+        {rows.map(row => (
+          <fieldset key={row.event_type} disabled={busy || loading} className="min-w-0 rounded-2xl border border-gray-200 px-3 pb-3 dark:border-gray-700 disabled:opacity-60">
+            <legend className="px-1 text-sm font-semibold">{notificationLabels[row.event_type]}</legend>
+            <div className="mt-2 grid grid-cols-3 gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+              {modes.map(({ value, label, Icon }) => (
+                <label key={value} className="min-w-0 cursor-pointer">
+                  <input
+                    type="radio"
+                    name={`${groupId}-${row.event_type}`}
+                    value={value}
+                    checked={value === (row.push_enabled ? "inbox_push" : row.in_app_enabled ? "inbox" : "off")}
+                    onChange={event => void changeMode(row, value, event.currentTarget)}
+                    className="peer sr-only"
+                  />
+                  <span className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-center text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 peer-checked:bg-blue-600 peer-checked:text-white peer-checked:shadow-sm peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-blue-500 peer-disabled:cursor-wait motion-reduce:transition-none dark:text-gray-300 dark:hover:bg-gray-700 dark:peer-checked:bg-blue-500 dark:peer-checked:text-white">
+                    <Icon aria-hidden="true" className="h-4 w-4" />
+                    {label}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ))}
+      </div>
       <p role="status" className="text-sm">{busy ? "Salvataggio..." : notice}</p>
     </section>
   );

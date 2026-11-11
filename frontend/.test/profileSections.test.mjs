@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { createElement } from 'react';
+import { act, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { createServer } from 'vite';
@@ -101,4 +101,99 @@ test('active device count excludes expired and revoked sessions', () => {
     { is_expired: false, revoked_at: '2026-01-01T00:00:00Z' },
   ] }));
   assert.match(html, /2 sessioni attive/);
+});
+
+test('desktop tabs support keyboard navigation and preserve mobile accordions without remounting forms', async () => {
+  const { JSDOM } = await import('jsdom');
+  const dom = new JSDOM('<div id="root"></div>', { url: 'https://inventory.example/profile' });
+  const originals = new Map();
+  for (const [key, value] of Object.entries({
+    window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
+    localStorage: dom.window.localStorage, IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+  const listeners = new Set();
+  const media = {
+    matches: false,
+    addEventListener: (_event, listener) => listeners.add(listener),
+    removeEventListener: (_event, listener) => listeners.delete(listener),
+  };
+  dom.window.matchMedia = () => media;
+  const { createRoot } = await import('react-dom/client');
+  const { api } = await server.ssrLoadModule('/src/api.ts');
+  const adapter = api.defaults.adapter;
+  const requests = [];
+  api.defaults.adapter = async config => {
+    requests.push(config.url);
+    const data = config.url === '/auth/me' ? { email_masked: 't***@example.com' } : [];
+    return { config, data, status: 200, statusText: 'OK', headers: {} };
+  };
+  const root = createRoot(document.getElementById('root'));
+  const render = role => root.render(createElement(MemoryRouter, null,
+    createElement(AuthContext.Provider, {
+      value: { user: { username: 'test', role: { name: role } }, isLoading: false },
+    }, createElement(ProfilePage)),
+  ));
+  const resize = async desktop => {
+    await act(async () => {
+      media.matches = desktop;
+      listeners.forEach(listener => listener());
+    });
+  };
+  try {
+    await act(async () => render('moderator'));
+    assert.equal(document.querySelector('[role="tablist"]'), null);
+    const personal = document.querySelector('#profile-panel-personal details');
+    const password = document.querySelector('input[type="password"]');
+    await act(async () => {
+      personal.querySelector('summary').click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    assert.equal(personal.open, true);
+
+    await resize(true);
+    assert.equal(document.querySelectorAll('[role="tab"]').length, 5);
+    assert.equal(document.querySelectorAll('[role="tabpanel"]:not([hidden])').length, 1);
+    assert.equal(document.querySelector('#profile-tab-personal').getAttribute('aria-selected'), 'true');
+    assert.ok([...document.querySelectorAll('summary')].every(summary => summary.hidden));
+    await act(async () => document.querySelector('#profile-tab-password').click());
+    assert.equal(document.querySelector('#profile-panel-password').hidden, false);
+    assert.equal(document.querySelector('input[type="password"]'), password);
+    await act(async () => document.querySelector('#profile-tab-password').dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }),
+    ));
+    assert.equal(document.activeElement.id, 'profile-tab-devices');
+    assert.equal(document.querySelector('#profile-panel-devices').hidden, false);
+    assert.equal(document.querySelectorAll('[role="tab"][tabindex="0"]').length, 1);
+    for (const [key, expected] of [['Home', 'personal'], ['ArrowLeft', 'devices'], ['ArrowRight', 'personal']]) {
+      await act(async () => document.activeElement.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key, bubbles: true }),
+      ));
+      assert.equal(document.activeElement.id, `profile-tab-${expected}`);
+    }
+
+    await resize(false);
+    assert.equal(document.querySelector('[role="tablist"]'), null);
+    assert.equal(personal.open, true);
+    assert.equal(document.querySelector('#profile-panel-devices details').open, false);
+    assert.equal(document.querySelector('input[type="password"]'), password);
+    assert.equal(requests.filter(url => url === '/notifications/preferences').length, 1);
+
+    await resize(true);
+    await act(async () => render('viewer'));
+    assert.equal(document.querySelectorAll('[role="tab"]').length, 4);
+    assert.equal(document.querySelector('#profile-tab-push'), null);
+    await act(async () => document.querySelector('#profile-tab-notifications').click());
+    assert.match(document.querySelector('#profile-panel-notifications').textContent, /Gli utenti con sola lettura non le ricevono/);
+  } finally {
+    await act(async () => root.unmount());
+    api.defaults.adapter = adapter;
+    dom.window.close();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
 });
