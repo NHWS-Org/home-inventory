@@ -466,7 +466,7 @@ export function SourceAssignmentsDialog({ item, onClose }: { item: Item; onClose
                 disabled={r.qty >= r.qty + Math.max(0, r.source_net_qty ?? 0)}
                 onClick={() => change(r, r.qty + 1)}>+</button>
               <button type="button" className="h-9 rounded border border-gray-400 px-2 text-xs text-gray-800 hover:bg-gray-100 dark:border-gray-500 dark:text-gray-100 dark:hover:bg-gray-700" onClick={() => remove(r)} title="Scollega">Scollega</button>
-              <button type="button" className="h-9 px-2 rounded bg-red-600 text-white text-xs" onClick={() => deleteListItem(r)} title="Cancella item dalla lista">🗑️</button>
+              <button type="button" className="h-9 px-2 rounded bg-red-600 text-white text-xs" onClick={() => deleteListItem(r)} title="Cancella item dalla lista" aria-label="Cancella item dalla lista">🗑️</button>
             </span>
           </li>
         ))}
