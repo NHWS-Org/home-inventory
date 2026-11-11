@@ -453,6 +453,29 @@ def rollback_item(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    # Security: Verify authorization and resource existence before evaluating rollback parameters
+    # to prevent ID enumeration oracles and unauthorized probing of version numbers.
+    item = db.query(Item).get(item_id)
+    if item:
+        if not can_access_item(user, item, action="edit"):
+            raise HTTPException(status_code=403, detail="Accesso negato")
+    else:
+        latest = (
+            db.query(ItemVersion)
+            .filter(ItemVersion.item_id == item_id)
+            .order_by(ItemVersion.version_num.desc())
+            .first()
+        )
+        if not latest:
+            raise HTTPException(status_code=404, detail="Item non trovato")
+        if user.role.name == "viewer":
+            raise HTTPException(status_code=403, detail="Accesso negato")
+        parent_inventory = db.query(Inventory).filter(Inventory.id == latest.inventory_id).first()
+        if not parent_inventory:
+            raise HTTPException(status_code=404, detail="Inventario origine non trovato: ripristina prima l'inventario")
+        if not can_access_inventory(user, parent_inventory, action="edit"):
+            raise HTTPException(status_code=403, detail="Accesso negato")
+
     target = db.query(ItemVersion).filter(
         ItemVersion.item_id == item_id,
         ItemVersion.version_num == version_num,
@@ -460,16 +483,14 @@ def rollback_item(
     if not target or cast(str, target.operation) == "DELETE":
         raise HTTPException(status_code=400, detail="Versione non valida per il rollback")
 
-    item = db.query(Item).get(item_id)
-
     # Ripristino di item cancellato: ricreazione dal snapshot della versione
     if not item:
-        parent_inventory = db.query(Inventory).filter(Inventory.id == target.inventory_id).first()
-        if not parent_inventory:
-            raise HTTPException(status_code=404, detail="Inventario origine non trovato: ripristina prima l'inventario")
-        if not can_access_inventory(user, parent_inventory, action="edit"):
-            raise HTTPException(status_code=403, detail="Accesso negato")
-
+        if target.inventory_id != latest.inventory_id:
+            parent_inventory = db.query(Inventory).filter(Inventory.id == target.inventory_id).first()
+            if not parent_inventory:
+                raise HTTPException(status_code=404, detail="Inventario origine non trovato: ripristina prima l'inventario")
+            if not can_access_inventory(user, parent_inventory, action="edit"):
+                raise HTTPException(status_code=403, detail="Accesso negato")
         restored_item = Item(
             id=item_id,
             name=target.name,
@@ -486,9 +507,6 @@ def rollback_item(
         db.commit()
         db.refresh(restored_item)
         return _build_item_response(db, restored_item)
-
-    if not can_access_item(user, item, action="edit"):
-        raise HTTPException(status_code=403, detail="Accesso negato")
 
     old_snapshot = _snapshot_item(item)
     item.name = target.name
