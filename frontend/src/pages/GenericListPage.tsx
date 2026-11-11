@@ -471,12 +471,10 @@ export default function GenericListPage() {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-grow gap-2">
                     <div className="flex items-center gap-2">
                       <h2 className={`text-lg font-semibold ${selectedItems.includes(inv.id) ? "dark:text-black" : "" }`}>{inv.name}</h2>
-                      <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
-                        v{inv.version_num}
-                      </span>
                     </div>
                     <p className="text-sm text-gray-500 dark:ext-gray-300 sm:ml-4 text-right sm:text-right w-full sm:w-auto">
-                      Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
+                      Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}{" "}
+                      <span className="whitespace-nowrap">· v{inv.version_num}</span>
                     </p>
                     {canManage && (
                     <button
@@ -518,13 +516,11 @@ export default function GenericListPage() {
                     <span className="hidden sm:inline">QR code</span>
                   </button>
                   <h2 className="break-words text-base font-semibold [overflow-wrap:anywhere] sm:text-lg">
-                    {inv.name}{" "}
-                    <span className="inline-block rounded bg-blue-100 px-1.5 py-0.5 align-middle font-mono text-xs font-normal text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                      v{inv.version_num}
-                    </span>
+                    {inv.name}
                   </h2>
                   <p className="mt-1 text-xs text-gray-500 sm:text-sm">
-                    Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
+                    Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}{" "}
+                    <span className="whitespace-nowrap">· v{inv.version_num}</span>
                   </p>
                   {inv.matching_items && inv.matching_items.length > 0 && (
                     <div className="clear-both mt-2 p-2 border rounded bg-yellow-50">

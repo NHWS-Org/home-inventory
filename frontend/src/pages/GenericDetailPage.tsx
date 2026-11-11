@@ -528,9 +528,6 @@ export function SwipeableItemRow({
                   )}
                 </span>
               )}
-              <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
-                v{item.version_num}
-              </span>
               {(item.barcodes?.length ?? 0) > 0 && (
                 <span
                   className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 px-2 py-1 rounded whitespace-nowrap"
@@ -598,7 +595,8 @@ export function SwipeableItemRow({
               </div>
             )}
             <div className="mt-1 text-xs text-gray-400">
-              Ultima modifica: {item.username_mod} - {new Date(item.data_mod).toLocaleString()}
+              Ultima modifica: {item.username_mod} - {new Date(item.data_mod).toLocaleString()}{" "}
+              <span className="whitespace-nowrap">· v{item.version_num}</span>
             </div>
           </div>
         </div>

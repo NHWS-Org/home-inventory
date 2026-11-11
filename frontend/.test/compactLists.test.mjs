@@ -20,6 +20,7 @@ const server = await createServer({
   server: { middlewareMode: true, ws: false },
 });
 const { default: GenericListPage } = await server.ssrLoadModule('/src/pages/GenericListPage.tsx');
+const { SwipeableItemRow } = await server.ssrLoadModule('/src/pages/GenericDetailPage.tsx');
 const { AuthContext } = await server.ssrLoadModule('/src/auth-context.tsx');
 const { api } = await server.ssrLoadModule('/src/api.ts');
 const root = createRoot(document.getElementById('root'));
@@ -50,7 +51,7 @@ for (const path of ['inventories', 'checklists']) {
       }] };
     };
     await act(async () => root.render(createElement(MemoryRouter, { key: path, initialEntries: [`/${path}`] },
-      createElement(AuthContext.Provider, { value: { user: null } },
+      createElement(AuthContext.Provider, { value: { user: { role: { name: 'admin' } } } },
         createElement(GenericListPage), createElement(Location)))));
     assert.ok(requests.includes(path === 'inventories' ? '/inventory/' : '/checklist/'));
     const heading = document.querySelector('h2');
@@ -62,10 +63,39 @@ for (const path of ['inventories', 'checklists']) {
     assert.match(qr.className, /h-11 w-11/);
     assert.doesNotMatch(card.className, /pb-16/);
     assert.doesNotMatch(qr.className, /absolute|bottom-/);
-    assert.match(heading.textContent, /v3/);
+    assert.equal(heading.textContent, name);
+    assert.match(card.querySelector('p').textContent, /Ultima modifica: .* · v3$/);
     assert.match(card.textContent, /Creatore: angela \| Oggetti: 13/);
     assert.match(card.textContent, /Corrispondenze trovate:Gioco|Corrispondenze trovate:1x Gioco/);
     await act(async () => card.click());
     assert.equal(document.querySelector('output').textContent, `/${path}/1`);
+    const edit = [...document.querySelectorAll('button')].find(button => button.textContent === '✏️Modifica');
+    await act(async () => edit.click());
+    const editHeading = document.querySelector('h2');
+    assert.equal(editHeading.textContent, name);
+    assert.match(editHeading.closest('li').querySelector('p').textContent, /Ultima modifica: .* · v3$/);
   });
 }
+
+test('inventory and checklist item versions appear with modification details, not the name', async () => {
+  for (const isChecklist of [false, true]) {
+    for (const isEditMode of [false, true]) {
+      await act(async () => root.render(createElement(SwipeableItemRow, {
+        item: {
+          id: 2, inventory_id: 1, name: 'Riso', quantity: 1, version_num: 123,
+          data_mod: '2026-11-03T19:09:30', username_mod: 'angela',
+        },
+        isMobile: true, isChecklist, isInventory: !isChecklist,
+        user: { role: { name: 'viewer' } }, isEditMode, selectedItems: [],
+        setSelectedItems() {}, setItemBeingEdited() {}, updateItem() {}, deleteItem() {},
+        setItems() {}, setIsCloning() {},
+      })));
+      const name = [...document.querySelectorAll('span')].find(node => node.textContent === 'Riso');
+      assert.ok(name);
+      assert.doesNotMatch(name.parentElement.textContent, /v123/);
+      const details = [...document.querySelectorAll('li div')].find(node => node.textContent.startsWith('Ultima modifica:'));
+      assert.match(details.textContent, /^Ultima modifica: angela - .* · v123$/);
+      assert.equal(document.querySelector('li').textContent.match(/v123/g)?.length, 1);
+    }
+  }
+});
