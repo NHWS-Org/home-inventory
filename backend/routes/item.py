@@ -485,6 +485,12 @@ def rollback_item(
 
     # Ripristino di item cancellato: ricreazione dal snapshot della versione
     if not item:
+        if target.inventory_id != latest.inventory_id:
+            parent_inventory = db.query(Inventory).filter(Inventory.id == target.inventory_id).first()
+            if not parent_inventory:
+                raise HTTPException(status_code=404, detail="Inventario origine non trovato: ripristina prima l'inventario")
+            if not can_access_inventory(user, parent_inventory, action="edit"):
+                raise HTTPException(status_code=403, detail="Accesso negato")
         restored_item = Item(
             id=item_id,
             name=target.name,

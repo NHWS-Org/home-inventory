@@ -31,6 +31,7 @@ def auth_ctx():
         ])
         db.flush()
         db.add(Inventory(id=1, name="Owner inventory", owner_id=2, type="INVENTORY"))
+        db.add(Inventory(id=2, name="Other inventory", owner_id=3, type="INVENTORY"))
         db.flush()
         db.add(SharedInventory(user_id=5, inventory_id=1))
         db.add(Item(id=10, name="Active", inventory_id=1, quantity=5))
@@ -43,6 +44,10 @@ def auth_ctx():
                         version_num=2, operation="DELETE", changed_by_id=2),
             ItemVersion(item_id=30, inventory_id=999, name="Orphan", quantity=1,
                         version_num=1, operation="CREATE", changed_by_id=2),
+            ItemVersion(item_id=40, inventory_id=2, name="Moved", quantity=1,
+                        version_num=1, operation="CREATE", changed_by_id=3),
+            ItemVersion(item_id=40, inventory_id=1, name="Moved", quantity=1,
+                        version_num=2, operation="DELETE", changed_by_id=2),
         ])
     current = [2]
 
@@ -122,3 +127,13 @@ def test_rollback_deleted_item_rejects_unauthorized_and_viewers(auth_ctx, user_i
     response = client.post("/item/20/rollback/1")
     assert response.status_code == 403
     assert response.json()["detail"] == "Accesso negato"
+
+
+@pytest.mark.parametrize("user_id,status", [(2, 403), (3, 403), (1, 200)])
+def test_deleted_moved_item_rollback_checks_latest_and_target_inventories(auth_ctx, user_id, status):
+    client, current = auth_ctx
+    current[0] = user_id
+    response = client.post("/item/40/rollback/1")
+    assert response.status_code == status
+    if status == 200:
+        assert response.json()["inventory_id"] == 2
