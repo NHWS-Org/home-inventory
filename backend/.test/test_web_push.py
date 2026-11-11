@@ -1,4 +1,7 @@
+import ast
 import base64
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from datetime import timedelta
 import importlib
 import json
@@ -36,6 +39,7 @@ from routes.auth import create_access_token, router as auth_router
 from routes.backup import RestoreRequest, _restore_backup_rows
 from routes.notifications import router
 import web_push as push
+import push_config
 
 
 def encoded(value):
@@ -163,6 +167,118 @@ def test_vapid_is_persistent_derived_and_never_generated(setup, monkeypatch):
     with pytest.raises(PushConfigurationError, match="Cannot read"):
         load_push_config()
     assert not setup.path.exists()
+
+
+def test_api_startup_generates_and_reuses_persistent_vapid_key(setup):
+    setup.path.unlink()
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "main.py").read_text())
+    lifespan = next(
+        node for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "lifespan"
+    )
+    namespace = {
+        "asynccontextmanager": asynccontextmanager, "FastAPI": FastAPI,
+        "SessionLocal": setup.factory, "init_roles_and_admin": lambda db: None,
+        "initialize_settings": lambda db: None, "load_push_config": load_push_config,
+    }
+    exec(compile(ast.Module(body=[lifespan], type_ignores=[]), "main.py", "exec"), namespace)
+    setup.client.app.router.lifespan_context = namespace["lifespan"]
+    with setup.client as client:
+        response = client.get("/notifications/push/config", headers=setup.headers[2])
+        assert response.status_code == 200, response.text
+        public_key = response.json()["public_key"]
+    original = setup.path.read_bytes()
+    assert setup.path.stat().st_mode & 0o777 == 0o600
+    with setup.client as client:
+        assert client.get(
+            "/notifications/push/config", headers=setup.headers[2],
+        ).json()["public_key"] == public_key
+    assert setup.path.read_bytes() == original
+
+
+def test_vapid_bootstrap_disabled_or_invalid_settings_do_not_create_key(setup, monkeypatch):
+    setup.path.unlink()
+    monkeypatch.setenv("WEB_PUSH_ENABLED", "false")
+    assert load_push_config(create_if_missing=True) is None
+    assert not setup.path.exists()
+    monkeypatch.setenv("WEB_PUSH_ENABLED", "true")
+    monkeypatch.setenv("WEB_PUSH_VAPID_SUBJECT", "invalid")
+    with pytest.raises(PushConfigurationError, match="valid contact subject"):
+        load_push_config(create_if_missing=True)
+    assert not setup.path.exists()
+
+
+@pytest.mark.parametrize("existing", ["corrupt", "encrypted", "unreadable", "dangling_symlink"])
+def test_vapid_bootstrap_never_replaces_existing_file(setup, monkeypatch, existing):
+    if existing == "corrupt":
+        setup.path.write_bytes(b"not a PEM key")
+    elif existing == "encrypted":
+        key = write_key(setup.path)
+        setup.path.write_bytes(key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.BestAvailableEncryption(b"test-only-password"),
+        ))
+    elif existing == "unreadable":
+        read_bytes = Path.read_bytes
+
+        def denied(path):
+            if path == setup.path:
+                raise PermissionError("test-only unreadable key")
+            return read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", denied)
+    else:
+        setup.path.unlink()
+        setup.path.symlink_to(setup.path.parent / "missing-key.pem")
+    if setup.path.is_symlink():
+        original = setup.path.readlink()
+    else:
+        with setup.path.open("rb") as stream:
+            original = stream.read()
+    with pytest.raises(PushConfigurationError, match="Cannot read"):
+        load_push_config(create_if_missing=True)
+    if setup.path.is_symlink():
+        assert setup.path.readlink() == original
+        assert not setup.path.exists()
+    else:
+        with setup.path.open("rb") as stream:
+            assert stream.read() == original
+
+
+def test_vapid_bootstrap_storage_failure_leaves_no_key_or_temporary_file(setup, monkeypatch):
+    setup.path.unlink()
+
+    def denied(*args):
+        raise PermissionError("test-only read-only storage")
+
+    monkeypatch.setattr(push_config.os, "link", denied)
+    with pytest.raises(PushConfigurationError, match="Cannot persist"):
+        load_push_config(create_if_missing=True)
+    assert not setup.path.exists()
+    assert not list(setup.path.parent.glob(".vapid-*"))
+
+
+def test_concurrent_processes_bootstrap_the_same_vapid_key(setup):
+    setup.path.unlink()
+    command = [
+        sys.executable, "-c",
+        "from push_config import load_push_config; "
+        "print(load_push_config(create_if_missing=True).public_key)",
+    ]
+
+    def start(_):
+        return subprocess.run(
+            command, cwd=Path(__file__).resolve().parents[1],
+            capture_output=True, text=True, timeout=30,
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(start, range(6)))
+    for result in results:
+        assert result.returncode == 0, result.stderr
+    assert {result.stdout.strip() for result in results} == {load_push_config().public_key}
+    assert setup.path.stat().st_mode & 0o777 == 0o600
+    assert not list(setup.path.parent.glob(".vapid-*"))
 
 
 @pytest.mark.parametrize("endpoint", [

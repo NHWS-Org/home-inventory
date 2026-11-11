@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from models import Inventory, Item, User
 from scheduler import start_scheduler
 from fastapi.responses import JSONResponse
+from push_config import load_push_config
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("uvicorn.access").addFilter(
@@ -33,6 +34,7 @@ logging.getLogger("uvicorn.access").addFilter(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    load_push_config(create_if_missing=True)
     db = SessionLocal()
     try:
         init_roles_and_admin(db)

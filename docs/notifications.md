@@ -203,16 +203,21 @@ WEB_PUSH_VAPID_SUBJECT=mailto:amministratore@example.com
 In Dev usare il file privato `backend/.env`; in produzione shell o `.env` root.
 Il PEM deve essere leggibile nello stesso percorso da entrambi i servizi.
 Non inserire chiavi nel repository, in `.env.dev` o nell'immagine.
-Generare una coppia P-256 una sola volta:
+Con Web Push abilitato e percorso/contatto configurati, il backend genera
+automaticamente una chiave privata P-256 al primo avvio, solo se il file non
+esiste. Il file viene scritto con permessi `0600` e pubblicato atomicamente:
+avvii concorrenti riutilizzano la stessa chiave, senza sovrascriverla.
+Montare la directory su un volume persistente condiviso da API e worker;
+il percorso configurato deve essere scrivibile alla prima generazione.
+Il worker si limita a leggere la chiave: avviarlo dopo che il backend e sano
+(come nei Compose del repository). Non serve generare un file di chiave pubblica.
 
-```sh
-docker compose -f docker-compose-dev.yml exec backend sh -c \
-  'cd /app/data && test ! -e private_key.pem && test ! -e public_key.pem && umask 077 && vapid --gen'
-```
-
-Il comando rifiuta di sovrascrivere chiavi. L'API deriva la chiave pubblica dal
-PEM privato; non crea chiavi effimere. Configurazione mancante/corrotta con push
-abilitato: API `503`, worker non avviabile. La chiave JWT e indipendente.
+Un PEM preesistente viene riutilizzato, anche se fornito in sola lettura.
+File corrotto, cifrato, illeggibile o configurazione non valida impediscono
+l'avvio del backend con push abilitato: non vengono rigenerate chiavi come
+fallback. Se il file diventa non valido a runtime, l'API push risponde `503`.
+Il worker non si avvia con una configurazione mancante/non valida.
+L'API deriva la chiave pubblica dal PEM privato; la chiave JWT e indipendente.
 Cambiare VAPID richiede rinnovo delle sottoscrizioni browser.
 
 ### Sessioni, invii e limiti
