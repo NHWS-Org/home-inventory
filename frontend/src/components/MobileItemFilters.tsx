@@ -34,7 +34,7 @@ export default function MobileItemFilters<Sort extends string>(props: Props<Sort
   const hasBarcode = props.barcode !== undefined && props.barcode !== 'all';
   const hasMetadata = props.metadataSummary != null || (props.templateId !== undefined && props.templateId !== '');
   const activeCount = Number(hasBarcode) + Number(hasMetadata);
-  const control = 'min-h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-800';
+  const control = 'min-h-11 w-full rounded-xl border border-gray-300 bg-white px-3 text-base md:text-sm dark:border-gray-600 dark:bg-gray-800';
   const segment = (selected: boolean) => `min-h-11 min-w-0 flex-1 rounded-lg px-2 text-sm ${selected ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100' : 'text-gray-700 dark:text-gray-200'}`;
   const ascending = props.sortBy === 'name' ? 'A → Z' : 'Crescente';
   const descending = props.sortBy === 'name' ? 'Z → A' : 'Decrescente';
