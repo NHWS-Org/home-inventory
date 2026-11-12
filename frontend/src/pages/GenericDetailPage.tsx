@@ -22,6 +22,7 @@ import ItemBarcodesEditor from "../components/ItemBarcodesEditor";
 import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
 import { AddFromInventoryDialog, AssignExistingListItemDialog, AssignToListDialog, EditAssignmentDialog, ListLinkField, SourceAssignmentsDialog } from "../components/AssignmentDialogs";
 import { isAxiosError } from "axios";
+import { scrollPageToTop } from "../utils/scrollPageToTop";
 
 interface Props {
   item: Item;
@@ -798,7 +799,6 @@ export default function InventoryDetailPage() {
     return 'desc';
   });
   const [itemBeingEdited, setItemBeingEdited] = useState<Item | null>(null);
-  const detailTopRef = useRef<HTMLDivElement>(null);
   const filtroParam = filterText;
   const [isCloning, setIsCloning] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -1130,7 +1130,7 @@ useEffect(() => {
   const editItemSheetDrag = useBottomSheetDrag(() => setItemBeingEdited(null));
 
   return (
-    <div ref={detailTopRef} className="relative p-3 sm:p-4">
+    <div className="relative p-3 sm:p-4">
       {inventory && (
         <div className="fixed inset-x-4 top-20 z-50 md:hidden">
           <div className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2">
@@ -1367,7 +1367,7 @@ useEffect(() => {
       )}
 
       {!isMobile && <div className="fixed right-4 top-4 z-40 flex flex-wrap justify-end gap-2">
-        <button type="button" onClick={() => detailTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-700 px-3 py-2 text-white shadow-lg hover:bg-gray-800" title="Torna in cima alla lista">
+        <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-700 px-3 py-2 text-white shadow-lg hover:bg-gray-800" aria-label="Torna in cima alla pagina" title="Torna in cima alla pagina">
           ↑ In cima
         </button>
         {isEditMode && selectedItems.length > 0 && (
@@ -1537,9 +1537,9 @@ useEffect(() => {
             >{isEditMode ? '✖️' : '✏️'}</button>
             <button
               type="button"
-              onClick={() => detailTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              aria-label="Torna in cima alla lista"
-              title="Torna in cima alla lista"
+              onClick={(event) => scrollPageToTop(event.currentTarget)}
+              aria-label="Torna in cima alla pagina"
+              title="Torna in cima alla pagina"
               className="flex h-10 w-12 items-center justify-center rounded-xl bg-gray-600 text-lg text-white shadow-lg"
             >↑</button>
             <button

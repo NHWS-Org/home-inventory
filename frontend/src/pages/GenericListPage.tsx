@@ -34,6 +34,7 @@ import { InventoryWithMatches, ChecklistWithMatches } from "../types"
 import InventoryQrDialog from '../components/InventoryQrDialog'
 import { useBottomSheetDrag } from '../components/useBottomSheetDrag'
 import { FiGrid } from 'react-icons/fi'
+import { scrollPageToTop } from '../utils/scrollPageToTop'
 
 function NewItemModal({ isOpen, onClose, onCreate, isInventory }: {
   isOpen: boolean
@@ -630,6 +631,16 @@ export default function GenericListPage() {
             </button>
           </>
         )}
+        <button
+          type="button"
+          onClick={(event) => scrollPageToTop(event.currentTarget)}
+          aria-label="Torna in cima alla pagina"
+          title="Torna in cima alla pagina"
+          className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-600 px-3 py-2 text-lg text-white shadow-lg hover:bg-gray-700 md:text-sm"
+        >
+          <span aria-hidden="true">↑</span>
+          <span className="ml-1 hidden md:inline">In cima</span>
+        </button>
       </div>
       {message && (
         <div

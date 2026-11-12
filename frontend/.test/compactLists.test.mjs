@@ -14,13 +14,13 @@ for (const [key, value] of Object.entries({
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 }
 const { createRoot } = await import('react-dom/client');
-const { MemoryRouter, useLocation } = await import('react-router-dom');
+const { MemoryRouter, Routes, Route, useLocation } = await import('react-router-dom');
 const server = await createServer({
   appType: 'custom', configFile: false, logLevel: 'error',
   server: { middlewareMode: true, ws: false },
 });
 const { default: GenericListPage } = await server.ssrLoadModule('/src/pages/GenericListPage.tsx');
-const { SwipeableItemRow } = await server.ssrLoadModule('/src/pages/GenericDetailPage.tsx');
+const { default: GenericDetailPage, SwipeableItemRow } = await server.ssrLoadModule('/src/pages/GenericDetailPage.tsx');
 const { AuthContext } = await server.ssrLoadModule('/src/auth-context.tsx');
 const { api } = await server.ssrLoadModule('/src/api.ts');
 const root = createRoot(document.getElementById('root'));
@@ -37,6 +37,56 @@ after(async () => {
 function Location() {
   return createElement('output', { 'aria-label': 'Destinazione' }, useLocation().pathname);
 }
+
+test('back to top scrolls the page container to zero, including filters, on mobile and desktop', async () => {
+  const width = window.innerWidth;
+  const windowScroll = window.scrollTo;
+  window.scrollTo = () => assert.fail('The document is not the page scroll container');
+  try {
+    for (const viewport of [390, 1024]) {
+      window.innerWidth = viewport;
+      for (const path of ['inventories', 'checklists']) {
+        for (const detail of [false, true]) {
+          for (const role of detail ? ['admin'] : ['admin', 'viewer']) {
+            const container = {
+              id: 1, name: 'Dispensa', version_num: 1, owner: { username: 'admin' },
+              item_count: 0, data_mod: '2026-11-03T19:09:30',
+            };
+            api.defaults.adapter = async config => ({
+              config, status: 200, statusText: 'OK', headers: {},
+              data: config.url === '/inventory/' || config.url === '/checklist/'
+                ? [container]
+                : config.url === '/inventory/1' || config.url === '/checklist/1'
+                  ? container : [],
+            });
+            await act(async () => root.render(createElement(MemoryRouter, {
+              key: `${viewport}-${path}-${detail}-${role}`,
+              initialEntries: [`/${path}${detail ? '/1' : ''}`],
+            }, createElement(AuthContext.Provider, { value: { user: { role: { name: role } } } },
+              createElement('div', { 'data-page-scroll': true },
+                createElement(Routes, null, createElement(Route, {
+                  path: `/${path}${detail ? '/:id' : ''}`,
+                  element: createElement(detail ? GenericDetailPage : GenericListPage),
+                })))))));
+            const scroller = document.querySelector('[data-page-scroll]');
+            scroller.scrollTop = 900;
+            const calls = [];
+            scroller.scrollTo = options => { calls.push(options); scroller.scrollTop = options.top; };
+            const button = scroller.querySelector('button[aria-label="Torna in cima alla pagina"]');
+            assert.ok(button, `${viewport} ${path} ${detail} ${role}`);
+            assert.ok(scroller.querySelector('input[placeholder*="Filtra"]'));
+            await act(async () => button.click());
+            assert.deepEqual(calls, [{ top: 0, behavior: 'smooth' }]);
+            assert.equal(scroller.scrollTop, 0);
+          }
+        }
+      }
+    }
+  } finally {
+    window.innerWidth = width;
+    window.scrollTo = windowScroll;
+  }
+});
 
 for (const path of ['inventories', 'checklists']) {
   test(`${path} cards keep QR at the top without a reserved bottom strip`, async () => {

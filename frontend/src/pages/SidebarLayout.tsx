@@ -230,7 +230,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
       </div>
       {/* Contenuto */}
-      <div className={`ml-0 w-full flex-1 overflow-auto px-4 pb-28 dark:bg-gray-900 dark:text-white sm:px-6 md:p-6 ${isItemDetail ? 'pt-40 md:pt-6' : 'pt-16 md:pt-6'}`}>
+      <div data-page-scroll className={`ml-0 w-full flex-1 overflow-auto px-4 pb-28 dark:bg-gray-900 dark:text-white sm:px-6 md:p-6 ${isItemDetail ? 'pt-40 md:pt-6' : 'pt-16 md:pt-6'}`}>
         <NotificationClickReader />
         {location.pathname.startsWith('/settings') && <h1 className="mb-5 hidden text-2xl font-bold md:block">Impostazioni</h1>}
         {children}
