@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from main import app
 from database import Base
 from dependencies import get_db
-from models import User, Role, RoleEnum, InventoryVersion
+from models import User, Role, RoleEnum, Inventory, InventoryVersion
 from routes.auth import get_current_user
 
 
@@ -197,3 +197,85 @@ def test_owner_and_admin_can_access_deleted_history(auth_ctx):
     res_inv_admin = client.get("/inventory/100/history")
     assert res_inv_admin.status_code == 200
     assert len(res_inv_admin.json()) == 2
+
+
+def test_nonexistent_inventory_and_checklist_rollback_returns_404(auth_ctx):
+    client = auth_ctx["client"]
+    auth_ctx["state"]["user_id"] = auth_ctx["mod_owner"].id
+
+    res_inv = client.post("/inventory/9999/rollback/1")
+    assert res_inv.status_code == 404
+    assert res_inv.json()["detail"] == "Inventario non trovato"
+
+    res_chk = client.post("/checklist/9999/rollback/1")
+    assert res_chk.status_code == 404
+    assert res_chk.json()["detail"] == "Checklist non trovata"
+
+
+@pytest.mark.parametrize("version_num", [1, 999])
+def test_unauthorized_user_container_rollback_blocked_without_probing_oracle(auth_ctx, version_num):
+    client = auth_ctx["client"]
+    auth_ctx["state"]["user_id"] = auth_ctx["mod_other"].id
+
+    # Deleted inventory 100 has version 1, but not 999. Unauthorized user must get 403 for both.
+    res_inv = client.post(f"/inventory/100/rollback/{version_num}")
+    assert res_inv.status_code == 403
+    assert res_inv.json()["detail"] == "Accesso negato"
+
+    res_chk = client.post(f"/checklist/200/rollback/{version_num}")
+    assert res_chk.status_code == 403
+    assert res_chk.json()["detail"] == "Accesso negato"
+
+
+def test_viewer_user_rollback_rejected_with_forbidden(auth_ctx):
+    client = auth_ctx["client"]
+    auth_ctx["state"]["user_id"] = auth_ctx["viewer_user"].id
+
+    res_inv = client.post("/inventory/100/rollback/1")
+    assert res_inv.status_code == 403
+    assert res_inv.json()["detail"] == "Accesso negato"
+
+    res_chk = client.post("/checklist/200/rollback/1")
+    assert res_chk.status_code == 403
+    assert res_chk.json()["detail"] == "Accesso negato"
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 100), ("checklist", 200)])
+@pytest.mark.parametrize("actor", ["mod_owner", "admin_user"])
+def test_authorized_container_rollback_restores_deleted_container(auth_ctx, kind, container_id, actor):
+    auth_ctx["state"]["user_id"] = auth_ctx[actor].id
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/1")
+    assert response.status_code == 200
+    assert response.json()["id"] == container_id
+    assert response.json()["owner"]["id"] == auth_ctx["mod_owner"].id
+    assert response.json()["version_num"] == 3
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 100), ("checklist", 200)])
+@pytest.mark.parametrize("actor", ["mod_other", "viewer_user"])
+@pytest.mark.parametrize("version_num", [1, 999])
+def test_live_container_rollback_checks_access_before_version(auth_ctx, kind, container_id, actor, version_num):
+    db = auth_ctx["db"]
+    db.add(Inventory(
+        id=container_id, name="Live container", type=kind.upper(),
+        owner_id=auth_ctx["mod_owner"].id,
+    ))
+    db.commit()
+    auth_ctx["state"]["user_id"] = auth_ctx[actor].id
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/{version_num}")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Accesso negato"
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 100), ("checklist", 200)])
+@pytest.mark.parametrize("version_num", [2, 999])
+def test_authorized_container_rollback_rejects_deleted_or_missing_version(auth_ctx, kind, container_id, version_num):
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/{version_num}")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Versione non valida per il rollback"
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 200), ("checklist", 100)])
+def test_cross_type_container_rollback_not_found(auth_ctx, kind, container_id):
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/1")
+    assert response.status_code == 404

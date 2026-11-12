@@ -1,11 +1,11 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from assignment_service import build_assignment_response, pending_assigned_by_source
 from dependencies import get_db
-from models import Item, ListAssignment
+from models import Item, ListAssignment, Inventory
 from notification_service import emit_item_updated
 from routes.auth import get_current_user
 from routes.item import can_access_item
@@ -71,17 +71,40 @@ def create_assignment(payload: AssignmentCreate, db: Session = Depends(get_db), 
 @router.get("/by-source/{item_id}", response_model=List[AssignmentResponse])
 def list_assignments_by_source(item_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Assegnazioni collegate a un item di inventario, incluse le righe già spuntate."""
-    source = db.query(Item).get(item_id)
+    # ⚡ Bolt optimization: Eager load source inventory and assignments (chaining list_item, its checklist inventory,
+    # and access shares) to eliminate O(N) lazy-loading queries when checking access and building response payloads.
+    source = (
+        db.query(Item)
+        .options(
+            joinedload(Item.inventory).joinedload(Inventory.shared_with_users),
+            joinedload(Item.inventory).joinedload(Inventory.shared_with_groups),
+            joinedload(Item.source_assignments)
+            .joinedload(ListAssignment.list_item)
+            .joinedload(Item.inventory)
+            .joinedload(Inventory.shared_with_users),
+            joinedload(Item.source_assignments)
+            .joinedload(ListAssignment.list_item)
+            .joinedload(Item.inventory)
+            .joinedload(Inventory.shared_with_groups),
+        )
+        .filter(Item.id == item_id)
+        .first()
+    )
     if not source:
         raise HTTPException(status_code=404, detail="Item non trovato")
     if not can_access_item(user, source, action="view"):
         raise HTTPException(status_code=403, detail="Accesso negato")
+
+    # ⚡ Bolt optimization: Precompute pending assigned quantity in a single query instead of executing
+    # pending_assigned_by_source once per assignment inside _source_net.
+    pending = pending_assigned_by_source(db, [item_id])
+
     result = []
     for assignment in source.source_assignments:
         list_item = assignment.list_item
         if not can_access_item(user, list_item, action="view"):
             continue
-        result.append(build_assignment_response(assignment))
+        result.append(build_assignment_response(assignment, pending=pending))
     return result
 
 

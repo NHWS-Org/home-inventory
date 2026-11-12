@@ -1318,35 +1318,47 @@ def get_checklist_history(inventory_id: int, db: Session = Depends(get_db), user
 
 #############################################################################
 # Rollback a una versione precedente
-@inventory_router.post("/{inventory_id}/rollback/{version_num}", response_model=InventoryResponse)
-def rollback_inventory(
+def rollback_container_base(
+    inventory_type: str,
     inventory_id: int,
     version_num: int,
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
-):
+    db: Session,
+    user: User,
+) -> InventoryResponse:
+    # Security: Verify authorization and resource existence before evaluating rollback parameters
+    # to prevent ID enumeration oracles and unauthorized probing of version numbers.
+    not_found_msg = "Inventario non trovato" if inventory_type == "INVENTORY" else "Checklist non trovata"
+    inv = db.query(Inventory).filter_by(id=inventory_id, type=inventory_type).first()
+    if inv:
+        if not can_access_inventory(user, inv, action="edit"):
+            raise HTTPException(status_code=403, detail="Accesso negato")
+    else:
+        latest = (
+            db.query(InventoryVersion)
+            .filter(InventoryVersion.inventory_id == inventory_id, InventoryVersion.type == inventory_type)
+            .order_by(InventoryVersion.version_num.desc())
+            .first()
+        )
+        if not latest:
+            raise HTTPException(status_code=404, detail=not_found_msg)
+        if user.role.name == "viewer":
+            raise HTTPException(status_code=403, detail="Accesso negato")
+        if user.role.name != "admin" and latest.owner_id != user.id:
+            raise HTTPException(status_code=403, detail="Accesso negato")
+
     target = db.query(InventoryVersion).filter(
         InventoryVersion.inventory_id == inventory_id,
         InventoryVersion.version_num == version_num,
+        InventoryVersion.type == inventory_type,
     ).first()
     if target is None or cast(str, target.operation) == "DELETE":
         raise HTTPException(status_code=400, detail="Versione non valida per il rollback")
 
-    inv = db.query(Inventory).filter_by(id=inventory_id, type="INVENTORY").first()
-
-    # Ripristino di inventario cancellato
     if not inv:
-        if cast(str, target.type) != "INVENTORY":
-            raise HTTPException(status_code=400, detail="Versione non compatibile")
-        if user.role.name == "viewer":
-            raise HTTPException(status_code=403, detail="Accesso negato")
-        if user.role.name != "admin" and target.owner_id != user.id:
-            raise HTTPException(status_code=403, detail="Accesso negato")
-
         restored = Inventory(
             id=inventory_id,
             name=target.name,
-            type="INVENTORY",
+            type=inventory_type,
             owner_id=target.owner_id or user.id,
             user_ins=user.id,
             user_mod=user.id,
@@ -1359,9 +1371,6 @@ def rollback_inventory(
         db.refresh(restored)
         return _build_inventory_response(db, restored)
 
-    if not can_access_inventory(user, inv, action="edit"):
-        raise HTTPException(status_code=403, detail="Accesso negato")
-
     old_snapshot = _snapshot_inventory(inv)
     setattr(inv, "name", cast(str, target.name))
     inv.user_mod = user.id
@@ -1370,6 +1379,17 @@ def rollback_inventory(
     db.commit()
     db.refresh(inv)
     return _build_inventory_response(db, inv)
+
+
+@inventory_router.post("/{inventory_id}/rollback/{version_num}", response_model=InventoryResponse)
+def rollback_inventory(
+    inventory_id: int,
+    version_num: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    return rollback_container_base("INVENTORY", inventory_id, version_num, db, user)
+
 
 # Rollback checklist
 @checklist_router.post("/{inventory_id}/rollback/{version_num}", response_model=InventoryResponse)
@@ -1379,51 +1399,7 @@ def rollback_checklist(
     db: Session = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    target = db.query(InventoryVersion).filter(
-        InventoryVersion.inventory_id == inventory_id,
-        InventoryVersion.version_num == version_num,
-    ).first()
-    if target is None or cast(str, target.operation) == "DELETE":
-        raise HTTPException(status_code=400, detail="Versione non valida per il rollback")
-
-    inv = db.query(Inventory).filter_by(id=inventory_id, type="CHECKLIST").first()
-
-    # Ripristino di checklist cancellata
-    if not inv:
-        if cast(str, target.type) != "CHECKLIST":
-            raise HTTPException(status_code=400, detail="Versione non compatibile")
-        if user.role.name == "viewer":
-            raise HTTPException(status_code=403, detail="Accesso negato")
-        if user.role.name != "admin" and target.owner_id != user.id:
-            raise HTTPException(status_code=403, detail="Accesso negato")
-
-        restored = Inventory(
-            id=inventory_id,
-            name=target.name,
-            type="CHECKLIST",
-            owner_id=target.owner_id or user.id,
-            user_ins=user.id,
-            user_mod=user.id,
-            data_mod=datetime.now(timezone.utc),
-        )
-        db.add(restored)
-        db.flush()
-        _write_inventory_version(db, restored, "CREATE", user)
-        db.commit()
-        db.refresh(restored)
-        return _build_inventory_response(db, restored)
-
-    if not can_access_inventory(user, inv, action="edit"):
-        raise HTTPException(status_code=403, detail="Accesso negato")
-
-    old_snapshot = _snapshot_inventory(inv)
-    setattr(inv, "name", cast(str, target.name))
-    inv.user_mod = user.id
-    inv.data_mod = datetime.now(timezone.utc)
-    _write_inventory_version(db, inv, "UPDATE", user, old_snapshot)
-    db.commit()
-    db.refresh(inv)
-    return _build_inventory_response(db, inv)
+    return rollback_container_base("CHECKLIST", inventory_id, version_num, db, user)
 
 
 #############################################################################
