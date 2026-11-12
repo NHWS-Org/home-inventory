@@ -23,6 +23,7 @@ import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
 import { AddFromInventoryDialog, AssignExistingListItemDialog, AssignToListDialog, EditAssignmentDialog, ListLinkField, SourceAssignmentsDialog } from "../components/AssignmentDialogs";
 import { isAxiosError } from "axios";
 import { scrollPageToTop } from "../utils/scrollPageToTop";
+import MobileItemFilters from "../components/MobileItemFilters";
 
 interface Props {
   item: Item;
@@ -1186,6 +1187,52 @@ useEffect(() => {
 
       {inventory ? (
         <div>
+          {isMobile && (
+            <MobileItemFilters
+              search={filterText}
+              onSearch={setFilterText}
+              sortBy={sortBy}
+              onSortBy={(value) => { localStorage.setItem('item_sortBy', value); setSortBy(value); }}
+              sortOrder={sortOrder}
+              onSortOrder={(value) => { localStorage.setItem('item_sortOrder', value); setSortOrder(value); }}
+              checklist={isChecklist}
+              priorityOrder={prioritySortOrder}
+              onPriorityOrder={(value) => { localStorage.setItem('item_prioritySortOrder', value); setPrioritySortOrder(value); }}
+              barcode={barcodeFilter}
+              onBarcode={setBarcodeFilter}
+              templateId={selectedTemplateId}
+              templates={filterTemplates}
+              onTemplate={(value) => {
+                setSelectedTemplateId(value);
+                if (value === '') {
+                  setMetadataFilteredItemIds(null);
+                  setMetadataFilterSummary(null);
+                }
+              }}
+              metadataSummary={metadataFilterSummary}
+              onClearMetadata={() => { setSelectedTemplateId(''); setMetadataFilteredItemIds(null); setMetadataFilterSummary(null); }}
+              onReset={() => {
+                setFilterText('');
+                setBarcodeFilter('all');
+                setSelectedTemplateId('');
+                setMetadataFilteredItemIds(null);
+                setMetadataFilterSummary(null);
+                window.history.replaceState(null, '', location.pathname);
+              }}
+              metadataEditor={canEdit ? (
+                <MetadataFilterManager
+                  inventoryId={inventory.id}
+                  currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
+                  definitions={metadataDefinitions}
+                  allDefinitions={allMetadataDefinitions}
+                  onTemplatesChanged={setFilterTemplates}
+                  triggerLabel="Filtri metadati"
+                  triggerClassName="!min-h-11 !w-full !rounded-xl !px-3 !py-2 !text-sm !shadow-none"
+                />
+              ) : undefined}
+            />
+          )}
+          {!isMobile && (
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
             <label htmlFor="sort-by-select" className="hidden sm:inline text-sm font-medium">Ordina per:</label>
             {isChecklist && (
@@ -1317,7 +1364,8 @@ useEffect(() => {
                 </div>
             )}
           </div>
-          {metadataFilterSummary && (
+          )}
+          {!isMobile && metadataFilterSummary && (
             <div className="mb-3 flex items-center gap-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950 dark:text-indigo-100">
               <span>{metadataFilterSummary}</span>
               <button
@@ -1468,6 +1516,12 @@ useEffect(() => {
           {isMoreActionsOpen && (
             <>
               <div className="relative z-40 mb-2 flex w-56 flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800">
+                {isEditMode && (
+                  <>
+                    <button type="button" onClick={() => setSelectedItems(sortedItems.map(item => item.id))} className="min-h-11 w-full rounded-xl bg-blue-500 px-3 text-left text-sm text-white">Seleziona tutti</button>
+                    <button type="button" onClick={() => setSelectedItems([])} className="min-h-11 w-full rounded-xl bg-gray-500 px-3 text-left text-sm text-white">Deseleziona tutti</button>
+                  </>
+                )}
                 {isEditMode && selectedItems.length > 0 && (
                   <button
                     type="button"
@@ -1489,16 +1543,6 @@ useEffect(() => {
                     📥 Aggiungi da inventario
                   </button>
                 )}
-                <MetadataFilterManager
-                  inventoryId={inventory?.id ?? Number(id)}
-                  currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
-                  definitions={metadataDefinitions}
-                  allDefinitions={allMetadataDefinitions}
-                  onTemplatesChanged={setFilterTemplates}
-                  triggerLabel="🧩 Filtri metadati"
-                  triggerClassName="!min-h-11 !w-full !rounded-xl !px-3 !py-2 !text-left !text-sm !font-medium !shadow-none"
-                  onDialogClose={() => setIsMoreActionsOpen(false)}
-                />
                 <button
                   type="button"
                   onClick={() => {

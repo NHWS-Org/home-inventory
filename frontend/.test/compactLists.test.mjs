@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { createServer } from 'vite';
 
-const dom = new JSDOM('<div id="root"></div>', { url: 'https://inventory.example' });
+const dom = new JSDOM('<div id="root"></div>', { url: 'https://inventory.example', pretendToBeVisual: true });
 const originals = new Map();
 for (const [key, value] of Object.entries({
   window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
   Event: dom.window.Event, localStorage: dom.window.localStorage, IS_REACT_ACT_ENVIRONMENT: true,
+  HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+  MutationObserver: dom.window.MutationObserver,
+  requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+  cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+  getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
 })) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
@@ -21,6 +26,7 @@ const server = await createServer({
 });
 const { default: GenericListPage } = await server.ssrLoadModule('/src/pages/GenericListPage.tsx');
 const { default: GenericDetailPage, SwipeableItemRow } = await server.ssrLoadModule('/src/pages/GenericDetailPage.tsx');
+const { default: MobileItemFilters } = await server.ssrLoadModule('/src/components/MobileItemFilters.tsx');
 const { AuthContext } = await server.ssrLoadModule('/src/auth-context.tsx');
 const { api } = await server.ssrLoadModule('/src/api.ts');
 const root = createRoot(document.getElementById('root'));
@@ -37,6 +43,63 @@ after(async () => {
 function Location() {
   return createElement('output', { 'aria-label': 'Destinazione' }, useLocation().pathname);
 }
+
+test('mobile filter sheet preserves search independence, sort state and removable filters', async () => {
+  function Harness({ checklist }) {
+    const [search, onSearch] = useState('Riso');
+    const [barcode, onBarcode] = useState('all');
+    const [sortBy, onSortBy] = useState('name');
+    const [sortOrder, onSortOrder] = useState('asc');
+    const [priorityOrder, onPriorityOrder] = useState('desc');
+    const [templateId, onTemplate] = useState('');
+    return createElement(MobileItemFilters, {
+      search, onSearch, barcode, onBarcode, sortBy, onSortBy, sortOrder, onSortOrder,
+      checklist, priorityOrder, onPriorityOrder, templateId, onTemplate,
+      templates: [{ id: 1, name: 'Alimenti' }], metadataSummary: null,
+      onClearMetadata() { onTemplate(''); },
+      onReset() { onSearch(''); onBarcode('all'); onTemplate(''); },
+      metadataEditor: createElement('button', { type: 'button' }, 'Filtri metadati'),
+    });
+  }
+  const click = async text => {
+    const node = [...document.querySelectorAll('button')].find(button => button.textContent === text);
+    assert.ok(node, text);
+    await act(async () => node.click());
+  };
+  await act(async () => root.render(createElement(Harness, { checklist: false })));
+  assert.equal(document.querySelectorAll('select').length, 0);
+  await act(async () => document.querySelector('button[aria-haspopup="dialog"]').click());
+  assert.ok(document.querySelector('[role="dialog"]'));
+  assert.equal(document.querySelectorAll('select').length, 2);
+  assert.equal(document.querySelector('[role="dialog"]').textContent.includes('Priorità'), false);
+  await click('Senza barcode');
+  await click('Z → A');
+  await click('Chiudi');
+  assert.equal(document.querySelector('input').value, 'Riso');
+  assert.ok(document.querySelector('button[aria-label="Filtri e ordinamento (1 filtri attivi)"]'));
+  await act(async () => document.querySelector('button[aria-label="Cancella ricerca"]').click());
+  assert.equal(document.querySelector('input').value, '');
+  assert.ok([...document.querySelectorAll('button')].some(button => button.textContent.includes('Senza barcode')));
+  await act(async () => document.querySelector('button[aria-haspopup="dialog"]').click());
+  const descending = [...document.querySelectorAll('button')].find(button => button.textContent === 'Z → A');
+  assert.equal(descending.getAttribute('aria-pressed'), 'true');
+  const template = document.querySelectorAll('select')[1];
+  await act(async () => { template.value = '1'; template.dispatchEvent(new Event('change', { bubbles: true })); });
+  await click('Chiudi');
+  assert.ok(document.querySelector('button[aria-label="Filtri e ordinamento (2 filtri attivi)"]'));
+  await click('Alimenti ×');
+  assert.ok(document.querySelector('button[aria-label="Filtri e ordinamento (1 filtri attivi)"]'));
+  await act(async () => document.querySelector('button[aria-haspopup="dialog"]').click());
+  await click('Azzera filtri');
+  assert.equal(descending.getAttribute('aria-pressed'), 'true');
+  await click('Chiudi');
+  assert.ok(document.querySelector('button[aria-label="Filtri e ordinamento"]'));
+  await act(async () => root.render(createElement(Harness, { key: 'checklist', checklist: true })));
+  await act(async () => document.querySelector('button[aria-haspopup="dialog"]').click());
+  await click('Prima bassa');
+  assert.equal([...document.querySelectorAll('button')].find(button => button.textContent === 'Prima bassa').getAttribute('aria-pressed'), 'true');
+  await click('Chiudi');
+});
 
 test('back to top scrolls the page container to zero, including filters, on mobile and desktop', async () => {
   const width = window.innerWidth;
@@ -74,7 +137,7 @@ test('back to top scrolls the page container to zero, including filters, on mobi
             scroller.scrollTo = options => { calls.push(options); scroller.scrollTop = options.top; };
             const button = scroller.querySelector('button[aria-label="Torna in cima alla pagina"]');
             assert.ok(button, `${viewport} ${path} ${detail} ${role}`);
-            assert.ok(scroller.querySelector('input[placeholder*="Filtra"]'));
+            assert.ok(scroller.querySelector('input[placeholder*="Filtra"], input[aria-label="Ricerca libera"]'));
             await act(async () => button.click());
             assert.deepEqual(calls, [{ top: 0, behavior: 'smooth' }]);
             assert.equal(scroller.scrollTop, 0);
