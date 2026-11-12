@@ -24,6 +24,7 @@ import { AddFromInventoryDialog, AssignExistingListItemDialog, AssignToListDialo
 import { isAxiosError } from "axios";
 import { scrollPageToTop } from "../utils/scrollPageToTop";
 import MobileItemFilters from "../components/MobileItemFilters";
+import { useDesktopLayout } from "../useDesktopLayout";
 
 interface Props {
   item: Item;
@@ -750,7 +751,7 @@ export function SwipeableItemRow({
 }
 
 export default function InventoryDetailPage() {
-  const isMobile = window.innerWidth < 768;
+  const isMobile = !useDesktopLayout();
   const authContext = useContext(AuthContext);
   const user = authContext?.user ?? null;
   const isAdmin = user?.role?.name === 'admin';

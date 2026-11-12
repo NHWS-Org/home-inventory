@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
 import { FiAlertCircle, FiCheckCircle, FiChevronDown, FiClock, FiSlash } from "react-icons/fi";
@@ -8,17 +8,7 @@ import { disablePushForBrowser, type PushBrowserState } from "../utils/pushNotif
 import { SESSION_RENEWED } from "../utils/sessionRenewal";
 import { useAuth } from "../useAuth";
 
-const desktopQuery = "(min-width: 768px)";
-
-function subscribeDesktopLayout(onChange: () => void) {
-  const media = window.matchMedia(desktopQuery);
-  media.addEventListener("change", onChange);
-  return () => media.removeEventListener("change", onChange);
-}
-
-function isDesktopLayout() {
-  return window.matchMedia(desktopQuery).matches;
-}
+import { useDesktopLayout } from "../useDesktopLayout";
 
 type ProfileTab = "personal" | "password" | "push" | "notifications" | "devices";
 
@@ -122,7 +112,7 @@ const ProfilePage = () => {
   const [sessionsBusy, setSessionsBusy] = useState(false);
   const [sessionsStatus, setSessionsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [pushState, setPushState] = useState<PushBrowserState>("checking");
-  const desktop = useSyncExternalStore(subscribeDesktopLayout, isDesktopLayout, () => false);
+  const desktop = useDesktopLayout();
   const [activeTab, setActiveTab] = useState<ProfileTab>("personal");
   const sessionsRequest = useRef(0);
 

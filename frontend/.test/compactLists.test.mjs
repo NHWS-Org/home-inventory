@@ -20,6 +20,12 @@ for (const [key, value] of Object.entries({
 }
 const { createRoot } = await import('react-dom/client');
 const { MemoryRouter, Routes, Route, useLocation } = await import('react-router-dom');
+const layoutListeners = new Set();
+window.matchMedia = () => ({
+  get matches() { return window.innerWidth >= 768; },
+  addEventListener(event, listener) { layoutListeners.add(listener); },
+  removeEventListener(event, listener) { layoutListeners.delete(listener); },
+});
 const server = await createServer({
   appType: 'custom', configFile: false, logLevel: 'error',
   server: { middlewareMode: true, ws: false },
@@ -141,6 +147,24 @@ test('back to top scrolls the page container to zero, including filters, on mobi
             await act(async () => button.click());
             assert.deepEqual(calls, [{ top: 0, behavior: 'smooth' }]);
             assert.equal(scroller.scrollTop, 0);
+            if (detail) {
+              const requests = [];
+              const adapter = api.defaults.adapter;
+              api.defaults.adapter = config => { requests.push(config.url); return adapter(config); };
+              const otherWidth = viewport === 390 ? 1024 : 390;
+              await act(async () => {
+                window.innerWidth = otherWidth;
+                for (const listener of layoutListeners) listener();
+              });
+              assert.equal(!!scroller.querySelector('input[aria-label="Ricerca libera"]'), otherWidth < 768);
+              assert.equal(requests.filter(url => /^\/(?:inventory|checklist)\//.test(url)).length, 0, `Resizing must not reload inventory data: ${requests}`);
+              await act(async () => {
+                window.innerWidth = viewport;
+                for (const listener of layoutListeners) listener();
+              });
+              assert.equal(!!scroller.querySelector('input[aria-label="Ricerca libera"]'), viewport < 768);
+              api.defaults.adapter = adapter;
+            }
           }
         }
       }
