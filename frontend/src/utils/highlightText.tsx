@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 function renderParts(parts: string[]): ReactNode {
   return parts.map((part, index) => index % 2 === 1 ? (
-    <span key={index} className="rounded-sm bg-blue-100 px-0.5 text-gray-900 dark:bg-blue-800 dark:text-white">{part}</span>
+    <mark key={index} className="rounded-sm bg-yellow-300 px-0.5 font-bold text-gray-950 ring-1 ring-inset ring-amber-600 dark:bg-yellow-300 dark:text-gray-950 dark:ring-yellow-200">{part}</mark>
   ) : part);
 }
 

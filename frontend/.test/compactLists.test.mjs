@@ -245,7 +245,7 @@ for (const path of ['inventories', 'checklists']) {
     assert.match(card.querySelector('p').textContent, /Ultima modifica: .* · v3$/);
     assert.match(card.textContent, /Creatore: angela \| Oggetti: 13/);
     assert.match(card.textContent, /Corrispondenze trovate:Gioco|Corrispondenze trovate:1x Gioco/);
-    assert.equal(card.querySelector('span.bg-blue-100')?.textContent, 'Gioco');
+    assert.equal(card.querySelector('mark')?.textContent, 'Gioco');
     await act(async () => card.click());
     assert.equal(document.querySelector('output').textContent, `/${path}/1`);
     const edit = [...document.querySelectorAll('button')].find(button => button.textContent === '✏️Modifica');
@@ -292,7 +292,7 @@ test('item search highlights literal matches in names, descriptions and metadata
       setSelectedItems() {}, setItemBeingEdited() {}, updateItem() {}, deleteItem() {},
       setItems() {}, setIsCloning() {},
     })));
-    const highlights = [...document.querySelectorAll('li span.bg-blue-100')];
+    const highlights = [...document.querySelectorAll('li mark')];
     assert.equal(highlights.length, 3);
     assert.ok(highlights.every(node => node.textContent.toLowerCase() === search.toLowerCase()));
     assert.equal(document.querySelector('li img'), null);
@@ -304,7 +304,7 @@ test('item search highlights literal matches in names, descriptions and metadata
     setSelectedItems() {}, setItemBeingEdited() {}, updateItem() {}, deleteItem() {},
     setItems() {}, setIsCloning() {},
   })));
-  assert.equal(document.querySelectorAll('li span.bg-blue-100').length, 0);
+  assert.equal(document.querySelectorAll('li mark').length, 0);
 });
 
 test('compact inventory controls preserve quantity updates and editing without selecting the row', async () => {
