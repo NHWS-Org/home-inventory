@@ -41,7 +41,10 @@ def build_assignment_summary(assignment: ListAssignment, pending: dict[int, int]
     )
 
 
-def build_assignment_response(assignment: ListAssignment) -> AssignmentResponse:
+def build_assignment_response(
+    assignment: ListAssignment, pending: dict[int, int] | None = None
+) -> AssignmentResponse:
+    # ⚡ Bolt optimization: Accept optional precomputed pending map to avoid executing pending_assigned_by_source per item.
     source = assignment.source_item
     list_item = assignment.list_item
     source_inventory = source.inventory if source else None
@@ -58,7 +61,7 @@ def build_assignment_response(assignment: ListAssignment) -> AssignmentResponse:
         source_inventory_id=source.inventory_id if source else None,
         source_inventory_name=source_inventory.name if source_inventory else None,
         source_stock=source.quantity if source else None,
-        source_net_qty=_source_net(assignment, None),
+        source_net_qty=_source_net(assignment, pending),
         qty=assignment.qty,
     )
 
