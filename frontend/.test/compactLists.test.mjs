@@ -21,8 +21,11 @@ for (const [key, value] of Object.entries({
 const { createRoot } = await import('react-dom/client');
 const { MemoryRouter, Routes, Route, useLocation } = await import('react-router-dom');
 const layoutListeners = new Set();
-window.matchMedia = () => ({
-  get matches() { return window.innerWidth >= 768; },
+window.matchMedia = query => ({
+  get matches() {
+    const minWidth = query.match(/min-width:\s*(\d+)px/);
+    return minWidth ? window.innerWidth >= Number(minWidth[1]) : false;
+  },
   addEventListener(event, listener) { layoutListeners.add(listener); },
   removeEventListener(event, listener) { layoutListeners.delete(listener); },
 });
@@ -113,11 +116,11 @@ test('back to top scrolls the page container to zero, including filters, on mobi
   const windowScroll = window.scrollTo;
   window.scrollTo = () => assert.fail('The document is not the page scroll container');
   try {
-    for (const viewport of [390, 1024]) {
+    for (const viewport of [390, 800, 1024, 1280]) {
       window.innerWidth = viewport;
       for (const path of ['inventories', 'checklists']) {
         for (const detail of [false, true]) {
-          for (const role of detail ? ['admin'] : ['admin', 'viewer']) {
+          for (const role of detail && viewport < 768 ? ['admin'] : ['admin', 'viewer']) {
             const container = {
               id: 1, name: 'Dispensa', version_num: 1, owner: { username: 'admin' },
               item_count: 0, data_mod: '2026-11-03T19:09:30',
@@ -148,7 +151,7 @@ test('back to top scrolls the page container to zero, including filters, on mobi
             await act(async () => button.click());
             assert.deepEqual(calls, [{ top: 0, behavior: 'smooth' }]);
             assert.equal(scroller.scrollTop, 0);
-            if (!detail && viewport === 390) {
+            if (!detail && viewport < 1280) {
               assert.equal(scroller.querySelectorAll('select').length, 0);
               await act(async () => scroller.querySelector('button[aria-haspopup="dialog"]').click());
               const dialog = document.querySelector('[role="dialog"]');
@@ -161,21 +164,39 @@ test('back to top scrolls the page container to zero, including filters, on mobi
               await act(async () => [...dialog.querySelectorAll('button')].find(node => node.textContent === 'Chiudi').click());
             }
             if (detail) {
+              if (viewport === 800 && role === 'admin') {
+                const add = scroller.querySelector('button[aria-label="Aggiungi item"]');
+                assert.ok(add);
+                assert.equal(add.textContent, 'Nuovo');
+                assert.equal(add.closest('.fixed'), null, 'Tablet actions must remain inside the content column');
+                assert.equal(scroller.textContent.includes('Importa / esporta'), false);
+                await act(async () => scroller.querySelector('button[aria-label="Modifica item"]').click());
+                await act(async () => scroller.querySelector('button[aria-label="Altre azioni"]').click());
+                assert.ok(scroller.textContent.includes('Seleziona tutti'));
+                assert.ok(scroller.textContent.includes('Condividi su WhatsApp'));
+                assert.ok(scroller.textContent.includes('Importa / esporta'));
+                assert.equal(scroller.textContent.includes('Aggiungi da inventario'), path === 'checklists');
+                await act(async () => scroller.querySelector('button[aria-label="Chiudi altre azioni"]').click());
+                await act(async () => scroller.querySelector('button[aria-label="Esci dalla modifica"]').click());
+                await act(async () => scroller.querySelector('button[aria-haspopup="dialog"]').click());
+                assert.ok(document.querySelector('[role="dialog"]').textContent.includes('Barcode'));
+                await act(async () => document.querySelector('button[aria-label="Chiudi filtri"]').click());
+              }
               const requests = [];
               const adapter = api.defaults.adapter;
               api.defaults.adapter = config => { requests.push(config.url); return adapter(config); };
-              const otherWidth = viewport === 390 ? 1024 : 390;
+              const otherWidth = viewport < 1280 ? 1280 : 800;
               await act(async () => {
                 window.innerWidth = otherWidth;
                 for (const listener of layoutListeners) listener();
               });
-              assert.equal(!!scroller.querySelector('input[aria-label="Ricerca libera"]'), otherWidth < 768);
+              assert.equal(!!scroller.querySelector('input[aria-label="Ricerca libera"]'), otherWidth < 1280);
               assert.equal(requests.filter(url => /^\/(?:inventory|checklist)\//.test(url)).length, 0, `Resizing must not reload inventory data: ${requests}`);
               await act(async () => {
                 window.innerWidth = viewport;
                 for (const listener of layoutListeners) listener();
               });
-              assert.equal(!!scroller.querySelector('input[aria-label="Ricerca libera"]'), viewport < 768);
+              assert.equal(!!scroller.querySelector('input[aria-label="Ricerca libera"]'), viewport < 1280);
               api.defaults.adapter = adapter;
             }
           }

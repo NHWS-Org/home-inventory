@@ -754,6 +754,7 @@ export function SwipeableItemRow({
 
 export default function InventoryDetailPage() {
   const isMobile = !useDesktopLayout();
+  const compactControls = !useDesktopLayout(1280);
   const authContext = useContext(AuthContext);
   const user = authContext?.user ?? null;
   const isAdmin = user?.role?.name === 'admin';
@@ -1133,6 +1134,64 @@ useEffect(() => {
   const addItemSheetDrag = useBottomSheetDrag(() => setisInsertMode(false));
   const editItemSheetDrag = useBottomSheetDrag(() => setItemBeingEdited(null));
 
+  const compactActions = canEdit && (
+    <div className={isMobile
+      ? "fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center"
+      : "relative z-40 mb-2 flex justify-end"}>
+      {isMoreActionsOpen && (
+        <div className={`${isMobile ? 'relative mb-2' : 'absolute right-0 top-full mt-2'} z-40 flex w-56 flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800`}>
+          {isEditMode && (
+            <>
+              <button type="button" onClick={() => setSelectedItems(sortedItems.map(item => item.id))} className="min-h-11 w-full rounded-xl bg-blue-500 px-3 text-left text-sm text-white">Seleziona tutti</button>
+              <button type="button" onClick={() => setSelectedItems([])} className="min-h-11 w-full rounded-xl bg-gray-500 px-3 text-left text-sm text-white">Deseleziona tutti</button>
+            </>
+          )}
+          {isEditMode && selectedItems.length > 0 && (
+            <button type="button" onClick={async () => {
+              if (!window.confirm('Sei sicuro di voler eliminare gli oggetti selezionati?')) return;
+              for (const selectedId of selectedItems) await deleteItem(selectedId);
+              setSelectedItems([]);
+              setIsEditMode(false);
+              const getItems = isInventory ? getInventoryItems : getChecklistItems;
+              const refreshed = inventory && await getItems(inventory.id);
+              if (refreshed) setItems(refreshed);
+              setIsMoreActionsOpen(false);
+            }} className="min-h-11 w-full rounded-xl bg-red-600 px-3 text-left text-sm font-medium text-white">🗑️ Elimina selezionati ({selectedItems.length})</button>
+          )}
+          {isChecklist && (
+            <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsAddFromInventoryOpen(true); }} className="min-h-11 w-full rounded-xl bg-emerald-600 px-3 text-left text-sm font-medium text-white">📥 Aggiungi da inventario</button>
+          )}
+          <button type="button" onClick={() => {
+            setIsMoreActionsOpen(false);
+            const now = new Date();
+            const header = `${inventory?.name} (${now.toLocaleString()})`;
+            const withQty = items.filter((item) => item.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
+            const zeroQty = items.filter((item) => item.quantity === 0).sort((a, b) => a.name.localeCompare(b.name));
+            const lines = [...withQty, ...zeroQty].map((item) => `- ${item.quantity}x ${item.name}${item.description ? ` (${item.description})` : ''}`);
+            window.open(`https://wa.me/?text=${encodeURIComponent([header, ...lines].join('\n'))}`, '_blank');
+          }} className="min-h-11 w-full rounded-xl bg-green-700 px-3 text-left text-sm font-medium text-white">📲 Condividi su WhatsApp</button>
+          {isAdmin && (
+            <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsShareModalOpen(true); }} className="min-h-11 w-full rounded-xl bg-green-600 px-3 text-left text-sm font-medium text-white">📤 Importa / esporta</button>
+          )}
+        </div>
+      )}
+      <div className={isMobile ? "relative z-40 flex gap-1 rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90" : "relative z-40 flex flex-wrap gap-2"}>
+        <button type="button" onClick={() => setisInsertMode(true)} aria-label="Aggiungi item" title="Aggiungi item"
+          className={isMobile ? "flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-lg text-white shadow-lg hover:bg-blue-600" : "min-h-11 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"}
+        >{isMobile ? '➕' : 'Nuovo'}</button>
+        <button type="button" onClick={() => { setIsEditMode((current) => !current); setSelectedItems([]); }} aria-label={isEditMode ? 'Esci dalla modifica' : 'Modifica item'} title={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
+          className={isMobile ? `flex h-10 w-12 items-center justify-center rounded-xl text-lg text-white shadow-lg ${isEditMode ? 'bg-yellow-700' : 'bg-yellow-500'}` : "min-h-11 rounded-xl border border-gray-300 px-4 text-sm dark:border-gray-600"}
+        >{isMobile ? (isEditMode ? '✖️' : '✏️') : (isEditMode ? 'Fine modifica' : 'Modifica')}</button>
+        <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} aria-label="Torna in cima alla pagina" title="Torna in cima alla pagina"
+          className={isMobile ? "flex h-10 w-12 items-center justify-center rounded-xl bg-gray-600 text-lg text-white shadow-lg" : "grid h-11 w-11 place-items-center rounded-xl border border-gray-300 dark:border-gray-600"}
+        >↑</button>
+        <button type="button" onClick={() => setIsMoreActionsOpen((open) => !open)} aria-label={isMoreActionsOpen ? 'Chiudi altre azioni' : 'Altre azioni'} aria-expanded={isMoreActionsOpen} title="Altre azioni"
+          className={isMobile ? "flex h-10 w-12 items-center justify-center rounded-xl bg-gray-700 text-lg text-white shadow-lg dark:bg-gray-600" : "grid h-11 w-11 place-items-center rounded-xl border border-gray-300 text-lg dark:border-gray-600"}
+        >⋯</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative p-3 sm:p-4">
       {inventory && (
@@ -1190,7 +1249,13 @@ useEffect(() => {
 
       {inventory ? (
         <div>
-          {isMobile && (
+          {compactControls && !isMobile && compactActions}
+          {compactControls && !isMobile && !canEdit && (
+            <div className="mb-2 flex justify-end">
+              <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} aria-label="Torna in cima alla pagina" className="min-h-11 rounded-xl border border-gray-300 px-3 text-sm dark:border-gray-600">↑ In cima</button>
+            </div>
+          )}
+          {compactControls && (
             <MobileItemFilters
               search={filterText}
               onSearch={setFilterText}
@@ -1240,7 +1305,7 @@ useEffect(() => {
               ) : undefined}
             />
           )}
-          {!isMobile && (
+          {!compactControls && (
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
             <label htmlFor="sort-by-select" className="hidden sm:inline text-sm font-medium">Ordina per:</label>
             {isChecklist && (
@@ -1304,16 +1369,6 @@ useEffect(() => {
                   }}
                   className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none sm:w-auto"
                 />
-                <select
-                  value={barcodeFilter}
-                  onChange={(e) => setBarcodeFilter(e.target.value as 'all' | 'with' | 'without')}
-                  className="min-h-10 w-28 rounded border px-1.5 py-1 sm:min-h-0 sm:w-auto"
-                  title="Filtra per barcode"
-                >
-                  <option value="all">🏷️ Tutti</option>
-                  <option value="with">🏷️ Con barcode</option>
-                  <option value="without">🏷️ Senza barcode</option>
-                </select>
                 <button
                   type="button"
                   onClick={() => {
@@ -1327,6 +1382,16 @@ useEffect(() => {
                   <span className="inline sm:hidden" aria-hidden="true">❌</span>
                   <span className="hidden sm:inline">Cancella filtro</span>
                 </button>
+                <select
+                  value={barcodeFilter}
+                  onChange={(e) => setBarcodeFilter(e.target.value as 'all' | 'with' | 'without')}
+                  className="min-h-10 w-28 rounded border px-1.5 py-1 sm:min-h-0 sm:w-auto"
+                  title="Filtra per barcode"
+                >
+                  <option value="all">🏷️ Tutti</option>
+                  <option value="with">🏷️ Con barcode</option>
+                  <option value="without">🏷️ Senza barcode</option>
+                </select>
               </div>
             </div>
             {(isInventory || isChecklist) && canEdit && (
@@ -1373,7 +1438,7 @@ useEffect(() => {
             )}
           </div>
           )}
-          {!isMobile && metadataFilterSummary && (
+          {!compactControls && metadataFilterSummary && (
             <div className="mb-3 flex items-center gap-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950 dark:text-indigo-100">
               <span>{metadataFilterSummary}</span>
               <button
@@ -1423,7 +1488,7 @@ useEffect(() => {
         <p>Caricamento {isChecklist ? "checklist" : "inventaro"}...</p>
       )}
 
-      {!isMobile && <div className="fixed right-4 top-4 z-40 flex flex-wrap justify-end gap-2">
+      {!compactControls && <div className="fixed right-4 top-4 z-40 flex flex-wrap justify-end gap-2">
         <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-700 px-3 py-2 text-white shadow-lg hover:bg-gray-800" aria-label="Torna in cima alla pagina" title="Torna in cima alla pagina">
           ↑ In cima
         </button>
@@ -1520,94 +1585,9 @@ useEffect(() => {
         )}
       </div>}
 
-      {isMobile && canEdit && (isInventory || isChecklist) && (
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center">
-          {isMoreActionsOpen && (
-            <>
-              <div className="relative z-40 mb-2 flex w-56 flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800">
-                {isEditMode && (
-                  <>
-                    <button type="button" onClick={() => setSelectedItems(sortedItems.map(item => item.id))} className="min-h-11 w-full rounded-xl bg-blue-500 px-3 text-left text-sm text-white">Seleziona tutti</button>
-                    <button type="button" onClick={() => setSelectedItems([])} className="min-h-11 w-full rounded-xl bg-gray-500 px-3 text-left text-sm text-white">Deseleziona tutti</button>
-                  </>
-                )}
-                {isEditMode && selectedItems.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!window.confirm('Sei sicuro di voler eliminare gli oggetti selezionati?')) return;
-                      for (const selectedId of selectedItems) await deleteItem(selectedId);
-                      setSelectedItems([]);
-                      setIsEditMode(false);
-                      const getItems = isInventory ? getInventoryItems : getChecklistItems;
-                      const refreshed = inventory && await getItems(inventory.id);
-                      if (refreshed) setItems(refreshed);
-                      setIsMoreActionsOpen(false);
-                    }}
-                    className="min-h-11 w-full rounded-xl bg-red-600 px-3 text-left text-sm font-medium text-white"
-                  >🗑️ Elimina selezionati ({selectedItems.length})</button>
-                )}
-                {isChecklist && (
-                  <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsAddFromInventoryOpen(true); }} className="min-h-11 w-full rounded-xl bg-emerald-600 px-3 text-left text-sm font-medium text-white">
-                    📥 Aggiungi da inventario
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMoreActionsOpen(false);
-                    const now = new Date();
-                    const header = `${inventory?.name} (${now.toLocaleString()})`;
-                    const withQty = items.filter((item) => item.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
-                    const zeroQty = items.filter((item) => item.quantity === 0).sort((a, b) => a.name.localeCompare(b.name));
-                    const lines = [...withQty, ...zeroQty].map((item) => `- ${item.quantity}x ${item.name}${item.description ? ` (${item.description})` : ''}`);
-                    window.open(`https://wa.me/?text=${encodeURIComponent([header, ...lines].join('\n'))}`, '_blank');
-                  }}
-                  className="min-h-11 w-full rounded-xl bg-green-700 px-3 text-left text-sm font-medium text-white"
-                >📲 Condividi su WhatsApp</button>
-                {isAdmin && (
-                  <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsShareModalOpen(true); }} className="min-h-11 w-full rounded-xl bg-green-600 px-3 text-left text-sm font-medium text-white">
-                    📤 Importa / esporta
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-          <div className="relative z-40 flex gap-1 rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90">
-            <button
-              type="button"
-              onClick={() => setisInsertMode(true)}
-              aria-label="Aggiungi item"
-              title="Aggiungi item"
-              className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-lg text-white shadow-lg hover:bg-blue-600"
-            >➕</button>
-            <button
-              type="button"
-              onClick={() => { setIsEditMode((current) => !current); setSelectedItems([]); }}
-              aria-label={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
-              title={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
-              className={`flex h-10 w-12 items-center justify-center rounded-xl text-lg text-white shadow-lg ${isEditMode ? 'bg-yellow-700' : 'bg-yellow-500'}`}
-            >{isEditMode ? '✖️' : '✏️'}</button>
-            <button
-              type="button"
-              onClick={(event) => scrollPageToTop(event.currentTarget)}
-              aria-label="Torna in cima alla pagina"
-              title="Torna in cima alla pagina"
-              className="flex h-10 w-12 items-center justify-center rounded-xl bg-gray-600 text-lg text-white shadow-lg"
-            >↑</button>
-            <button
-              type="button"
-              onClick={() => setIsMoreActionsOpen((open) => !open)}
-              aria-label={isMoreActionsOpen ? 'Chiudi altre azioni' : 'Altre azioni'}
-              aria-expanded={isMoreActionsOpen}
-              title="Altre azioni"
-              className="flex h-10 w-12 items-center justify-center rounded-xl bg-gray-700 text-lg text-white shadow-lg dark:bg-gray-600"
-            >⋯</button>
-          </div>
-        </div>
-      )}
+      {isMobile && compactActions}
 
-      {isMobile && isMoreActionsOpen && createPortal(
+      {compactControls && isMoreActionsOpen && createPortal(
         <button type="button" aria-label="Chiudi altre azioni" onClick={() => setIsMoreActionsOpen(false)} className="fixed inset-0 z-[39]" />,
         document.body,
       )}

@@ -1,17 +1,12 @@
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
-const desktopQuery = '(min-width: 768px)';
-
-function subscribe(onChange: () => void) {
-  const media = window.matchMedia(desktopQuery);
-  media.addEventListener('change', onChange);
-  return () => media.removeEventListener('change', onChange);
-}
-
-function getSnapshot() {
-  return window.matchMedia(desktopQuery).matches;
-}
-
-export function useDesktopLayout() {
+export function useDesktopLayout(minWidth = 768) {
+  const query = `(min-width: ${minWidth}px)`;
+  const subscribe = useCallback((onChange: () => void) => {
+    const media = window.matchMedia(query);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, [query]);
+  const getSnapshot = useCallback(() => window.matchMedia(query).matches, [query]);
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }

@@ -89,10 +89,10 @@ export default function MobileItemFilters<Sort extends string>(props: Props<Sort
       </div>
       <Dialog open={open} onClose={setOpen} className="relative z-50">
         <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
-        <div className="fixed inset-0 flex items-end">
+        <div className="fixed inset-0 flex items-end md:items-center md:justify-center md:p-6">
           <Dialog.Panel
             style={{ transform: `translateY(${drag.offset}px)`, transition: drag.isDragging ? 'none' : 'transform 220ms ease-out' }}
-            className="max-h-[90dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-white"
+            className="max-h-[90dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-white md:max-w-lg md:rounded-2xl"
           >
             <button type="button" aria-label="Chiudi o trascina verso il basso" {...drag.gripProps} className="mx-auto flex h-8 w-16 touch-none items-center justify-center"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" /></button>
             <div className="mb-4 flex items-center justify-between">

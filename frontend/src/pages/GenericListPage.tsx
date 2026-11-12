@@ -133,6 +133,7 @@ function EditNameModal({ isOpen, onClose, onSave, name, onNameChange }: {
 
 export default function GenericListPage() {
   const desktop = useDesktopLayout();
+  const compactControls = !useDesktopLayout(1280);
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -321,12 +322,61 @@ export default function GenericListPage() {
   if (loading) return <p>Caricamento...</p>;
   if (error) return <p>Errore: {error}</p>;
 
+  const actions = (
+    <div className={desktop
+      ? 'relative mb-2 flex flex-wrap justify-end gap-2'
+      : 'fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-row gap-2 rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90'}>
+      {editMode && selectedItems.length > 0 && (
+        <button onClick={async () => {
+          const deletableIds = items.filter(inv => selectedItems.includes(inv.id) && inv.item_count === 0).map(inv => inv.id);
+          const nonDeletable = items.filter(inv => selectedItems.includes(inv.id) && inv.item_count > 0);
+          if (deletableIds.length === 0 && nonDeletable.length > 0) {
+            showMessage((isInventory ? 'Puoi eliminare solo inventari vuoti.' : 'Puoi eliminare solo liste vuote.'), 'error');
+            return;
+          }
+          if (window.confirm('Sei sicuro di voler cancellare gli elementi selezionati senza oggetti?')) {
+            for (const id of deletableIds) {
+              if (isInventory) await deleteInventory(id);
+              else await deleteChecklist(id);
+            }
+            setItems((prev) => prev.filter((i) => !deletableIds.includes(i.id)));
+            setSelectedItems([]);
+            setEditMode(false);
+            showMessage('Eliminazione completata.', 'success');
+          }
+        }} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-red-600 px-3 py-2 text-white shadow-lg hover:bg-red-700">
+          <span className="inline md:hidden">🗑️ </span>
+          <span className="hidden md:inline">Elimina </span>
+        </button>
+      )}
+      {canEdit && (
+        <>
+          <button onClick={() => setIsModalOpen(true)} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-white shadow-lg hover:bg-blue-600">
+            <span className="inline md:hidden">➕</span>
+            <span className="hidden md:inline">Nuovo</span>
+          </button>
+          <button onClick={() => { setEditMode((prev) => !prev); setSelectedItems([]); }}
+            className={desktop ? 'flex h-10 min-w-12 items-center justify-center rounded-xl border border-gray-300 px-3 py-2 dark:border-gray-600' : `flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg ${editMode ? 'bg-yellow-700' : 'bg-yellow-500 hover:bg-yellow-600'}`}>
+            <span className="inline md:hidden">{editMode ? '✖️' : '✏️'}</span>
+            <span className="hidden md:inline">{editMode ? 'Chiudi' : 'Modifica'}</span>
+          </button>
+        </>
+      )}
+      <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} aria-label="Torna in cima alla pagina" title="Torna in cima alla pagina"
+        className={desktop ? 'flex h-10 min-w-12 items-center justify-center rounded-xl border border-gray-300 px-3 py-2 text-sm dark:border-gray-600' : 'flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-600 px-3 py-2 text-lg text-white shadow-lg hover:bg-gray-700'}>
+        <span aria-hidden="true">↑</span>
+        <span className="ml-1 hidden md:inline">In cima</span>
+      </button>
+    </div>
+  );
+
   return (
     <div className="p-4">
       <div className="hidden justify-between items-center mb-4 md:flex">
         <h1 className="hidden text-2xl font-bold md:block">{isInventory ? 'Inventari' : 'Liste'}</h1>
       </div>
-      {!desktop && (
+      {desktop && actions}
+      {compactControls && (
         <MobileItemFilters
           search={searchQuery}
           onSearch={setSearchQuery}
@@ -350,7 +400,7 @@ export default function GenericListPage() {
           ) : undefined}
         />
       )}
-      {desktop && <>
+      {!compactControls && <>
       <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 mb-4">
         <div className="flex items-center gap-2">
           <input
@@ -587,71 +637,7 @@ export default function GenericListPage() {
           ))}
         </ul>
       )}
-      <div
-        className={`z-40 gap-2 flex ${
-          desktop
-            ? 'fixed top-4 right-4 flex-row'
-            : 'fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 -translate-x-1/2 flex-row rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90'
-        }`}
-      >
-        {editMode && selectedItems.length > 0 && (
-          <button
-            onClick={async () => {
-              const deletableIds = items
-                .filter(inv => selectedItems.includes(inv.id) && inv.item_count === 0)
-                .map(inv => inv.id);
-              const nonDeletable = items
-                .filter(inv => selectedItems.includes(inv.id) && inv.item_count > 0);
-              if (deletableIds.length === 0 && nonDeletable.length > 0) {
-                showMessage((isInventory ? 'Puoi eliminare solo inventari vuoti.' : 'Puoi eliminare solo liste vuote.'), 'error');
-                return;
-              }
-              if (window.confirm('Sei sicuro di voler cancellare gli elementi selezionati senza oggetti?')) {
-                for (const id of deletableIds) {
-                  if (isInventory) await deleteInventory(id);
-                  else await deleteChecklist(id);
-                }
-                setItems((prev) => prev.filter((i) => !deletableIds.includes(i.id)));
-                setSelectedItems([]);
-                setEditMode(false);
-                showMessage('Eliminazione completata.', 'success');
-              }
-            }}
-            className="flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg bg-red-600 hover:bg-red-700"
-          >
-            <span className="inline md:hidden">🗑️ </span>
-            <span className="hidden md:inline">Elimina </span>
-          </button>
-        )}
-        {canEdit && (
-          <>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg bg-blue-500 hover:bg-blue-600"
-            >
-              <span className="inline md:hidden">➕</span>
-              <span className="hidden md:inline">Nuovo</span>
-            </button>
-            <button
-              onClick={() => { setEditMode((prev) => !prev); setSelectedItems([]); }}
-              className={`flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg ${editMode ? 'bg-yellow-700' : 'bg-yellow-500 hover:bg-yellow-600'}`}
-            >
-              <span className="inline md:hidden">{editMode ? '✖️' : '✏️'}</span>
-              <span className="hidden md:inline">{editMode ? 'Chiudi' : 'Modifica'}</span>
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={(event) => scrollPageToTop(event.currentTarget)}
-          aria-label="Torna in cima alla pagina"
-          title="Torna in cima alla pagina"
-          className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-600 px-3 py-2 text-lg text-white shadow-lg hover:bg-gray-700 md:text-sm"
-        >
-          <span aria-hidden="true">↑</span>
-          <span className="ml-1 hidden md:inline">In cima</span>
-        </button>
-      </div>
+      {!desktop && actions}
       {message && (
         <div
           className={`fixed z-50 p-3 rounded shadow-lg text-white transition-opacity duration-1000 ${
