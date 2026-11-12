@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from main import app
 from database import Base
 from dependencies import get_db
-from models import User, Role, RoleEnum, InventoryVersion
+from models import User, Role, RoleEnum, Inventory, InventoryVersion
 from routes.auth import get_current_user
 
 
@@ -238,3 +238,44 @@ def test_viewer_user_rollback_rejected_with_forbidden(auth_ctx):
     res_chk = client.post("/checklist/200/rollback/1")
     assert res_chk.status_code == 403
     assert res_chk.json()["detail"] == "Accesso negato"
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 100), ("checklist", 200)])
+@pytest.mark.parametrize("actor", ["mod_owner", "admin_user"])
+def test_authorized_container_rollback_restores_deleted_container(auth_ctx, kind, container_id, actor):
+    auth_ctx["state"]["user_id"] = auth_ctx[actor].id
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/1")
+    assert response.status_code == 200
+    assert response.json()["id"] == container_id
+    assert response.json()["owner"]["id"] == auth_ctx["mod_owner"].id
+    assert response.json()["version_num"] == 3
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 100), ("checklist", 200)])
+@pytest.mark.parametrize("actor", ["mod_other", "viewer_user"])
+@pytest.mark.parametrize("version_num", [1, 999])
+def test_live_container_rollback_checks_access_before_version(auth_ctx, kind, container_id, actor, version_num):
+    db = auth_ctx["db"]
+    db.add(Inventory(
+        id=container_id, name="Live container", type=kind.upper(),
+        owner_id=auth_ctx["mod_owner"].id,
+    ))
+    db.commit()
+    auth_ctx["state"]["user_id"] = auth_ctx[actor].id
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/{version_num}")
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Accesso negato"
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 100), ("checklist", 200)])
+@pytest.mark.parametrize("version_num", [2, 999])
+def test_authorized_container_rollback_rejects_deleted_or_missing_version(auth_ctx, kind, container_id, version_num):
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/{version_num}")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Versione non valida per il rollback"
+
+
+@pytest.mark.parametrize("kind,container_id", [("inventory", 200), ("checklist", 100)])
+def test_cross_type_container_rollback_not_found(auth_ctx, kind, container_id):
+    response = auth_ctx["client"].post(f"/{kind}/{container_id}/rollback/1")
+    assert response.status_code == 404
