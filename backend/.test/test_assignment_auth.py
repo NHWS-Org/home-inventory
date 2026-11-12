@@ -127,3 +127,34 @@ def test_assignment_source_authorization_enforced_on_patch_and_delete(auth_ctx):
     delete_ok = client.delete(f"/assignment/{assignment.id}")
     assert delete_ok.status_code == 200
     assert delete_ok.json() == {"detail": "Assegnazione eliminata"}
+
+
+@pytest.mark.parametrize("checked", [False, True])
+def test_assignments_by_source_filters_hidden_lists_and_keeps_stock_totals(auth_ctx, checked):
+    db = auth_ctx["db"]
+    source = auth_ctx["source_item"]
+    auth_ctx["state"]["user_id"] = auth_ctx["user1"].id
+    url = f"/assignment/by-source/{source.id}"
+    assert auth_ctx["client"].get(url).status_code == 403
+
+    db.add(SharedInventory(user_id=auth_ctx["user1"].id, inventory_id=auth_ctx["source_inv"].id))
+    hidden_list = Inventory(name="Hidden", type="CHECKLIST", owner_id=auth_ctx["user2"].id)
+    db.add(hidden_list)
+    db.flush()
+    hidden_item = Item(name="Private row", quantity=0, inventory_id=hidden_list.id)
+    db.add(hidden_item)
+    db.flush()
+    db.add(ListAssignment(
+        list_item_id=hidden_item.id, source_item_id=source.id, qty=3,
+        user_ins=auth_ctx["user2"].id, user_mod=auth_ctx["user2"].id,
+    ))
+    auth_ctx["list_item"].quantity = int(checked)
+    db.commit()
+
+    response = auth_ctx["client"].get(url)
+    assert response.status_code == 200
+    [visible] = response.json()
+    assert visible["id"] == auth_ctx["assignment"].id
+    assert visible["list_checked"] is checked
+    assert visible["source_stock"] == 10
+    assert visible["source_net_qty"] == (7 if checked else 5)
