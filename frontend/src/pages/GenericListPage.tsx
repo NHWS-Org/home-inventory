@@ -35,6 +35,9 @@ import InventoryQrDialog from '../components/InventoryQrDialog'
 import { useBottomSheetDrag } from '../components/useBottomSheetDrag'
 import { FiGrid } from 'react-icons/fi'
 import { scrollPageToTop } from '../utils/scrollPageToTop'
+import MobileItemFilters from '../components/MobileItemFilters'
+import { useDesktopLayout } from '../useDesktopLayout'
+import { renderHighlightedText } from '../utils/highlightText'
 
 function NewItemModal({ isOpen, onClose, onCreate, isInventory }: {
   isOpen: boolean
@@ -128,27 +131,8 @@ function EditNameModal({ isOpen, onClose, onSave, name, onNameChange }: {
   );
 }
 
-function renderHighlightedText(text: string): React.ReactNode {
-  if (!text) return null;
-  const parts = text.split(/\*\*(.*?)\*\*/g);
-  if (parts.length === 1) return text;
-  return parts.map((part, index) => {
-    if (!part) return null;
-    if (index % 2 === 1) {
-      return (
-        <span
-          key={index}
-          style={{ backgroundColor: '#cce5ff', padding: '0 2px', borderRadius: '2px' }}
-        >
-          {part}
-        </span>
-      );
-    }
-    return part;
-  });
-}
-
 export default function GenericListPage() {
+  const desktop = useDesktopLayout();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -339,9 +323,34 @@ export default function GenericListPage() {
 
   return (
     <div className="p-4">
-      <div className="flex justify-between items-center mb-4">
+      <div className="hidden justify-between items-center mb-4 md:flex">
         <h1 className="hidden text-2xl font-bold md:block">{isInventory ? 'Inventari' : 'Liste'}</h1>
       </div>
+      {!desktop && (
+        <MobileItemFilters
+          search={searchQuery}
+          onSearch={setSearchQuery}
+          placeholder="Cerca per oggetto…"
+          sortBy={sortBy}
+          sortOptions={[
+            { value: 'name', label: 'Nome' },
+            { value: 'date', label: 'Data modifica' },
+            { value: 'created', label: 'Data creazione' },
+            { value: 'item_count', label: 'Numero di oggetti' },
+          ]}
+          onSortBy={(value) => { localStorage.setItem(isInventory ? 'inventory_sortBy' : 'checklist_sortBy', value); setSortBy(value); }}
+          sortOrder={sortOrder}
+          onSortOrder={(value) => { localStorage.setItem(isInventory ? 'inventory_sortOrder' : 'checklist_sortOrder', value); setSortOrder(value); }}
+          onReset={() => { setSearchQuery(''); setSelectedItems([]); }}
+          selectionActions={editMode ? (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setSelectedItems(items.map(item => item.id))} className="min-h-11 flex-1 rounded-xl bg-blue-500 px-2 text-sm text-white">Seleziona tutti</button>
+              <button type="button" onClick={() => setSelectedItems([])} className="min-h-11 flex-1 rounded-xl bg-gray-500 px-2 text-sm text-white">Deseleziona tutti</button>
+            </div>
+          ) : undefined}
+        />
+      )}
+      {desktop && <>
       <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 mb-4">
         <div className="flex items-center gap-2">
           <input
@@ -418,6 +427,7 @@ export default function GenericListPage() {
           </div>
         )}
       </div>
+      </>}
       {canEdit && (
         <>
           <NewItemModal
@@ -579,7 +589,7 @@ export default function GenericListPage() {
       )}
       <div
         className={`z-40 gap-2 flex ${
-          window.innerWidth >= 768
+          desktop
             ? 'fixed top-4 right-4 flex-row'
             : 'fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 -translate-x-1/2 flex-row rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90'
         }`}

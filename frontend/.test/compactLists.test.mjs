@@ -60,6 +60,7 @@ test('mobile filter sheet preserves search independence, sort state and removabl
     const [templateId, onTemplate] = useState('');
     return createElement(MobileItemFilters, {
       search, onSearch, barcode, onBarcode, sortBy, onSortBy, sortOrder, onSortOrder,
+      sortOptions: [{ value: 'name', label: 'Nome' }, { value: 'date', label: 'Data modifica' }],
       checklist, priorityOrder, onPriorityOrder, templateId, onTemplate,
       templates: [{ id: 1, name: 'Alimenti' }], metadataSummary: null,
       onClearMetadata() { onTemplate(''); },
@@ -147,6 +148,18 @@ test('back to top scrolls the page container to zero, including filters, on mobi
             await act(async () => button.click());
             assert.deepEqual(calls, [{ top: 0, behavior: 'smooth' }]);
             assert.equal(scroller.scrollTop, 0);
+            if (!detail && viewport === 390) {
+              assert.equal(scroller.querySelectorAll('select').length, 0);
+              await act(async () => scroller.querySelector('button[aria-haspopup="dialog"]').click());
+              const dialog = document.querySelector('[role="dialog"]');
+              assert.ok(dialog);
+              assert.deepEqual([...dialog.querySelectorAll('option')].map(option => option.textContent), ['Nome', 'Data modifica', 'Data creazione', 'Numero di oggetti']);
+              assert.equal(dialog.textContent.includes('Barcode'), false);
+              const select = dialog.querySelector('select');
+              await act(async () => { select.value = 'item_count'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+              assert.equal(localStorage.getItem(path === 'inventories' ? 'inventory_sortBy' : 'checklist_sortBy'), 'item_count');
+              await act(async () => [...dialog.querySelectorAll('button')].find(node => node.textContent === 'Chiudi').click());
+            }
             if (detail) {
               const requests = [];
               const adapter = api.defaults.adapter;
@@ -184,7 +197,7 @@ for (const path of ['inventories', 'checklists']) {
       return { config, status: 200, statusText: 'OK', headers: {}, data: [{
         id: 1, name, version_num: 3, owner: { username: 'angela' }, item_count: 13,
         data_ins: '2026-11-03T19:09:30', data_mod: '2026-11-03T19:09:30',
-        matching_items: [{ id: 2, name: 'Gioco', quantity: 1 }],
+        matching_items: [{ id: 2, name: 'Gioco', quantity: 1, highlighted: { name: '**Gioco**' } }],
       }] };
     };
     await act(async () => root.render(createElement(MemoryRouter, { key: path, initialEntries: [`/${path}`] },
@@ -204,6 +217,7 @@ for (const path of ['inventories', 'checklists']) {
     assert.match(card.querySelector('p').textContent, /Ultima modifica: .* · v3$/);
     assert.match(card.textContent, /Creatore: angela \| Oggetti: 13/);
     assert.match(card.textContent, /Corrispondenze trovate:Gioco|Corrispondenze trovate:1x Gioco/);
+    assert.equal(card.querySelector('span.bg-blue-100')?.textContent, 'Gioco');
     await act(async () => card.click());
     assert.equal(document.querySelector('output').textContent, `/${path}/1`);
     const edit = [...document.querySelectorAll('button')].find(button => button.textContent === '✏️Modifica');
@@ -235,6 +249,34 @@ test('inventory and checklist item versions appear with modification details, no
       assert.equal(document.querySelector('li').textContent.match(/v123/g)?.length, 1);
     }
   }
+});
+
+test('item search highlights literal matches in names, descriptions and metadata without HTML injection', async () => {
+  for (const search of ['rIso', '[.*]', '<img>']) {
+    await act(async () => root.render(createElement(SwipeableItemRow, {
+      item: {
+        id: 2, inventory_id: 1, name: 'Riso [.*] <img>', description: 'RISO [.*] <img>',
+        quantity: 1, version_num: 1, data_mod: '2026-11-03T19:09:30',
+        metadata_values: [{ id: 1, definition_label: 'Categoria', field_type: 'TEXT', value_text: 'riso [.*] <img>' }],
+      },
+      search, isMobile: true, isChecklist: false, isInventory: true,
+      user: { role: { name: 'viewer' } }, isEditMode: false, selectedItems: [],
+      setSelectedItems() {}, setItemBeingEdited() {}, updateItem() {}, deleteItem() {},
+      setItems() {}, setIsCloning() {},
+    })));
+    const highlights = [...document.querySelectorAll('li span.bg-blue-100')];
+    assert.equal(highlights.length, 3);
+    assert.ok(highlights.every(node => node.textContent.toLowerCase() === search.toLowerCase()));
+    assert.equal(document.querySelector('li img'), null);
+  }
+  await act(async () => root.render(createElement(SwipeableItemRow, {
+    item: { id: 2, name: 'Riso', quantity: 1, version_num: 1, data_mod: '2026-11-03T19:09:30' },
+    search: '', isMobile: false, isChecklist: false, isInventory: true,
+    user: { role: { name: 'viewer' } }, isEditMode: false, selectedItems: [],
+    setSelectedItems() {}, setItemBeingEdited() {}, updateItem() {}, deleteItem() {},
+    setItems() {}, setIsCloning() {},
+  })));
+  assert.equal(document.querySelectorAll('li span.bg-blue-100').length, 0);
 });
 
 test('compact inventory controls preserve quantity updates and editing without selecting the row', async () => {

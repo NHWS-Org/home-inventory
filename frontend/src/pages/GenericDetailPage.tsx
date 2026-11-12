@@ -25,9 +25,11 @@ import { isAxiosError } from "axios";
 import { scrollPageToTop } from "../utils/scrollPageToTop";
 import MobileItemFilters from "../components/MobileItemFilters";
 import { useDesktopLayout } from "../useDesktopLayout";
+import { highlightSearchText } from "../utils/highlightText";
 
 interface Props {
   item: Item;
+  search?: string;
   isMobile: boolean;
   isChecklist: boolean;
   isInventory: boolean;
@@ -282,7 +284,7 @@ function MetadataFieldsSection({
 }
 
 export function SwipeableItemRow({
-  item, isMobile, isChecklist, isInventory, user,
+  item, search = '', isMobile, isChecklist, isInventory, user,
   isEditMode, selectedItems, setSelectedItems, setItemBeingEdited,
   updateItem, deleteItem, setItems, setIsCloning, 
 }: Props) {
@@ -483,7 +485,7 @@ export function SwipeableItemRow({
           )}
           <div className="flex min-w-0 flex-col">
             <div className="font-semibold flex flex-wrap items-center gap-x-2 gap-y-1 leading-5 md:leading-normal">
-              <span className="min-w-0 break-words [overflow-wrap:anywhere]">{item.name}</span>
+              <span className="min-w-0 break-words [overflow-wrap:anywhere]">{highlightSearchText(item.name, search)}</span>
               {isChecklist && (
                 <span ref={priorityMenuRef} className="relative inline-flex">
                   <button
@@ -535,7 +537,7 @@ export function SwipeableItemRow({
               )}
             </div>
             {item.description && (
-              <div className="break-words text-sm leading-tight text-gray-500 dark:text-gray-200 md:leading-5">{item.description}</div>
+              <div className="break-words text-sm leading-tight text-gray-500 dark:text-gray-200 md:leading-5">{highlightSearchText(item.description, search)}</div>
             )}
             {isChecklist && item.assignment && (
               <button
@@ -586,7 +588,7 @@ export function SwipeableItemRow({
                       key={value.id}
                       className="max-w-full break-words rounded-full bg-slate-100 px-1.5 py-0.5 text-xs leading-4 text-slate-700 dark:bg-slate-700 dark:text-slate-100 md:px-2 md:text-sm md:leading-5"
                     >
-                      {value.definition_label}: {formatItemMetadataValue(value)}
+                      {value.definition_label}: {highlightSearchText(formatItemMetadataValue(value), search)}
                     </span>
                   ))}
               </div>
@@ -1192,7 +1194,12 @@ useEffect(() => {
             <MobileItemFilters
               search={filterText}
               onSearch={setFilterText}
-              sortBy={sortBy}
+              sortBy={isChecklist && sortBy === 'quantity' ? 'name' : sortBy}
+              sortOptions={[
+                { value: 'name', label: 'Nome' },
+                { value: 'date', label: 'Data modifica' },
+                ...(!isChecklist ? [{ value: 'quantity' as const, label: 'Quantità' }] : []),
+              ]}
               onSortBy={(value) => { localStorage.setItem('item_sortBy', value); setSortBy(value); }}
               sortOrder={sortOrder}
               onSortOrder={(value) => { localStorage.setItem('item_sortOrder', value); setSortOrder(value); }}
@@ -1387,6 +1394,7 @@ useEffect(() => {
               <SwipeableItemRow
                 key={item.id}
                 item={item}
+                search={filterText}
                 isMobile={isMobile}
                 isChecklist={isChecklist}
                 isInventory={isInventory}
