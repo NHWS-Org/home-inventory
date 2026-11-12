@@ -1137,7 +1137,7 @@ useEffect(() => {
   const compactActions = canEdit && (
     <div className={isMobile
       ? "fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center"
-      : "relative z-40 mb-2 flex justify-end"}>
+      : "fixed right-4 top-4 z-40 flex justify-end rounded-2xl bg-white/95 p-1 shadow-lg backdrop-blur dark:bg-gray-900/95"}>
       {isMoreActionsOpen && (
         <div className={`${isMobile ? 'relative mb-2' : 'absolute right-0 top-full mt-2'} z-40 flex w-56 flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800`}>
           {isEditMode && (
@@ -1208,11 +1208,12 @@ useEffect(() => {
             </button>
           </div>
           <p className="mt-1 truncate px-1 text-xs leading-tight text-gray-600 dark:text-gray-300">
-            Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica: {new Date(inventory.data_mod).toLocaleString()}
+            Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica: {new Date(inventory.data_mod).toLocaleString()}{" "}
+            <span className="whitespace-nowrap">· v{inventory.version_num}</span>
           </p>
         </div>
       )}
-      <div className="relative z-10 bg-white pb-1 dark:bg-gray-900 md:sticky md:top-0">
+      <div className={`relative z-10 bg-white pb-1 dark:bg-gray-900 md:sticky md:top-0 ${compactControls ? 'md:pt-16' : ''}`}>
         <Link
           to={`/${basePath}${filtroParam ? `?filtro=${encodeURIComponent(filtroParam)}` : ""}`}
           className="mb-1 hidden text-sm text-blue-500 hover:underline md:inline-block"
@@ -1225,9 +1226,6 @@ useEffect(() => {
               <h2 className="flex items-center gap-1.5 text-lg font-bold sm:gap-2 sm:text-xl">
                 {isChecklist ? "Lista: " : "Inventario: "}
                 {inventory.name}
-                <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-200 sm:px-2 sm:py-1 sm:text-sm">
-                  v{inventory.version_num}
-                </span>
               </h2>
               <button
                 onClick={() => setIsHistoryOpen(true)}
@@ -1240,7 +1238,8 @@ useEffect(() => {
             </div>
             <p className="mb-1 hidden text-xs text-gray-600 dark:text-gray-400 sm:mb-2 sm:text-sm md:block">
               Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica:{" "}
-              {new Date(inventory.data_mod).toLocaleString()}
+              {new Date(inventory.data_mod).toLocaleString()}{" "}
+              <span className="whitespace-nowrap">· v{inventory.version_num}</span>
             </p>
             <hr className="mb-1 hidden sm:mb-2 md:block" />
           </>
@@ -1249,9 +1248,8 @@ useEffect(() => {
 
       {inventory ? (
         <div>
-          {compactControls && !isMobile && compactActions}
           {compactControls && !isMobile && !canEdit && (
-            <div className="mb-2 flex justify-end">
+            <div className="fixed right-4 top-4 z-40 flex justify-end rounded-2xl bg-white/95 p-1 shadow-lg backdrop-blur dark:bg-gray-900/95">
               <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} aria-label="Torna in cima alla pagina" className="min-h-11 rounded-xl border border-gray-300 px-3 text-sm dark:border-gray-600">↑ In cima</button>
             </div>
           )}
@@ -1585,7 +1583,7 @@ useEffect(() => {
         )}
       </div>}
 
-      {isMobile && compactActions}
+      {compactControls && compactActions}
 
       {compactControls && isMoreActionsOpen && createPortal(
         <button type="button" aria-label="Chiudi altre azioni" onClick={() => setIsMoreActionsOpen(false)} className="fixed inset-0 z-[39]" />,

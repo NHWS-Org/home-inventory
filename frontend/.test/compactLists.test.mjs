@@ -116,7 +116,7 @@ test('back to top scrolls the page container to zero, including filters, on mobi
   const windowScroll = window.scrollTo;
   window.scrollTo = () => assert.fail('The document is not the page scroll container');
   try {
-    for (const viewport of [390, 800, 1024, 1280]) {
+    for (const viewport of [390, 800, 1000, 1024, 1280]) {
       window.innerWidth = viewport;
       for (const path of ['inventories', 'checklists']) {
         for (const detail of [false, true]) {
@@ -164,11 +164,18 @@ test('back to top scrolls the page container to zero, including filters, on mobi
               await act(async () => [...dialog.querySelectorAll('button')].find(node => node.textContent === 'Chiudi').click());
             }
             if (detail) {
+              assert.equal(scroller.querySelector('h2').textContent.includes('v1'), false);
+              const version = [...scroller.querySelectorAll('p span')].find(node => node.textContent === '· v1' && node.parentElement.textContent.includes('Data modifica:'));
+              assert.ok(version, 'The container version must follow the modification date');
+              assert.equal(version.parentElement.lastElementChild, version);
+              if (viewport >= 768) {
+                assert.ok(button.closest('.fixed'), 'Desktop actions must stay fixed while the content scrolls');
+              }
               if (viewport === 800 && role === 'admin') {
                 const add = scroller.querySelector('button[aria-label="Aggiungi item"]');
                 assert.ok(add);
                 assert.equal(add.textContent, 'Nuovo');
-                assert.equal(add.closest('.fixed'), null, 'Tablet actions must remain inside the content column');
+                assert.ok(add.closest('.fixed'), 'Tablet actions must stay visible while the content scrolls');
                 assert.equal(scroller.textContent.includes('Importa / esporta'), false);
                 await act(async () => scroller.querySelector('button[aria-label="Modifica item"]').click());
                 await act(async () => scroller.querySelector('button[aria-label="Altre azioni"]').click());
