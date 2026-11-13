@@ -90,8 +90,9 @@ export function notificationDate(row: InboxNotification): Date {
     : row.action_at ?? row.created_at;
   return new Date(/[zZ]$|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`);
 }
-export async function getInbox(offset = 0): Promise<InboxNotification[]> {
-  return (await api.get<InboxNotification[]>("/notifications", { params: { limit: 50, offset } })).data;
+export async function getInbox(offset = 0, unreadOnly = false): Promise<InboxNotification[]> {
+  const params = unreadOnly ? { limit: 50, offset, unread_only: true } : { limit: 50, offset };
+  return (await api.get<InboxNotification[]>("/notifications", { params })).data;
 }
 export async function getUnreadCount(): Promise<number> {
   return (await api.get<{ count: number }>("/notifications/unread-count")).data.count;
@@ -122,7 +123,7 @@ export async function markOpenedNotificationRead(search: string): Promise<boolea
 export async function markAllNotificationsRead(): Promise<void> {
   await api.put("/notifications/read-all");
 }
-export type NotificationSelection = { ids: number[]; all?: false } | { all: true; ids?: never };
+export type NotificationSelection = { ids: number[]; all?: false } | { all: true; ids?: never; unread_only?: boolean };
 export async function changeNotifications(action: "read" | "delete", selection: NotificationSelection): Promise<number> {
   return (await api.post<{ updated: number }>("/notifications/bulk", { action, ...selection })).data.updated;
 }

@@ -92,12 +92,12 @@ def action_time(record: NotificationEvent) -> datetime:
 
 @router.get("")
 def inbox(
-    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), unread_only: bool = False,
     db: Session = Depends(get_db), user=Depends(get_current_user),
 ):
     result = []
     authorized = sorted(
-        accessible_notifications(db, user),
+        accessible_notifications(db, user, unread_only=unread_only),
         key=lambda entry: (action_time(entry[1]), entry[0].id), reverse=True,
     )
     for row, record, inventory in authorized[offset:offset + limit]:
@@ -131,7 +131,7 @@ def read_all(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
 def change_notifications(db: Session, user: User, payload: NotificationBulkAction) -> dict[str, int]:
     if payload.all:
-        rows = [row for row, _record, _inventory in accessible_notifications(db, user)]
+        rows = [row for row, _record, _inventory in accessible_notifications(db, user, unread_only=payload.unread_only)]
     else:
         rows = list(db.scalars(select(Notification).where(
             Notification.user_id == user.id, Notification.id.in_(set(payload.ids)),

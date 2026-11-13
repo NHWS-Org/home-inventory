@@ -96,9 +96,12 @@ class NotificationBulkAction(BaseModel):
     action: Literal["read", "delete"]
     ids: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list)
     all: bool = False
+    unread_only: bool = False
 
     @model_validator(mode="after")
     def require_scope(self) -> "NotificationBulkAction":
         if self.all == bool(self.ids):
             raise ValueError("Specificare gli ID oppure tutte le notifiche")
+        if self.unread_only and not self.all:
+            raise ValueError("unread_only è valido solo con all")
         return self

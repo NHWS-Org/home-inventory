@@ -424,6 +424,25 @@ def test_bulk_notification_selection_is_personal_and_persistent(setup, action):
     assert client.get("/notifications/unread-count").json() == {"count": 3}
 
 
+def test_unread_only_filters_inbox_and_bulk_all_delete(setup):
+    factory, client, current = setup
+    with factory.begin() as db:
+        for quantity in range(1, 4):
+            enqueue_event(db, ItemQuantityChangedData(
+                inventory_id=1, item_id=1, previous_quantity=quantity, quantity=quantity + 1,
+            ), actor_id=1)
+    settle(factory)
+    current[0] = 5
+    read_id = client.get("/notifications").json()[0]["id"]
+    assert client.put(f"/notifications/{read_id}/read").status_code == 200
+    unread = client.get("/notifications", params={"unread_only": True}).json()
+    assert len(unread) == 2 and read_id not in [row["id"] for row in unread]
+    assert client.post("/notifications/bulk", json={"action": "delete", "ids": [read_id], "unread_only": True}).status_code == 422
+    response = client.post("/notifications/bulk", json={"action": "delete", "all": True, "unread_only": True})
+    assert response.json() == {"updated": 2}
+    assert [row["id"] for row in client.get("/notifications").json()] == [read_id]
+
+
 @pytest.mark.parametrize("action", ["read", "delete"])
 def test_bulk_all_notifications_includes_unloaded_pages_and_skips_revoked_access(setup, action):
     factory, client, current = setup

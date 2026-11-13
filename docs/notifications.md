@@ -223,11 +223,24 @@ ferma a zero e rispetta la preferenza di sistema per ridurre il movimento.
 La voce è nella sidebar desktop e nella barra di navigazione inferiore mobile;
 il badge mostra solo i conteggi positivi (massimo visibile 99+), mai zero.
 Su mobile il titolo Centro notifiche compare nel header comune alle altre pagine.
-La inbox elenca 50 righe per volta con Carica altre, Aggiorna, lettura singola
-e Segna tutte come lette. Le checkbox consentono di selezionare singole righe,
-tutte le righe visibili oppure tutte le notifiche, anche non ancora caricate.
-Le selezionate si possono segnare come lette o eliminare definitivamente,
-con conferma prima della cancellazione. Ogni riga ha anche un cestino.
+La inbox elenca 50 righe per volta con Carica altre. Un header compatto offre
+il selettore Da leggere / Tutte (predefinito: Da leggere, con conteggio delle
+non lette) e l'interruttore Raggruppa per contenitore, ricordato sul
+dispositivo. Su desktop l'header contiene anche Aggiorna, Segna tutte come lette
+e Preferenze notifiche; su mobile queste azioni sono nel menu ⋯. Le notifiche
+non lette hanno un pallino blu e uno sfondo evidenziato. Toccare una riga apre
+il contenitore e segna letta quella notifica. Su desktop i pulsanti Segna come
+letta ed Elimina compaiono al passaggio del mouse o con il focus da tastiera.
+Su mobile si scorre la riga verso sinistra per eliminarla e verso destra per
+segnarla letta; una pressione lunga avvia la selezione.
+Nella vista raggruppata ogni contenitore mostra il conteggio, al massimo tre
+righe con Mostra altre N e le azioni Apri, Segna gruppo come letto ed Elimina
+notifiche del gruppo. Queste azioni riguardano le notifiche caricate.
+Selezionando una riga (checkbox su desktop, pulsante Seleziona o pressione
+lunga su mobile) l'header diventa una barra di selezione: annulla, seleziona
+visibili, segna come lette, elimina e Seleziona tutte (anche non caricate).
+Nella vista Da leggere la selezione totale include solo le notifiche non lette
+(`unread_only`). L'eliminazione chiede sempre conferma.
 La lettura e cancellazione globali riguardano tutte le pagine autorizzate.
 L'eliminazione rimuove fisicamente solo le righe inbox dell'utente corrente:
 non cancella gli eventi condivisi, le notifiche degli altri o i banner gia
@@ -251,7 +264,7 @@ disponibili anche se l'ID viene riutilizzato. La cancellazione del contenitore
 elimina tutti i suoi eventi e le notifiche/code associate. Gli eventi
 preesistenti vengono esclusi se la risorsa corrente e stata creata dopo l'evento.
 Aprire direttamente un inventario o una lista non segna le notifiche come lette.
-La freccia di una notifica non letta apre la risorsa e segna letta solo quella
+Il link di una notifica non letta apre la risorsa e segna letta solo quella
 notifica; un errore resta visibile con la possibilità di riprovare. Il click su
 un banner push apre invece la risorsa con l'UUID evento nel link:
 dopo autenticazione l'app segna come letta solo la notifica di quell'evento
@@ -280,12 +293,12 @@ Tutti gli endpoint sono autenticati e limitati all'utente del token:
 
 | Metodo | Percorso | Risultato |
 |---|---|---|
-| GET | `/notifications?limit=50&offset=0` | Inbox autorizzata con tipo/nome contenitore |
+| GET | `/notifications?limit=50&offset=0&unread_only=false` | Inbox autorizzata con tipo/nome contenitore; `unread_only=true` elenca solo le non lette |
 | GET | `/notifications/unread-count` | `{count}` |
 | PUT | `/notifications/{id}/read` | Lettura singola |
 | PUT | `/notifications/events/{event_key}/read` | Lettura dell'evento del banner, solo propria inbox |
 | PUT | `/notifications/read-all` | `{updated}`, tutte le pagine autorizzate |
-| POST | `/notifications/bulk` | `{action: "read" \| "delete", ids: [...]}` oppure `{action: ..., all: true}`; restituisce `{updated}` |
+| POST | `/notifications/bulk` | `{action: "read" \| "delete", ids: [...]}` oppure `{action: ..., all: true, unread_only?: bool}`; restituisce `{updated}` |
 | DELETE | `/notifications/{id}` | Elimina definitivamente la propria riga inbox |
 | GET | `/notifications/preferences` | Preferenze personali dei tre eventi |
 | PUT | `/notifications/preferences/{event_type}` | `{in_app_enabled, push_enabled}`; Push richiede Inbox |
