@@ -357,7 +357,7 @@ La conversione accetta dump data-only generati dalla vecchia applicazione con `-
 - Nell'elenco inventari e liste, il pulsante QR in alto a destra di ogni riga apre il codice del contenitore e permette di stamparlo. Le righe compatte mantengono nome e dettagli senza riservare una fascia vuota al pulsante. La versione di contenitori e item compare accanto a "Ultima modifica", non nel nome.
 - Su mobile gli item affiancano dettagli e controlli quantità: i pulsanti +/− e la spunta mantengono un'area di almeno 44 px, mentre cronologia e assegnazione usano pulsanti secondari da 36 px. Metadati e informazioni di modifica sono più compatti, senza nascondere descrizioni o valori.
 - Il pulsante ↑ negli elenchi inventari/liste e item torna all'inizio della pagina, mostrando anche i filtri.
-- Su mobile la barra degli item mostra solo la ricerca libera e il pulsante opzioni. Ordinamento, barcode, priorità delle liste, template e filtri metadati sono nel pannello dal basso; i filtri avanzati attivi compaiono come chip rimovibili. La cancellazione della ricerca non modifica gli altri filtri. In modalità modifica, selezione e deselezione di tutti gli item sono nel menu azioni.
+- Su mobile la barra degli item mostra solo la ricerca libera e il pulsante opzioni. Ordinamento, barcode, priorità delle liste e filtri salvati sono nel pannello dal basso; i filtri avanzati attivi compaiono come chip rimovibili. La cancellazione della ricerca non modifica gli altri filtri. In modalità modifica, selezione e deselezione di tutti gli item sono nel menu azioni.
 - Le barre filtri usano il layout compatto sotto 1280 px, anche con la sidebar desktop aperta, e passano automaticamente al layout esteso senza ricaricare la pagina. Nei dettagli, tra 768 e 1279 px, le azioni principali restano fisse in alto a destra durante lo scorrimento e quelle secondarie sono nel menu «⋯»; il pannello filtri è centrato. La versione dell'inventario/lista segue la data di modifica, non il titolo. La barra mobile resta invariata.
 - Anche gli elenchi inventari/liste usano la barra mobile compatta con ricerca e ordinamento nel pannello dal basso. Negli item i termini cercati sono evidenziati in nome, descrizione e valori dei metadati, senza distinguere maiuscole e minuscole.
 - Le corrispondenze di ricerca usano un'evidenziazione gialla con testo scuro in grassetto e bordo, visibile sia nel tema chiaro sia in quello scuro.
@@ -366,6 +366,46 @@ La conversione accetta dump data-only generati dalla vecchia applicazione con `-
 - Il pulsante "Scansiona", nelle pagine inventario e checklist, consente di usare la fotocamera (desktop o mobile), un lettore USB/Bluetooth (che funziona come una tastiera) oppure l'inserimento manuale. La fotocamera richiede HTTPS (o localhost).
 - Un codice sconosciuto consente di creare un nuovo articolo o associarlo a uno esistente. Ogni codice è univoco all'interno del proprio inventario.
 - Ricerca dei dati EAN tramite Open Food Facts, Open Beauty Facts, Open Pet Food Facts e Open Products Facts, e dei libri (ISBN-10/ISBN-13, normalizzati a ISBN-13) tramite Open Library con fallback su Google Books (imposta `GOOGLE_BOOKS_API_KEY` per evitare i limiti di quota senza chiave): gratuita e senza chiave API, con cache locale. I farmaci sono riconosciuti (EAN, codice AIC a 9 cifre, GTIN estratto dal DataMatrix GS1) ma non esiste un'API pubblica per codice: l'anagrafica arriva solo se presente nelle fonti sopra. Si può disattivare impostando `BARCODE_LOOKUP_ENABLED=false`. Quando è attiva, i codici vengono inviati ai servizi esterni.
+
+### Filtri salvati e gestione trigger
+
+**Gestione filtri** unisce campi degli item e metadati. Scegli il campo,
+l'operatore e il valore; combina **tutte** le condizioni oppure **almeno una**.
+La quantita riguarda gli inventari, mentre stato **Completato** e priorita
+riguardano le liste. L'ambito compatibile e i permessi determinano quali
+contenitori possono usare il filtro. I filtri esistenti restano disponibili.
+
+Per le date puoi scegliere una data fissa, **OGGI** oppure **OGGI + X giorni**.
+X puo essere positivo, zero o negativo: ad esempio `OGGI + 7` trova date
+relative alla prossima settimana e `OGGI - 3` a tre giorni fa. Anche i limiti
+di un intervallo possono essere relativi. **Prova filtro** mostra i risultati
+senza inviare notifiche.
+
+Esempi di filtri con tutte le condizioni:
+
+- Inventari: **Scadenza prima di OGGI** e **Quantita maggiore di 0**.
+- Liste: **Scadenza prima di OGGI** e **Completato = No**.
+
+**Gestione trigger** associa un filtro salvato a un orario e ai giorni della
+settimana, con un fuso esplicito (ad esempio `Europe/Rome`). Il fuso del trigger
+governa anche la valutazione di OGGI. Puoi limitare i contenitori, mettere
+il trigger in pausa e provare l'esecuzione senza inviare notifiche.
+Ogni contenitore con corrispondenze genera il proprio avviso; il conteggio
+si riferisce all'esecuzione, non necessariamente ai risultati al momento
+dell'apertura.
+
+In **Gestione profilo**, abilita **Avvisi da trigger** scegliendo
+**Disattivate / Solo Inbox / Inbox + Push**, poi seleziona i trigger da seguire.
+La categoria e disattivata per default. Ricevere un avviso richiede accesso
+corrente al filtro e al contenitore; l'iscrizione non concede nuovi permessi.
+Il creatore puo ricevere questi eventi del sistema. Per il push resta
+necessario il consenso del browser.
+
+Le esecuzioni pianificate richiedono il servizio `notification-worker`:
+ricostruisci sia backend sia frontend e abilita il profilo Compose
+`notifications`. Le migrazioni vengono applicate all'avvio del backend;
+crea un backup prima dell'aggiornamento. Per i dettagli di consegna e
+deduplicazione consulta [la guida notifiche](docs/notifications.md).
 
 ### Assegnazioni lista → inventario
 
@@ -716,7 +756,7 @@ Conversion accepts data-only dumps generated by the old application with `--colu
 - In the inventory and checklist overview, the QR button at the top right of each row opens the container's code for printing. Compact rows retain the name and details without reserving an empty strip for the button. Container and item versions appear next to "Ultima modifica" (last modified), not in the name.
 - On mobile, item details sit alongside quantity controls: +/− buttons and completion checkboxes retain targets of at least 44 px, while history and assignment use secondary 36 px buttons. Metadata and modification details are more compact without hiding descriptions or values.
 - The ↑ button in inventory/checklist and item lists returns to the top of the page, including the filters.
-- On mobile, the item toolbar only shows free-text search and the options button. Sorting, barcodes, checklist priority, templates and metadata filters live in a bottom sheet; active advanced filters appear as removable chips. Clearing search preserves other filters. In edit mode, select/deselect all live in the actions menu.
+- On mobile, the item toolbar only shows free-text search and the options button. Sorting, barcodes, checklist priority and saved filters live in a bottom sheet; active advanced filters appear as removable chips. Clearing search preserves other filters. In edit mode, select/deselect all live in the actions menu.
 - Filter toolbars use the compact layout below 1280 px, including with the desktop sidebar open, and switch automatically to the expanded layout without reloading. On detail pages between 768 and 1279 px, primary actions stay fixed at the top right while scrolling, secondary actions live in the “⋯” menu, and filters open in a centered dialog. Inventory/checklist versions follow the modification date instead of the title. The mobile toolbar is unchanged.
 - Inventory/checklist overviews also use the compact mobile search bar with sorting in the bottom sheet. Item search matches are highlighted case-insensitively in names, descriptions and metadata values.
 - Search matches use yellow highlighting with bold dark text and an outline, visible in both light and dark themes.
@@ -725,6 +765,39 @@ Conversion accepts data-only dumps generated by the old application with `--colu
 - The "Scan" button on inventory and checklist pages lets you use a camera (desktop or mobile), a USB/Bluetooth barcode reader (which acts like a keyboard), or manual entry. Camera access requires HTTPS (or localhost).
 - An unknown code can be used to create an item or link the code to an existing one. Each code must be unique within its inventory.
 - EAN lookup uses Open Food Facts, Open Beauty Facts, Open Pet Food Facts, and Open Products Facts; books (ISBN-10/13, normalized to ISBN-13) use Open Library with a Google Books fallback (set `GOOGLE_BOOKS_API_KEY` to avoid keyless quota limits). Medicines are recognized (EAN, 9-digit Italian AIC, GTIN extracted from the GS1 DataMatrix) but have no public per-code API, so details appear only if the sources above know them. It is free, requires no API key, and uses a local cache. Disable it by setting `BARCODE_LOOKUP_ENABLED=false`. When enabled, codes are sent to these external services.
+
+### Saved filters and trigger management
+
+**Filter management** combines item fields and metadata. Choose the field,
+operator and value, then match **all** or **any** conditions. Quantity applies
+to inventories; completion and priority apply to checklists. Field compatibility
+and permissions determine eligible containers. Existing filters remain available.
+
+Date conditions support a fixed date, **TODAY**, or **TODAY + X days**, with
+positive, zero or negative offsets. Range boundaries can also be relative.
+**Try filter** previews matches without sending notifications.
+
+Examples with all conditions:
+
+- Inventories: **Expiry before TODAY** and **Quantity greater than 0**.
+- Checklists: **Expiry before TODAY** and **Completed = No**.
+
+**Trigger management** associates a saved filter with a time, weekdays and
+an explicit timezone such as `Europe/Rome`. That timezone also determines
+TODAY. Restrict containers, pause a trigger or preview its execution without
+sending notifications. Each matching container generates a separate alert;
+the count is an execution snapshot, not necessarily the result when opened.
+
+In **Profile management**, choose **Disabled / Inbox only / Inbox + Push**
+for **Trigger alerts**, then subscribe to individual triggers. This category
+is disabled by default. Current filter and container access is required;
+subscribing never grants permissions. The creator can receive system events.
+Push still requires browser consent.
+
+Scheduled execution requires `notification-worker`: rebuild backend and frontend
+and enable the Compose `notifications` profile. Backend startup applies
+migrations; back up your data before updating. See the
+[notification guide](docs/notifications.md) for delivery and deduplication details.
 
 ### List-to-inventory assignments
 

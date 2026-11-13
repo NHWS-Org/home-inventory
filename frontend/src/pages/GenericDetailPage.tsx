@@ -4,11 +4,9 @@ import {
   getInventoryById, getInventoryItems,
   getChecklistById, getChecklistItems,
   createItem, updateItem, deleteItem,
-  getMetadataDefinitions, listAllMetadataDefinitions, getItemMetadataValues,
-  getFilterTemplates, getFilterTemplate,
-  filterItemsByTextMetadata, filterItemsByNumericMetadata, filterItemsByDateMetadata, filterItemsByBooleanMetadata,
+  getMetadataDefinitions, getItemMetadataValues,
   bulkUpsertItemMetadataValues, deleteItemMetadataValue, createAssignment, deleteAssignment } from "../api";
-import { Inventory, InventoryItem, Item, User, MetadataDefinition, ItemMetadataValue, ItemMetadataValueUpsert, FilterTemplate, FilterTemplateListItem } from "../types";
+import { Inventory, InventoryItem, Item, User, MetadataDefinition, ItemMetadataValue, ItemMetadataValueUpsert } from "../types";
 import { Dialog } from "@headlessui/react";
 import { FiArrowLeft, FiClock } from 'react-icons/fi';
 import { createPortal } from 'react-dom';
@@ -16,7 +14,6 @@ import { useContext } from "react";
 import { AuthContext } from "../auth-context";
 import { useSwipeable } from 'react-swipeable';
 import { HistoryModal } from "../components/HistoryModal";
-import MetadataFilterManager from "../components/MetadataFilterManager";
 import { ITEMS_CHANGED_EVENT } from "../components/GlobalBarcodeScan";
 import ItemBarcodesEditor from "../components/ItemBarcodesEditor";
 import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
@@ -26,6 +23,7 @@ import { scrollPageToTop } from "../utils/scrollPageToTop";
 import MobileItemFilters from "../components/MobileItemFilters";
 import { useDesktopLayout } from "../useDesktopLayout";
 import { highlightSearchText } from "../utils/highlightText";
+import { evaluateFilter, getFilter, getFilters, type FilterResponse } from "../filtersApi";
 
 interface Props {
   item: Item;
@@ -808,15 +806,30 @@ export default function InventoryDetailPage() {
   const [isCloning, setIsCloning] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [metadataDefinitions, setMetadataDefinitions] = useState<MetadataDefinition[]>([]);
-  const [allMetadataDefinitions, setAllMetadataDefinitions] = useState<MetadataDefinition[]>([]);
   const [newItemMetadataDrafts, setNewItemMetadataDrafts] = useState<MetadataDraftMap>({});
   const [editingMetadataDrafts, setEditingMetadataDrafts] = useState<MetadataDraftMap>({});
   const [editingMetadataValues, setEditingMetadataValues] = useState<ItemMetadataValue[]>([]);
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [metadataFilteredItemIds, setMetadataFilteredItemIds] = useState<number[] | null>(null);
   const [metadataFilterSummary, setMetadataFilterSummary] = useState<string | null>(null);
-  const [filterTemplates, setFilterTemplates] = useState<FilterTemplateListItem[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | ''>('');
+  const [filterTemplates, setFilterTemplates] = useState<FilterResponse[]>([]);
+  const initialFilterId = new URLSearchParams(location.search).get('filter_id');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | ''>(
+    initialFilterId && /^[1-9]\d*$/.test(initialFilterId) ? Number(initialFilterId) : '',
+  );
+  const [filterApplyError, setFilterApplyError] = useState('');
+  const filterEvaluationRequest = useRef(0);
+
+  useEffect(() => {
+    if (!initialFilterId) return;
+    if (!/^[1-9]\d*$/.test(initialFilterId)) {
+      setFilterApplyError('Il filtro collegato alla notifica non è valido.');
+      return;
+    }
+    setSelectedTemplateId(Number(initialFilterId));
+    setMetadataFilteredItemIds(null);
+    setMetadataFilterSummary(null);
+  }, [initialFilterId]);
 
   const editingMetadataRecap = metadataDefinitions
     .filter((definition) => definition.is_active)
@@ -843,16 +856,27 @@ useEffect(() => {
 
     const definitionsData = await getMetadataDefinitions(Number(id), true);
     setMetadataDefinitions(definitionsData);
-    const allDefsData = await listAllMetadataDefinitions(true);
-    setAllMetadataDefinitions(allDefsData);
-    const templatesData = await getFilterTemplates(Number(id), true);
-    setFilterTemplates(templatesData);
+    try {
+      const filtersData = await getFilters();
+      const targetType = isChecklist ? 'CHECKLIST' : 'INVENTORY';
+      setFilterTemplates(filtersData.filter(filter =>
+        (filter.container_type === null || filter.container_type === targetType)
+        && !filter.validation_error
+        && filter.scope_preview.scope_type !== 'none'
+        && (filter.scope_preview.scope_type === 'global'
+          || filter.scope_preview.scope_type === 'all_inventories' && targetType === 'INVENTORY'
+          || filter.scope_preview.scope_type === 'all_checklists' && targetType === 'CHECKLIST'
+          || filter.scope_preview.inventories.some(container => container.id === Number(id))),
+      ));
+    } catch {
+      setFilterApplyError('Impossibile caricare i filtri salvati.');
+    }
 
     const itemsData = await getItems(Number(id));
     if (Array.isArray(itemsData)) setItems(itemsData as Item[]);
   };
   fetchData();
-}, [id, isInventory]);
+}, [id, isInventory, isChecklist]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -914,10 +938,16 @@ useEffect(() => {
   useEffect(() => {
     if (selectedTemplateId === '') return;
     const exists = filterTemplates.some((template) => template.id === selectedTemplateId);
-    if (!exists) {
+    if (!exists && filterTemplates.length > 0) {
+      filterEvaluationRequest.current += 1;
+      if (initialFilterId && Number(initialFilterId) === selectedTemplateId) {
+        setFilterApplyError('Il filtro collegato alla notifica non è disponibile per questo contenitore.');
+      }
       setSelectedTemplateId('');
+      setMetadataFilteredItemIds(null);
+      setMetadataFilterSummary(null);
     }
-  }, [filterTemplates, selectedTemplateId]);
+  }, [filterTemplates, selectedTemplateId, initialFilterId]);
 
   useEffect(() => {
     localStorage.setItem("item_sortBy", sortBy);
@@ -1029,105 +1059,47 @@ useEffect(() => {
         }
       };
 
-    const applyTemplateToList = useCallback(async (templateId: number) => {
+    const applyTemplateToList = useCallback(async (filterId: number) => {
+      const request = ++filterEvaluationRequest.current;
+      setFilterApplyError('');
       try {
-        const template: FilterTemplate = await getFilterTemplate(templateId);
-        const root = template.criteria as Record<string, unknown>;
-        const filterType = (root?.filter_type as string) || template.filter_type;
-        const matchMode = (root?.match_mode as 'all' | 'any') || 'all';
-        const criteria = Array.isArray(root?.criteria) ? root.criteria : [];
-
-        if (!criteria.length) {
-          alert('Il template non contiene criteri validi.');
+        const filter = await getFilter(filterId);
+        if (filter.validation_error || filter.conditions.length === 0) {
+          if (request === filterEvaluationRequest.current) {
+            setMetadataFilteredItemIds(null);
+            setMetadataFilterSummary(null);
+            setFilterApplyError(filter.validation_error || 'Il filtro non contiene condizioni valide.');
+          }
           return;
         }
-
-        const asSet = (ids: number[]) => new Set(ids);
-        const intersect = (a: Set<number>, b: Set<number>) => new Set([...a].filter((x) => b.has(x)));
-        const union = (a: Set<number>, b: Set<number>) => new Set([...a, ...b]);
-
-        const byType = {
-          text: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'TEXT' || raw.field_type === 'LIST' || raw.value_text != null || filterType === 'text';
-          }),
-          numeric: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'NUMBER' || raw.value_number != null || filterType === 'numeric';
-          }),
-          date: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'DATE' || raw.value_date != null || filterType === 'date';
-          }),
-          boolean: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'BOOLEAN' || raw.value_boolean != null || filterType === 'boolean';
-          }),
-        };
-
-        const resultSets: Set<number>[] = [];
-
-        if (byType.text.length > 0) {
-          const response = await filterItemsByTextMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.text as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (byType.numeric.length > 0) {
-          const response = await filterItemsByNumericMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.numeric as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (byType.date.length > 0) {
-          const response = await filterItemsByDateMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.date as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (byType.boolean.length > 0) {
-          const response = await filterItemsByBooleanMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.boolean as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (resultSets.length === 0) {
-          alert('Tipo template non supportato.');
-          return;
-        }
-
-        let finalSet = resultSets[0];
-        for (let i = 1; i < resultSets.length; i += 1) {
-          finalSet = matchMode === 'all' ? intersect(finalSet, resultSets[i]) : union(finalSet, resultSets[i]);
-        }
-
-        const itemIds = Array.from(finalSet.values()).sort((a, b) => a - b);
+        const result = await evaluateFilter(filterId, {
+          inventory_id: Number(id),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Rome',
+        });
+        if (request !== filterEvaluationRequest.current) return;
+        const container = result.containers.find(item => item.id === Number(id));
+        const itemIds = container?.item_ids ?? [];
         setMetadataFilteredItemIds(itemIds);
-        setMetadataFilterSummary(`Template "${template.name}" applicato (${itemIds.length} risultati)`);
-        return;
-
+        setMetadataFilterSummary(`${filter.name} (${itemIds.length} risultati)`);
       } catch {
-        alert('Errore durante l\'applicazione del template.');
+        if (request !== filterEvaluationRequest.current) return;
+        setMetadataFilteredItemIds(null);
+        setMetadataFilterSummary(null);
+        setFilterApplyError('Impossibile applicare il filtro. Potrebbe non essere compatibile con questo contenitore o non essere più accessibile.');
       }
     }, [id]);
 
   useEffect(() => {
-    if (selectedTemplateId === '' || !inventory) {
+    if (selectedTemplateId === '') {
+      filterEvaluationRequest.current += 1;
+      return;
+    }
+    if (!inventory) {
       return;
     }
 
+    setMetadataFilteredItemIds(null);
+    setMetadataFilterSummary(null);
     void applyTemplateToList(selectedTemplateId);
   }, [selectedTemplateId, inventory, items, applyTemplateToList]);
 
@@ -1275,13 +1247,22 @@ useEffect(() => {
               templates={filterTemplates}
               onTemplate={(value) => {
                 setSelectedTemplateId(value);
+                setFilterApplyError('');
                 if (value === '') {
                   setMetadataFilteredItemIds(null);
                   setMetadataFilterSummary(null);
                 }
               }}
               metadataSummary={metadataFilterSummary}
-              onClearMetadata={() => { setSelectedTemplateId(''); setMetadataFilteredItemIds(null); setMetadataFilterSummary(null); }}
+              onClearMetadata={() => {
+                setSelectedTemplateId('');
+                setMetadataFilteredItemIds(null);
+                setMetadataFilterSummary(null);
+                setFilterApplyError('');
+                const params = new URLSearchParams(location.search);
+                params.delete('filter_id');
+                window.history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
+              }}
               onReset={() => {
                 setFilterText('');
                 setBarcodeFilter('all');
@@ -1290,19 +1271,10 @@ useEffect(() => {
                 setMetadataFilterSummary(null);
                 window.history.replaceState(null, '', location.pathname);
               }}
-              metadataEditor={canEdit ? (
-                <MetadataFilterManager
-                  inventoryId={inventory.id}
-                  currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
-                  definitions={metadataDefinitions}
-                  allDefinitions={allMetadataDefinitions}
-                  onTemplatesChanged={setFilterTemplates}
-                  triggerLabel="Filtri metadati"
-                  triggerClassName="!min-h-11 !w-full !rounded-xl !px-3 !py-2 !text-sm !shadow-none"
-                />
-              ) : undefined}
+              metadataEditor={canEdit ? <Link to="/filters" className="flex min-h-11 items-center justify-center rounded-xl border border-gray-300 text-sm text-blue-700 dark:border-gray-600 dark:text-blue-300">Gestisci filtri salvati</Link> : undefined}
             />
           )}
+          {filterApplyError && <p role="alert" className="mb-2 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">{filterApplyError}</p>}
           {!compactControls && (
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
             <label htmlFor="sort-by-select" className="hidden sm:inline text-sm font-medium">Ordina per:</label>
@@ -1392,26 +1364,26 @@ useEffect(() => {
                 </select>
               </div>
             </div>
-            {(isInventory || isChecklist) && canEdit && (
+            {(isInventory || isChecklist) && (
               <div className="flex w-full items-center gap-1.5 sm:w-auto sm:gap-2">
-                <label className="hidden sm:inline text-sm font-medium whitespace-nowrap">Template filtro:</label>
+                <label className="hidden sm:inline text-sm font-medium whitespace-nowrap">Filtro salvato:</label>
                 <select
                   value={selectedTemplateId}
-                  onChange={async (e) => {
+                  onChange={(e) => {
                     const value = e.target.value;
                     if (!value) {
                       setSelectedTemplateId('');
                       setMetadataFilteredItemIds(null);
                       setMetadataFilterSummary(null);
+                      setFilterApplyError('');
                       return;
                     }
                     const templateId = Number(value);
                     setSelectedTemplateId(templateId);
-                    await applyTemplateToList(templateId);
                   }}
                   className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none sm:min-w-[220px]"
                 >
-                  <option value="">Template filtro: nessuno</option>
+                  <option value="">Filtro salvato: nessuno</option>
                   {filterTemplates.map((template) => (
                     <option key={template.id} value={template.id}>{template.name}</option>
                   ))}
@@ -1520,14 +1492,9 @@ useEffect(() => {
           </button>
         )}
         {(isInventory || isChecklist) && canEdit && (
-          <MetadataFilterManager
-            inventoryId={inventory?.id ?? Number(id)}
-            currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
-            definitions={metadataDefinitions}
-            allDefinitions={allMetadataDefinitions}
-            onTemplatesChanged={setFilterTemplates}
-            triggerClassName="!flex !h-10 !min-h-10 !min-w-12 !items-center !justify-center !rounded-xl !px-3 !py-2"
-          />
+          <Link to="/filters" aria-label="Gestisci filtri salvati" title="Gestisci filtri salvati" className="flex h-10 min-w-12 items-center justify-center rounded-xl border border-gray-300 px-3 text-blue-700 dark:border-gray-600 dark:text-blue-300">
+            <span className="inline md:hidden">⚙️</span><span className="hidden md:inline">Gestisci filtri</span>
+          </Link>
         )}
         {(isInventory || isChecklist) && canEdit && (
           <button

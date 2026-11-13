@@ -8,6 +8,7 @@ class NotificationEventType(str, Enum):
     ITEM_QUANTITY_CHANGED = "item_quantity_changed"
     ITEM_UPDATED = "item_updated"
     INVENTORY_UPDATED = "inventory_updated"
+    FILTER_TRIGGER_MATCHED = "filter_trigger_matched"
 
 
 class EventData(BaseModel):
@@ -58,8 +59,19 @@ class InventoryUpdatedData(EventData):
     details: dict[str, str | int | None] = Field(default_factory=dict)
 
 
+class FilterTriggerMatchedData(EventData):
+    event_type: Literal["filter_trigger_matched"] = "filter_trigger_matched"
+    filter_id: int = Field(gt=0)
+    trigger_id: int = Field(gt=0)
+    filter_name: str
+    count: int = Field(gt=0)
+    scheduled_at: str
+    trigger_revision: int = Field(gt=0)
+    filter_fingerprint: str
+
+
 NotificationEventData = Annotated[
-    ItemQuantityChangedData | ItemUpdatedData | InventoryUpdatedData,
+    ItemQuantityChangedData | ItemUpdatedData | InventoryUpdatedData | FilterTriggerMatchedData,
     Field(discriminator="event_type"),
 ]
 notification_event_adapter = TypeAdapter(NotificationEventData)

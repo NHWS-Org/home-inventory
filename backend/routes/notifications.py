@@ -9,7 +9,7 @@ from dependencies import get_current_user, get_db
 from models import Inventory, Item, Notification, NotificationEvent, NotificationPreference, User
 from notification_contracts import NotificationBulkAction, NotificationEventType, NotificationPreferenceInput
 from notification_outbox import utcnow
-from notification_service import can_receive, default_in_app, event_inventory
+from notification_service import can_receive, default_in_app, event_inventory, trigger_inbox_authorized
 from routes.push import router as push_router
 
 router = APIRouter()
@@ -56,7 +56,9 @@ def accessible_notification_context(
     if record is None or record.schema_version != 1:
         return None
     inventory = event_inventory(db, record)
-    return (record, inventory) if inventory is not None and can_receive(user, inventory) else None
+    return (record, inventory) if (
+        inventory is not None and can_receive(user, inventory) and trigger_inbox_authorized(db, user, record)
+    ) else None
 
 
 def accessible_notification(db: Session, row: Notification, user: User) -> NotificationEvent | None:
@@ -83,7 +85,7 @@ def accessible_notifications(db: Session, user: User, *, unread_only: bool = Fal
 
 
 def action_time(record: NotificationEvent) -> datetime:
-    value = record.payload.get("action_at")
+    value = record.payload.get("scheduled_at", record.payload.get("action_at"))
     result = datetime.fromisoformat(value) if value else record.created_at
     return result.astimezone(timezone.utc).replace(tzinfo=None) if result.tzinfo else result
 

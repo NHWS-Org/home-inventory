@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { FiBell, FiBellOff, FiInbox } from "react-icons/fi";
 import { getNotificationPreferences, notificationLabels, notifyInboxChanged, saveNotificationPreference, type NotificationPreference } from "../notificationsApi";
+import { getTriggerSubscriptions, getTriggers, saveTriggerSubscription, type TriggerResponse, type TriggerSubscription } from "../filtersApi";
 
 const modes = [
   { value: "off", label: "Disattivate", Icon: FiBellOff },
@@ -15,17 +16,42 @@ export default function NotificationPreferences() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [triggers, setTriggers] = useState<TriggerResponse[]>([]);
+  const [subscriptions, setSubscriptions] = useState<TriggerSubscription[]>([]);
+  const [subscriptionsLoading, setSubscriptionsLoading] = useState(true);
+  const [subscriptionsError, setSubscriptionsError] = useState("");
+  const [subscriptionBusy, setSubscriptionBusy] = useState<number | null>(null);
   const saving = useRef(false);
   const focusAfterSave = useRef<HTMLInputElement | null>(null);
   async function load() {
     setLoading(true);
     setError("");
     setNotice("");
-    try { setRows(await getNotificationPreferences()); }
+    try {
+      const preferences = await getNotificationPreferences();
+      setRows(preferences.some(row => row.event_type === "filter_trigger_matched")
+        ? preferences
+        : [...preferences, { event_type: "filter_trigger_matched", in_app_enabled: false, push_enabled: false }]);
+    }
     catch { setError("Impossibile caricare le preferenze notifiche."); }
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
+  const loadSubscriptions = useCallback(async () => {
+    setSubscriptionsLoading(true);
+    setSubscriptionsError("");
+    try {
+      const [availableTriggers, savedSubscriptions] = await Promise.all([getTriggers(), getTriggerSubscriptions()]);
+      if (!Array.isArray(availableTriggers) || !Array.isArray(savedSubscriptions)) {
+        throw new Error("Invalid trigger subscription response");
+      }
+      setTriggers(availableTriggers);
+      setSubscriptions(savedSubscriptions);
+    } catch {
+      setSubscriptionsError("Impossibile caricare le iscrizioni ai trigger.");
+    } finally { setSubscriptionsLoading(false); }
+  }, []);
+  useEffect(() => { void loadSubscriptions(); }, [loadSubscriptions]);
   useEffect(() => {
     if (busy) return;
     const input = focusAfterSave.current;
@@ -55,6 +81,22 @@ export default function NotificationPreferences() {
       saving.current = false;
       setBusy(false);
     }
+  }
+  async function changeSubscription(triggerId: number, enabled: boolean) {
+    const previous = subscriptions;
+    setSubscriptions(current => current.some(row => row.trigger_id === triggerId)
+      ? current.map(row => row.trigger_id === triggerId ? { ...row, enabled } : row)
+      : [...current, { trigger_id: triggerId, enabled }]);
+    setSubscriptionsError("");
+    setSubscriptionBusy(triggerId);
+    setNotice("");
+    try {
+      await saveTriggerSubscription(triggerId, enabled);
+      setNotice(enabled ? "Iscrizione al trigger attivata." : "Iscrizione al trigger disattivata.");
+    } catch {
+      setSubscriptions(previous);
+      setSubscriptionsError("Iscrizione non salvata. Lo stato precedente è stato ripristinato.");
+    } finally { setSubscriptionBusy(null); }
   }
   return (
     <section aria-labelledby="notification-preferences-heading" className="space-y-2">
@@ -89,6 +131,27 @@ export default function NotificationPreferences() {
         ))}
       </div>
       <p role="status" className="text-sm">{busy ? "Salvataggio..." : notice}</p>
+      <section aria-labelledby="trigger-subscriptions-heading" className="space-y-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+        <div>
+          <h3 id="trigger-subscriptions-heading" className="font-semibold">Avvisi da trigger</h3>
+          <p className="text-sm">Iscriviti ai trigger disponibili. Gli avvisi rispettano anche la preferenza “Avvisi da trigger” e l’accesso al contenitore.</p>
+        </div>
+        {subscriptionsLoading && <p role="status" className="text-sm">Caricamento trigger…</p>}
+        {subscriptionsError && <p role="alert" className="text-sm">{subscriptionsError}</p>}
+        {subscriptionsError && <button type="button" disabled={subscriptionsLoading} onClick={() => void loadSubscriptions()} className="min-h-11 rounded border px-3 text-sm">Riprova iscrizioni</button>}
+        {!subscriptionsLoading && !triggers.length && !subscriptionsError && <p className="text-sm text-gray-500">Nessun trigger disponibile al momento.</p>}
+        <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+          {triggers.map(trigger => {
+            const enabled = subscriptions.find(row => row.trigger_id === trigger.id)?.enabled ?? false;
+            return <li key={trigger.id} className="flex min-h-14 items-center justify-between gap-3 py-2">
+              <span className="min-w-0"><span className="block break-words text-sm font-medium">{trigger.name}</span><span className="block break-words text-xs text-gray-500">{trigger.filter_name} · {trigger.scope_preview.summary}</span></span>
+              <button type="button" role="switch" aria-checked={enabled} disabled={subscriptionsLoading || subscriptionBusy === trigger.id} onClick={() => void changeSubscription(trigger.id, !enabled)} className={`relative h-11 w-14 shrink-0 rounded-full transition-colors disabled:opacity-50 ${enabled ? "bg-blue-600" : "bg-gray-300 dark:bg-gray-600"}`} aria-label={`${enabled ? "Annulla iscrizione a" : "Iscriviti a"} ${trigger.name}`}>
+                <span className={`absolute top-[14px] h-5 w-5 rounded-full bg-white shadow transition-transform ${enabled ? "left-[30px]" : "left-1.5"}`} />
+              </button>
+            </li>;
+          })}
+        </ul>
+      </section>
     </section>
   );
 }

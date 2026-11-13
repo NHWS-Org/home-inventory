@@ -26,6 +26,7 @@ preferenza o richiesta del consenso push per eventi che non possono ricevere.
 | `item_quantity_changed` | Qualsiasi variazione di quantita o spunta di una singola riga | Disattiva |
 | `item_updated` | Creazione o eliminazione di un elemento oppure modifica effettiva dei suoi dettagli | Disattiva |
 | `inventory_updated` | Modifica effettiva del contenitore, attualmente il nome | Disattiva |
+| `filter_trigger_matched` | Un trigger pianificato trova elementi compatibili con un filtro | Disattiva |
 
 Tutti gli eventi sono disattivati per inbox e push per gli utenti nuovi e
 all'inizializzazione della migrazione. La migrazione a preferenze personali
@@ -35,6 +36,139 @@ preferenza personale per evento e attivazione esplicita del browser.
 Per ogni evento si sceglie una sola modalita: **Disattivate**, **Solo Inbox**
 oppure **Inbox + Push**. Push senza Inbox non e consentito, anche via API.
 L'autore della modifica e sempre escluso dai destinatari, sia inbox sia push.
+Questa esclusione riguarda gli eventi di modifica: i trigger sono eventi di
+sistema con `actor_id=null`, quindi anche il loro creatore può riceverli.
+
+### Filtri generici e trigger pianificati
+
+I filtri usano gli ID già esistenti di `filter_templates`. La rappresentazione
+generica è versionata (`criteria.version=2`) e supporta insieme campi dell'elemento
+e metadati. Gli endpoint `/filter-templates` e `/metadata/filters/*` mantengono
+il comportamento dei filtri legacy; la nuova lista legacy non include i filtri
+v2 e la lettura/modifica di un filtro v2 via API legacy restituisce 409, indicando
+di usare `/filters`. Nessun criterio legacy viene riscritto durante lettura o
+valutazione; anche i caratteri jolly dei filtri testuali legacy restano invariati.
+Un filtro legacy invalido resta elencabile con scope `none` e
+`validation_error` esplicito (stringa; `null` per un filtro valido), ma valutazione e
+creazione trigger falliscono esplicitamente (422).
+L'editor non deve aprire i criteri vuoti come filtro valido: mostra l'errore
+e permette la cancellazione, non un salvataggio distruttivo. PATCH senza
+nuovi criteri validi fallisce con 422 e mantiene il contenuto originale.
+
+API (percorsi relativi al root path API):
+
+* `GET /filters`, `GET /filters/{id}`, `POST /filters`,
+  `PATCH /filters/{id}`, `DELETE /filters/{id}`.
+* `GET /filters/fields`: catalogo `{field,label,source,field_type,definition_id?,
+  operators,container_types,list_options?}`. I metadati sono limitati a quelli
+  visibili tramite i contenitori; l'admin vede tutte le definizioni.
+* `POST /filters/preview`: il filtro completo più `inventory_id?` e
+  `timezone?` (predefinita `Europe/Rome`).
+* `POST /filters/{id}/evaluate`: `{inventory_id?,timezone?}`; un filtro legacy
+  legato a un contenitore non può essere valutato su un altro contenitore.
+* `GET /triggers`, `GET /triggers/{id}`, `POST /triggers`,
+  `PATCH /triggers/{id}`, `DELETE /triggers/{id}`.
+* `POST /triggers/{id}/preview`: valuta con i permessi dell'utente corrente,
+  senza generare eventi, aggiornare baseline o eseguire notifiche.
+* `GET /triggers/subscriptions`: `{trigger_id,enabled}[]`.
+  `PUT /triggers/{id}/subscription`: `{enabled:boolean}`.
+
+Il filtro contiene `{name,description?,is_shared,container_type,match_mode,
+conditions}`. `container_type` è `INVENTORY`, `CHECKLIST` o `null`; `match_mode`
+è `all` oppure `any`. Ogni condizione contiene `{source,field,definition_id?,
+operator,value?,range_from?,range_to?}`. `source` è `item` o `metadata`;
+per i metadati `field` deve coincidere con la chiave della definizione.
+I campi elemento sono `name`, `description`, `quantity`, `completed`,
+`priority`, `barcode`, `created_at`, `modified_at`. `quantity` è disponibile
+negli inventari; `completed` e `priority` nelle checklist. `completed` significa
+`quantity>0`. `barcode` supporta solo `contains`, `is_null`, `is_not_null`.
+Gli altri operatori provengono dal catalogo canonico dei metadati.
+
+`value` ed estremi accettano stringhe, numeri, booleani, `null` oppure
+`{relative_days:intero}` (da -36500 a 36500). Le date fisse sono ISO
+`YYYY-MM-DD`; le date relative rappresentano **OGGI + X giorni di calendario**
+nel fuso della valutazione, senza aritmetica approssimata su mesi/anni.
+Gli estremi `between` sono inclusivi e devono essere ordinati anche dopo
+la risoluzione relativa. Le date degli elementi sono confrontate come giorni
+locali su timestamp UTC: i giorni DST possono durare 23/25 ore. Le date EAV
+restano date di calendario. Gli operatori NULL non accettano valori;
+confronti, `not_equals` e `not_contains` non corrispondono a valori assenti.
+Un campo non disponibile nel contenitore è sempre falso, anche per `is_null`.
+In `any` si usa l'unione delle condizioni compatibili, non l'intersezione dei
+tipi dei campi. `contains` generico interpreta il testo letteralmente,
+non come pattern SQL. Nessun campo o operatore permette SQL arbitrario.
+
+Le valutazioni restituiscono
+`{containers:[{id,name,type,item_ids,count}],total_count}`; sono inclusi solo
+i contenitori con corrispondenze. Le risposte filtro aggiungono audit
+`id,user_ins,user_mod,data_ins,data_mod`, `scope_preview`, `trigger_count`,
+`can_manage`, `validation_error`. `scope_preview` è `{scope_type,summary,inventories:[{id,name,type}]}`,
+limitato ai contenitori visibili/compatibili (`specific` o `none`).
+
+Il trigger contiene `{name,filter_id,enabled,time,timezone,weekdays,
+inventory_ids,notify_mode}`: `time` è `HH:MM`, fuso IANA (predefinito
+`Europe/Rome`), giorni ISO da 1 lunedì a 7 domenica, contenitori `null`
+per tutti quelli compatibili/modificabili dal creatore oppure elenco esplicito.
+`notify_mode` è `always` o `changed`. La risposta aggiunge
+`id,filter_name,scope_preview,can_manage,last_run_at,next_run_at,
+last_result_count,last_container_count,last_error`. Timestamp di esecuzione
+e prossima esecuzione sono UTC; `last_run_at` indica lo slot pianificato.
+PATCH è parziale, con la stessa validazione della creazione. Creare un trigger
+attiva la sola sottoscrizione del creatore; la quarta preferenza evento resta
+disattivata. Altri destinatari devono attivare esplicitamente la sottoscrizione.
+
+Solo proprietario/admin gestiscono filtri e trigger. Un filtro privato è
+usabile esclusivamente da proprietario/admin; un filtro condiviso permette
+trigger personali e sottoscrizioni a utenti con accesso **edit** ai contenitori
+compatibili. I viewer non ricevono trigger. Il worker controlla nuovamente
+creatore, filtro, scope e sottoscrizione; inbox e invio push ricontrollano questi
+vincoli e il consenso personale. Cambiare/eliminare filtro o trigger invalida
+gli eventi precedenti e le code; la perdita di compatibilità disattiva le
+sottoscrizioni e i trigger non più autorizzati. Le modifiche legacy al filtro
+applicano la stessa invalidazione. Le modifiche dei metadati sono rivalutate
+al momento della consegna: un filtro non più valido non consegna.
+La disattivazione della quarta preferenza o della sottoscrizione nasconde
+anche le vecchie righe trigger, senza modificare il comportamento storico
+delle altre tre categorie.
+
+Ogni evento conserva `{filter_id,trigger_id,inventory_id,filter_name,count,
+scheduled_at}` e i token interni `trigger_revision`/`filter_fingerprint`, per
+impedire consegne stale dopo modifiche. Nome filtro e numero di risultati sono
+snapshot immutabili, non letture dei risultati attuali. Un evento corrisponde
+a un contenitore; il link push apre quel contenitore.
+
+Il loop `notification_worker` esegue anche lo scheduler persistente: run ed
+eventi vengono salvati nella stessa transazione. Vincoli unici su
+`(trigger_id,scheduled_at)` e `(trigger_id,logical_date)` impediscono doppie
+esecuzioni anche con worker concorrenti e dopo riavvio. Si recupera solo
+l'ultimo slot nell'ultima ora; slot anteriori vengono saltati, nessuna
+raffica di arretrati. Un orario locale inesistente durante DST viene saltato;
+un orario ripetuto usa la prima occorrenza (`fold=0`) una sola volta.
+Una modifica della pianificazione non provoca una seconda esecuzione
+nello stesso giorno logico. Il primo risultato non vuoto di `changed`
+notifica; poi si confrontano gli ID per contenitore, non soltanto il conteggio.
+Un risultato vuoto aggiorna la baseline senza notificare.
+
+Ogni tick valuta al massimo 100 trigger e scansiona al massimo 1000 righe,
+con cursore circolare; ogni utente può creare 100 trigger e ogni trigger può
+coprire al massimo 100 contenitori (anche a runtime, con errore esplicito
+se uno scope dinamico cresce troppo). Le valutazioni fallite hanno run
+`failed` e `last_error` sanitizzato (`not_authorized`, `invalid_filter`,
+`evaluation_failed`, oppure `filter_revoked` dopo modifica incompatibile);
+non vengono ripetute nello stesso slot. Una transazione DB non riuscita non
+salva run/eventi parziali e può essere ritentata entro la finestra.
+`tzdata` è una dipendenza esplicita per i fusi IANA nelle immagini Linux.
+
+La migrazione `ba1c2d3e4f5a` segue `c1d2e3f4a5b6`, mantiene dati e
+preferenze esistenti e aggiunge `scheduled_triggers`, `trigger_runs` e
+`trigger_subscriptions`. Backup/esportazione e restore includono le tre
+tabelle in ordine di dipendenza: i run ripristinati impediscono replay degli
+slot già eseguiti, mentre inbox/outbox continuano a essere azzerati dal restore.
+La migrazione supporta anche il bootstrap `Base.metadata.create_all` prima
+dello stamp di una revisione precedente: verifica colonne, tipi, nullabilità,
+chiavi e vincoli delle tabelle già presenti e non le ricrea. Uno schema
+incompatibile causa un errore esplicito, non viene ignorato; l'indice mancante
+del polling viene creato, un indice omonimo incompatibile viene rifiutato.
 
 La preferenza **Creazione, eliminazione e dettagli degli elementi** include le
 nuove righe e le cancellazioni.

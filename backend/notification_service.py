@@ -145,10 +145,34 @@ def event_recipients(db: Session, record: NotificationEvent) -> set[int]:
     inventory = event_inventory(db, record)
     if inventory is None:
         return set()
+    if record.payload["event_type"] == "filter_trigger_matched":
+        from models import TriggerSubscription
+        from trigger_service import trigger_event_authorized
+        users = db.scalars(select(User).join(
+            TriggerSubscription, TriggerSubscription.user_id == User.id,
+        ).where(
+            TriggerSubscription.trigger_id == record.payload["trigger_id"],
+            TriggerSubscription.enabled.is_(True),
+        ).options(joinedload(User.role), joinedload(User.group_associations))).unique()
+        return {
+            user.id for user in users
+            if can_receive(user, inventory) and trigger_event_authorized(db, user, record)
+        }
     users = db.scalars(select(User).options(
         joinedload(User.role), joinedload(User.group_associations),
     )).unique()
     return {user.id for user in users if can_receive(user, inventory)}
+
+
+def trigger_inbox_authorized(db: Session, user: User, record: NotificationEvent) -> bool:
+    if record.payload["event_type"] != "filter_trigger_matched":
+        return True
+    from trigger_service import trigger_event_authorized
+    preference = db.scalar(select(NotificationPreference).where(
+        NotificationPreference.user_id == user.id,
+        NotificationPreference.event_type == "filter_trigger_matched",
+    ))
+    return bool(preference is not None and preference.in_app_enabled and trigger_event_authorized(db, user, record))
 
 
 def evaluate_event(db: Session, record: NotificationEvent) -> None:

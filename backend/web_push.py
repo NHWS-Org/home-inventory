@@ -267,7 +267,11 @@ def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str
     item = db.get(Item, data["item_id"]) if "item_id" in data else None
     item_name = item.name if item is not None else None
     symbol = "🟡✎"
-    if data["event_type"] == "item_updated" and data.get("operation") == "deleted":
+    if data["event_type"] == "filter_trigger_matched":
+        symbol = "🔎"
+        item_name = data["filter_name"]
+        action = f"{data['count']} elementi corrispondenti"
+    elif data["event_type"] == "item_updated" and data.get("operation") == "deleted":
         item_name = data["details"]["name"]
         symbol = "🔴✕"
         action = ""

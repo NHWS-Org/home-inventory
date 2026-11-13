@@ -61,9 +61,10 @@ def test_sqlite_bootstrap_and_migrations(tmp_path, legacy_schema, starting_revis
         assert {
             "security_audit", "notification_events", "notification_preferences",
             "push_subscriptions", "push_deliveries",
+            "scheduled_triggers", "trigger_runs", "trigger_subscriptions",
         }.issubset(tables)
         assert connection.execute(
             text("SELECT version_num FROM alembic_version")
-        ).scalar_one() == "c1d2e3f4a5b6"
+        ).scalar_one() == "ba1c2d3e4f5a"
         assert "notification_rules" not in tables
     engine.dispose()

@@ -49,6 +49,8 @@ def check_health(factory=None, path: Path = HEARTBEAT_PATH) -> bool:
         with factory() as db:
             db.execute(text("SELECT id FROM notification_events LIMIT 1"))
             db.execute(text("SELECT id FROM push_deliveries LIMIT 1"))
+            db.execute(text("SELECT id FROM scheduled_triggers LIMIT 1"))
+            db.execute(text("SELECT id FROM trigger_runs LIMIT 1"))
     except (OSError, ValueError, SQLAlchemyError) as exc:
         logger.error("Notification worker healthcheck failed at database (%s)", type(exc).__name__)
         return False
@@ -59,7 +61,7 @@ def check_health(factory=None, path: Path = HEARTBEAT_PATH) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Database-backed notification outbox worker")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--once", action="store_true", help="Process at most one event and exit")
+    mode.add_argument("--once", action="store_true", help="Run one bounded scheduler/outbox/push cycle and exit")
     mode.add_argument("--status", action="store_true", help="Report queue counts without processing")
     mode.add_argument("--healthcheck", action="store_true", help="Check worker heartbeat and database")
     mode.add_argument("--reset-push", action="store_true", help="Discard subscriptions and push work after an offline database restore")
@@ -91,6 +93,7 @@ def main() -> None:
     from notification_outbox import claim_event, process_claim
     from push_config import load_push_config
     from web_push import claim_push, process_push
+    from trigger_service import run_due_triggers
 
     config = load_push_config()
     logger.info(
@@ -108,6 +111,7 @@ def main() -> None:
     HEARTBEAT_PATH.unlink(missing_ok=True)
     try:
         while not stop.is_set():
+            run_due_triggers(SessionLocal)
             claim = claim_event(SessionLocal)
             if claim is not None:
                 succeeded = process_claim(SessionLocal, claim)

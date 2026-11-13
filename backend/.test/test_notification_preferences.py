@@ -136,7 +136,7 @@ def test_fallback_and_new_user_defaults_and_orm_defaults(setup):
     expected = [{
         "event_type": kind, "in_app_enabled": False,
         "push_enabled": False,
-    } for kind in KINDS]
+    } for kind in (*KINDS, "filter_trigger_matched")]
     assert client.get("/notifications/preferences").json() == expected
     for entry in expected:
         assert client.put(f"/notifications/preferences/{entry['event_type']}", json={}).json() == entry

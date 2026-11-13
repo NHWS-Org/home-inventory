@@ -18,7 +18,7 @@ interface Props<Sort extends string> {
   barcode?: 'all' | 'with' | 'without';
   onBarcode?: (value: 'all' | 'with' | 'without') => void;
   templateId?: number | '';
-  templates?: FilterTemplateListItem[];
+  templates?: ReadonlyArray<Pick<FilterTemplateListItem, 'id' | 'name'>>;
   onTemplate?: (value: number | '') => void;
   metadataSummary?: string | null;
   onClearMetadata?: () => void;
@@ -129,18 +129,16 @@ export default function MobileItemFilters<Sort extends string>(props: Props<Sort
                   {(['all', 'with', 'without'] as const).map(value => <button key={value} type="button" aria-pressed={props.barcode === value} onClick={() => props.onBarcode?.(value)} className={segment(props.barcode === value)}>{value === 'all' ? 'Tutti' : value === 'with' ? 'Con barcode' : 'Senza barcode'}</button>)}
                 </div>
               </fieldset>}
-              {props.metadataEditor && (
-                <>
-                  <label className="block text-sm font-medium">
-                    Template filtro
+              {props.templateId !== undefined && (
+                <label className="block text-sm font-medium">
+                    Filtro salvato
                     <select value={props.templateId} onChange={(event) => props.onTemplate?.(event.target.value ? Number(event.target.value) : '')} className={`${control} mt-1`}>
-                      <option value="">Nessuno</option>
+                      <option value="">Nessun filtro</option>
                       {props.templates?.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
                     </select>
-                  </label>
-                  {props.metadataEditor}
-                </>
+                </label>
               )}
+              {props.metadataEditor}
               {props.selectionActions}
               <button type="button" onClick={props.onReset} className="min-h-11 w-full rounded-xl border border-red-300 px-3 text-sm text-red-700 dark:text-red-300">Azzera filtri</button>
               <button type="button" onClick={() => setOpen(false)} className="min-h-11 w-full rounded-xl bg-blue-600 px-3 text-sm font-medium text-white">Chiudi</button>

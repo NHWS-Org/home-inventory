@@ -143,6 +143,24 @@ test('notification arrow links carry the correct unread id, including for new ta
   }
 });
 
+test('filter-trigger notifications show filter context, result count, and apply the saved filter', () => {
+  const row = {
+    id: 33, read_at: null, inventory_type: 'INVENTORY', inventory_name: 'Dispensa',
+    event: {
+      event_type: 'filter_trigger_matched', inventory_id: 8, filter_id: 13, trigger_id: 7,
+      filter_name: 'Scadenze', count: 4, scheduled_at: '2026-11-07T08:30:00+01:00',
+    },
+  };
+  assert.equal(notifications.notificationItemName(row), 'Scadenze');
+  assert.equal(notifications.notificationAction(row), '4 risultati · trigger');
+  assert.deepEqual(notifications.notificationIndicator(row), { symbol: '🔔', label: 'Risultati filtro' });
+  assert.equal(notifications.notificationDate({ ...row, created_at: '2026-11-07T10:00:00Z' }).toISOString(), '2026-11-07T07:30:00.000Z');
+  assert.equal(notifications.notificationLink(row), '/inventories/8?notification_id=33&filter_id=13');
+  row.read_at = '2026-11-07T08:31:00+01:00';
+  assert.equal(notifications.notificationLink(row), '/inventories/8?filter_id=13');
+  assert.equal(notifications.notificationLabels.filter_trigger_matched, 'Avvisi da trigger');
+});
+
 test('opening a notification marks only its own row or push event and reports failures', async () => {
   const oldAdapter = api.defaults.adapter;
   const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -222,7 +240,7 @@ test('personal change preferences never send user/session identities or request 
     });
     assert.equal(requests[0].url, '/notifications/preferences/item_quantity_changed');
     assert.deepEqual(Object.keys(notifications.notificationLabels).sort(), [
-      'inventory_updated', 'item_quantity_changed', 'item_updated',
+      'filter_trigger_matched', 'inventory_updated', 'item_quantity_changed', 'item_updated',
     ]);
     await notifications.saveNotificationPreference({
       event_type: 'item_updated', in_app_enabled: true, push_enabled: true,
@@ -230,9 +248,12 @@ test('personal change preferences never send user/session identities or request 
     await notifications.saveNotificationPreference({
       event_type: 'inventory_updated', in_app_enabled: false, push_enabled: false,
     });
+    await notifications.saveNotificationPreference({
+      event_type: 'filter_trigger_matched', in_app_enabled: true, push_enabled: false,
+    });
     assert.deepEqual(requests.map(r => r.url), [
       '/notifications/preferences/item_quantity_changed', '/notifications/preferences/item_updated',
-      '/notifications/preferences/inventory_updated',
+      '/notifications/preferences/inventory_updated', '/notifications/preferences/filter_trigger_matched',
     ]);
     api.defaults.adapter = async () => { throw new Error('access revoked'); };
     await assert.rejects(notifications.getInbox(), /access revoked/);

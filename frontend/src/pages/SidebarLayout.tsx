@@ -8,7 +8,7 @@ import { useUnreadNotifications } from '../components/useUnreadNotifications'
 import NotificationClickReader from '../components/NotificationClickReader'
 import { useAuth } from '../useAuth'
 import { getApiVersion } from '../api'
-import { FiLogOut, FiCompass, FiBox, FiCheckSquare, FiSettings, FiLogIn, FiUser, FiSun, FiMoon, FiMonitor, FiInfo } from 'react-icons/fi'
+import { FiLogOut, FiCompass, FiBox, FiCheckSquare, FiSettings, FiLogIn, FiUser, FiSun, FiMoon, FiMonitor, FiInfo, FiFilter, FiClock } from 'react-icons/fi'
 import { useBottomSheetDrag } from '../components/useBottomSheetDrag'
 
 type ThemeMode = 'light' | 'dark' | 'system'
@@ -46,6 +46,8 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             : location.pathname === '/about' ? 'About'
               : location.pathname === '/profile' ? 'Profilo'
                 : location.pathname === '/notifications' ? 'Centro notifiche'
+                  : location.pathname === '/filters' ? 'Gestione filtri'
+                    : location.pathname === '/triggers' ? 'Gestione trigger'
                 : null
 
   useEffect(() => {
@@ -178,6 +180,17 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             </NavLink>
           )}
           {user && notificationStatus.enabled && <NotificationBell {...notificationStatus} variant="desktop" navItemClass={navItemClass} />}
+          {user?.role?.name !== 'viewer' && user?.username && (
+            <div className="mt-4 border-t border-gray-600 pt-3">
+              <p className="px-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Organizzazione</p>
+              <NavLink to="/filters" className={({ isActive }) =>
+                `flex items-center gap-3 hover:text-blue-300 ${isActive ? 'bg-gradient-to-r from-blue-500 to-blue-700 text-white rounded-xl px-4 py-3' : 'px-4 py-3'}`
+              }><FiFilter className="shrink-0" /><span>Gestione filtri</span></NavLink>
+              <NavLink to="/triggers" className={({ isActive }) =>
+                `flex items-center gap-3 hover:text-blue-300 ${isActive ? 'bg-gradient-to-r from-blue-500 to-blue-700 text-white rounded-xl px-4 py-3' : 'px-4 py-3'}`
+              }><FiClock className="shrink-0" /><span>Gestione trigger</span></NavLink>
+            </div>
+          )}
           {user && user.username && user.role?.name === 'admin' && (
             <NavLink
               to="/settings"
@@ -282,6 +295,14 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                 <Link to="/profile" state={{ from: location.pathname + location.search }} onClick={closeAccount} className="flex min-h-12 items-center gap-3 rounded-xl bg-blue-50 px-4 font-medium text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
                   <FiUser aria-hidden="true" /> Gestione profilo
                 </Link>
+                {user.role?.name !== 'viewer' && <>
+                  <Link to="/filters" onClick={closeAccount} className="flex min-h-12 items-center gap-3 rounded-xl border border-gray-200 px-4 font-medium dark:border-gray-700">
+                    <FiFilter aria-hidden="true" /> Gestione filtri
+                  </Link>
+                  <Link to="/triggers" onClick={closeAccount} className="flex min-h-12 items-center gap-3 rounded-xl border border-gray-200 px-4 font-medium dark:border-gray-700">
+                    <FiClock aria-hidden="true" /> Gestione trigger
+                  </Link>
+                </>}
                 <button
                   type="button"
                   onClick={() => {
