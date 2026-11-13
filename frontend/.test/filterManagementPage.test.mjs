@@ -110,3 +110,21 @@ test('trigger editor exposes ISO weekday selections, timezone, and result-change
   assert.equal(document.querySelector('[data-weekday="7"]').getAttribute('aria-pressed'), 'false');
   await act(async () => root.render(null));
 });
+
+test('legacy auto-scope filters keep inventory-only metadata selected and show audit details', async () => {
+  const legacy = {
+    ...filter, id: 1, name: 'Senza Categoria', container_type: null, is_shared: false,
+    conditions: [{ source: 'metadata', field: 'category', definition_id: 2, operator: 'is_null', value: null, range_from: null, range_to: null }],
+    username_ins: 'alice', data_ins: '2026-04-17T12:55:50', username_mod: 'bob', data_mod: '2026-11-13T11:00:00',
+  };
+  const legacyFields = [
+    { source: 'item', field: 'name', label: 'Nome', field_type: 'TEXT', operators: ['contains', 'is_null'], container_types: ['INVENTORY', 'CHECKLIST'] },
+    { source: 'metadata', field: 'category', definition_id: 2, label: 'Categoria', field_type: 'LIST', operators: ['equals', 'is_null', 'is_not_null'], container_types: ['INVENTORY'] },
+  ];
+  await act(async () => root.render(createElement(FilterEditor, { filter: legacy, fields: legacyFields, onClose() {}, onSaved() {} })));
+  const fieldSelect = document.querySelector('[aria-label="Campo della condizione"]');
+  assert.equal(fieldSelect.selectedOptions[0]?.textContent, 'Categoria');
+  assert.equal(document.querySelector('[aria-label="Operatore"]').value, 'is_null');
+  assert.match(document.body.textContent, /Creato da alice il .* · modificato da bob il /);
+  await act(async () => root.render(null));
+});

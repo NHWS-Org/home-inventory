@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from filter_contracts import TriggerInput
 from filter_service import (
-    can_view_filter, compatible_inventories, evaluate_filter, filter_input, get_filter,
+    audit_fields, can_view_filter, compatible_inventories, evaluate_filter, filter_input, get_filter,
     is_admin, scope_preview, validate_filter, visible_inventories,
 )
 from models import (
@@ -155,7 +155,7 @@ def trigger_response(db: Session, user: User, trigger: ScheduledTrigger) -> dict
     ).order_by(TriggerRun.scheduled_at.desc()).limit(1))
     return {
         **{key: getattr(trigger, key) for key in TriggerInput.model_fields},
-        "id": trigger.id, "filter_name": template.name, "scope_preview": scope,
+        "id": trigger.id, **audit_fields(trigger), "filter_name": template.name, "scope_preview": scope,
         "can_manage": can_manage_trigger(user, trigger), "last_run_at": as_utc(trigger.last_run_at),
         "next_run_at": as_utc(next_slot(trigger, last_logical_date=last_logical_date)), "last_result_count": trigger.last_result_count,
         "last_container_count": trigger.last_container_count, "last_error": trigger.last_error,

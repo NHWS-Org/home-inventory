@@ -49,12 +49,17 @@ export interface FilterScopePreview {
   inventories: Array<{ id: number; name: string; type: FilterContainerType }>;
 }
 
-export interface FilterResponse extends FilterInput {
+export interface AuditInfo {
+  user_ins?: number | null;
+  user_mod?: number | null;
+  username_ins?: string | null;
+  username_mod?: string | null;
+  data_ins?: string | null;
+  data_mod?: string | null;
+}
+
+export interface FilterResponse extends FilterInput, AuditInfo {
   id: number;
-  user_ins: string;
-  user_mod: string;
-  data_ins: string;
-  data_mod: string;
   scope_preview: FilterScopePreview;
   trigger_count: number;
   can_manage: boolean;
@@ -82,7 +87,7 @@ export interface TriggerInput {
   notify_mode: "always" | "changed";
 }
 
-export interface TriggerResponse extends TriggerInput {
+export interface TriggerResponse extends TriggerInput, AuditInfo {
   id: number;
   filter_name: string;
   scope_preview: FilterScopePreview;

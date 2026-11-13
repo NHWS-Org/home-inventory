@@ -151,6 +151,8 @@ def test_filter_crud_catalog_permissions_and_preview(setup):
     assert response.status_code == 201, response.text
     saved = response.json()
     assert saved["can_manage"] and saved["trigger_count"] == 0
+    assert saved["username_ins"] == "owner" and saved["data_ins"]
+    assert client.get("/filters").json()[0]["username_ins"] == "owner"
     assert client.post(f"/filters/{saved['id']}/evaluate", json={}).json()["total_count"] == 1
     current[0] = 2
     assert client.get("/filters").json() == []
@@ -306,6 +308,7 @@ def test_shared_subscriptions_current_permissions_and_consent(setup):
     })
     assert response.status_code == 201, response.text
     trigger = response.json()
+    assert trigger["username_ins"] == "owner" and trigger["data_ins"]
     current[0] = 2
     assert client.get(f"/triggers/{trigger['id']}").json()["can_manage"] is False
     assert client.put(f"/triggers/{trigger['id']}/subscription", json={"enabled": True}).status_code == 200

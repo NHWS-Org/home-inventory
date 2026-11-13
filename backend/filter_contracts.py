@@ -125,6 +125,8 @@ class FilterResponse(BaseModel):
     id: int
     user_ins: int | None
     user_mod: int | None
+    username_ins: str | None = None
+    username_mod: str | None = None
     data_ins: datetime
     data_mod: datetime
     scope_preview: ScopePreview
@@ -156,6 +158,12 @@ class FilterField(BaseModel):
 
 class TriggerResponse(TriggerInput):
     id: int
+    user_ins: int | None = None
+    user_mod: int | None = None
+    username_ins: str | None = None
+    username_mod: str | None = None
+    data_ins: datetime | None = None
+    data_mod: datetime | None = None
     filter_name: str
     scope_preview: ScopePreview
     can_manage: bool

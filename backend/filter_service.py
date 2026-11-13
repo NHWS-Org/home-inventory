@@ -401,6 +401,15 @@ def evaluate_filter(
     }
 
 
+def audit_fields(row) -> dict:
+    return {
+        "user_ins": row.user_ins, "user_mod": row.user_mod,
+        "username_ins": row.user_ins_rel.username if row.user_ins_rel else None,
+        "username_mod": row.user_mod_rel.username if row.user_mod_rel else None,
+        "data_ins": row.data_ins, "data_mod": row.data_mod,
+    }
+
+
 def filter_response(db: Session, user: User, template: FilterTemplate) -> dict:
     validation_error = None
     try:
@@ -416,8 +425,6 @@ def filter_response(db: Session, user: User, template: FilterTemplate) -> dict:
         validation_error = exc.detail if isinstance(exc, HTTPException) and isinstance(exc.detail, str) else "Criteri del filtro non validi"
     count = db.query(ScheduledTrigger).filter(ScheduledTrigger.filter_id == template.id).count()
     return {
-        **values, "id": template.id, "user_ins": template.user_ins, "user_mod": template.user_mod,
-        "data_ins": template.data_ins, "data_mod": template.data_mod,
-        "scope_preview": scope, "trigger_count": count, "can_manage": can_manage_filter(user, template),
+        **values, "id": template.id, **audit_fields(template), "scope_preview": scope, "trigger_count": count, "can_manage": can_manage_filter(user, template),
         "validation_error": validation_error,
     }

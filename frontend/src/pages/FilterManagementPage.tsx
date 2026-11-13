@@ -7,7 +7,7 @@ import {
   createFilter, createTrigger, deleteFilter, deleteTrigger, FILTER_WEEKDAYS, formatWeekdays,
   getFilter, getFilterFields, getFilters, getTrigger, getTriggers, previewFilter, previewTrigger, updateFilter, updateTrigger,
   validateFilterInput,
-  type FilterCondition, type FilterEvaluation, type FilterField, type FilterInput,
+  type AuditInfo, type FilterCondition, type FilterContainerType, type FilterEvaluation, type FilterField, type FilterInput,
   type FilterOperator, type FilterResponse, type FilterValue, type TriggerInput, type TriggerResponse,
 } from "../filtersApi";
 import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
@@ -127,7 +127,7 @@ export function FilterEditor({ filter, fields, onClose, onSaved }: {
   const [name, setName] = useState(filter?.name ?? "");
   const [description, setDescription] = useState(filter?.description ?? "");
   const [shared, setShared] = useState(filter?.is_shared ?? false);
-  const [containerType, setContainerType] = useState<FilterInput["container_type"]>(filter?.container_type ?? null);
+  const [containerType, setContainerType] = useState<FilterInput["container_type"]>(filter?.container_type ?? inferContainerType(filter?.conditions ?? [], fields));
   const [matchMode, setMatchMode] = useState<"all" | "any">(filter?.match_mode ?? "all");
   const [rows, setRows] = useState<ConditionDraft[]>(filter?.conditions.length
     ? filter.conditions.map(condition => conditionFromApi(condition, fields))
@@ -256,6 +256,7 @@ export function FilterEditor({ filter, fields, onClose, onSaved }: {
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{filter ? "Filtro salvato" : "Nuovo filtro"}</p>
             <Dialog.Title className="mt-1 truncate text-xl font-bold">{filter?.name || "Definisci un filtro"}</Dialog.Title>
+            {filter && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{auditText(filter)}</p>}
           </div>
           <button type="button" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800" onClick={onClose} aria-label="Chiudi editor"><FiX /></button>
         </header>
@@ -311,6 +312,7 @@ export function FilterEditor({ filter, fields, onClose, onSaved }: {
                       <label className="block min-w-0 text-xs font-semibold text-gray-600 dark:text-gray-300">Campo · {field?.source === "metadata" ? "Metadato" : "Item"}
                         <select aria-label="Campo della condizione" className={textControl} value={field ? usableFields.indexOf(field) : ""} onChange={selectField} disabled={!usableFields.length}>
                             {!usableFields.length && <option value="">Nessun campo disponibile</option>}
+                            {usableFields.length > 0 && !field && <option value="" disabled>Campo non disponibile: sceglierne uno</option>}
                           <optgroup label="Campi item">{usableFields.map((candidate, candidateIndex) => candidate.source === "item" ? <option key={`${candidate.source}:${candidate.field}`} value={candidateIndex}>{candidate.label}</option> : null)}</optgroup>
                           <optgroup label="Metadati">{usableFields.map((candidate, candidateIndex) => candidate.source === "metadata" ? <option key={`${candidate.source}:${candidate.definition_id}`} value={candidateIndex}>{candidate.label}</option> : null)}</optgroup>
                         </select>
@@ -466,7 +468,7 @@ export function TriggerEditor({ trigger, filters, defaultFilterId, onClose, onSa
       <Dialog.Panel style={{ transform: `translateY(${drag.offset}px)`, transition: drag.isDragging ? "none" : "transform 220ms ease-out" }} className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl bg-white text-gray-900 shadow-2xl dark:bg-gray-900 dark:text-white md:h-full md:max-h-none md:max-w-[600px] md:rounded-none md:rounded-l-2xl">
         <button type="button" aria-label="Chiudi o trascina verso il basso" {...drag.gripProps} className="mx-auto mt-3 flex h-11 w-16 shrink-0 touch-none items-center justify-center md:hidden"><span className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" /></button>
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-700 md:px-7">
-          <div><p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{trigger ? "Pianificazione salvata" : "Nuovo trigger"}</p><Dialog.Title className="mt-1 text-xl font-bold">{trigger?.name || "Definisci un trigger"}</Dialog.Title></div>
+          <div><p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{trigger ? "Pianificazione salvata" : "Nuovo trigger"}</p><Dialog.Title className="mt-1 text-xl font-bold">{trigger?.name || "Definisci un trigger"}</Dialog.Title>{trigger && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{auditText(trigger)}</p>}</div>
           <button type="button" className="grid h-11 w-11 place-items-center rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800" onClick={onClose} aria-label="Chiudi editor"><FiX /></button>
         </header>
         <form onSubmit={save} className="flex min-h-0 flex-1 flex-col">
@@ -611,13 +613,13 @@ export default function FilterManagementPage() {
       </div>
       {loading && <p role="status" className="p-6 text-center text-sm text-gray-500">Caricamento…</p>}
       {!loading && section === "filters" && (matchingFilters.length ? matchingFilters.map(filter => <article key={filter.id} className="grid gap-3 border-b border-gray-200 p-4 last:border-0 dark:border-gray-700 xl:grid-cols-[minmax(0,1fr)_180px_170px_52px] xl:items-center xl:gap-4 xl:px-5">
-        <div className="min-w-0"><button type="button" onClick={() => void openFilter(filter.id)} className="min-h-11 max-w-full break-words text-left font-semibold text-blue-700 hover:underline dark:text-blue-300">{filter.name}</button><p className="break-words text-sm text-gray-600 dark:text-gray-300">{filter.description || summarizeConditions(filter.conditions, fields)}</p><div className="mt-2 flex flex-wrap gap-1.5"><span className="rounded-md bg-gray-100 px-2 py-1 text-xs dark:bg-gray-800">{filter.conditions.length} {filter.conditions.length === 1 ? "condizione" : "condizioni"} · {filter.match_mode === "all" ? "Tutte" : "Almeno una"}</span><span className={`rounded-md px-2 py-1 text-xs ${filter.is_shared ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-100" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>{filter.is_shared ? "Condiviso" : "Privato"}</span></div></div>
+        <div className="min-w-0"><button type="button" onClick={() => void openFilter(filter.id)} className="min-h-11 max-w-full break-words text-left font-semibold text-blue-700 hover:underline dark:text-blue-300">{filter.name}</button><p className="break-words text-sm text-gray-600 dark:text-gray-300">{filter.description || summarizeConditions(filter.conditions, fields)}</p><div className="mt-2 flex flex-wrap gap-1.5"><span className="rounded-md bg-gray-100 px-2 py-1 text-xs dark:bg-gray-800">{filter.conditions.length} {filter.conditions.length === 1 ? "condizione" : "condizioni"} · {filter.match_mode === "all" ? "Tutte" : "Almeno una"}</span><span className={`rounded-md px-2 py-1 text-xs ${filter.is_shared ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-100" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>{filter.is_shared ? "Condiviso" : "Privato"}</span></div><p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{auditText(filter)}</p></div>
         <div className="space-y-2"><p className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300"><FiBox aria-hidden="true" className="shrink-0" />{filter.scope_preview.summary}</p>{filter.validation_error && <p role="alert" className="break-words text-sm text-amber-800 dark:text-amber-200">Filtro non valido: {filter.validation_error}</p>}</div>
         <div className="flex flex-wrap items-center gap-1 text-sm">{filter.trigger_count ? <span>{filter.trigger_count} trigger associati</span> : <span className="text-gray-500">Nessun trigger</span>}{canManage && !filter.validation_error && filter.conditions.length > 0 && <button type="button" onClick={() => { setNewTriggerFilterId(filter.id); setEditTrigger(null); }} className="min-h-11 rounded-lg px-2 text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950">+ Associa</button>}</div>
         <button type="button" onClick={() => void openFilter(filter.id)} disabled={!filter.can_manage} className={`${button} justify-self-end`} aria-label={`Modifica filtro ${filter.name}`} title={filter.can_manage ? "Modifica filtro" : "Sola lettura"}><FiInfo /></button>
       </article>) : <p className="p-8 text-center text-sm text-gray-500">Nessun filtro corrispondente.</p>)}
       {!loading && section === "triggers" && (matchingTriggers.length ? matchingTriggers.map(trigger => <article key={trigger.id} className="grid gap-3 border-b border-gray-200 p-4 last:border-0 dark:border-gray-700 xl:grid-cols-[minmax(0,1fr)_170px_170px_105px] xl:items-center xl:gap-4 xl:px-5">
-        <div className="min-w-0"><button type="button" disabled={!trigger.can_manage} onClick={() => void openTrigger(trigger.id)} className="min-h-11 max-w-full break-words text-left font-semibold text-blue-700 hover:underline disabled:cursor-default disabled:no-underline dark:text-blue-300">{trigger.name}</button><p className="text-sm text-gray-600 dark:text-gray-300"><FiFilter className="mr-1 inline" />{trigger.filter_name}</p><div className="mt-2 flex flex-wrap gap-1.5"><span className={`rounded-md px-2 py-1 text-xs ${trigger.enabled ? "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>{trigger.enabled ? "Attivo" : "In pausa"}</span><span className="rounded-md bg-gray-100 px-2 py-1 text-xs dark:bg-gray-800">Temporale</span></div></div>
+        <div className="min-w-0"><button type="button" disabled={!trigger.can_manage} onClick={() => void openTrigger(trigger.id)} className="min-h-11 max-w-full break-words text-left font-semibold text-blue-700 hover:underline disabled:cursor-default disabled:no-underline dark:text-blue-300">{trigger.name}</button><p className="text-sm text-gray-600 dark:text-gray-300"><FiFilter className="mr-1 inline" />{trigger.filter_name}</p><div className="mt-2 flex flex-wrap gap-1.5"><span className={`rounded-md px-2 py-1 text-xs ${trigger.enabled ? "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>{trigger.enabled ? "Attivo" : "In pausa"}</span><span className="rounded-md bg-gray-100 px-2 py-1 text-xs dark:bg-gray-800">Temporale</span></div><p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{auditText(trigger)}</p></div>
         <div><p className="font-semibold">{trigger.time}</p><p className="text-xs text-gray-500">{formatWeekdays(trigger.weekdays)} · {trigger.timezone}</p></div>
         <div className="text-xs text-gray-600 dark:text-gray-300">{trigger.last_error ? <span className="text-red-700 dark:text-red-300">{trigger.last_error}</span> : trigger.last_run_at ? <><p>{new Date(trigger.last_run_at).toLocaleString()}</p><b>{trigger.last_container_count ?? 0} contenitori · {trigger.last_result_count ?? 0} righe</b></> : "Nessuna esecuzione"}</div>
         <div className="flex items-center justify-end gap-1"><button type="button" role="switch" aria-checked={trigger.enabled} disabled={!trigger.can_manage} aria-label={`${trigger.enabled ? "Disattiva" : "Attiva"} ${trigger.name}`} onClick={async () => {
@@ -632,13 +634,33 @@ export default function FilterManagementPage() {
   </main>;
 }
 
+function inferContainerType(conditions: FilterCondition[], fields: FilterField[]): FilterInput["container_type"] {
+  // Legacy/auto filters store null ("compatible containers"); show the only type their fields support.
+  let types: FilterContainerType[] | null = null;
+  for (const condition of conditions) {
+    const field = fields.find(item => item.source === condition.source && item.field === condition.field
+      && (item.definition_id ?? null) === (condition.definition_id ?? null));
+    if (!field) return null;
+    types = types ? types.filter(type => field.container_types.includes(type)) : [...field.container_types];
+  }
+  return types?.length === 1 ? types[0] : null;
+}
+
+function auditText(row: AuditInfo): string {
+  const when = (value?: string | null) => value ? new Date(value).toLocaleString() : "";
+  const created = `Creato${row.username_ins ? ` da ${row.username_ins}` : ""}${row.data_ins ? ` il ${when(row.data_ins)}` : ""}`;
+  const modified = row.data_mod && row.data_ins && Math.abs(Date.parse(row.data_mod) - Date.parse(row.data_ins)) > 1000
+    ? ` · modificato${row.username_mod ? ` da ${row.username_mod}` : ""} il ${when(row.data_mod)}`
+    : "";
+  return created + modified;
+}
+
 function summarizeConditions(conditions: FilterCondition[], fields: FilterField[]): string {
   if (!conditions.length) return "Filtro legacy non valido: aggiorna le condizioni.";
   return conditions.map(condition => {
     const field = fields.find(item => item.field === condition.field && item.source === condition.source && item.definition_id === condition.definition_id);
-    const value = condition.operator === "is_null" ? "non impostato"
-      : condition.operator === "is_not_null" ? "impostato"
-        : condition.operator === "between"
+    const value = condition.operator === "is_null" || condition.operator === "is_not_null" ? ""
+      : condition.operator === "between"
           ? `${formatValue(condition.range_from)} – ${formatValue(condition.range_to)}`
           : formatValue(condition.value);
     return `${field?.label ?? condition.field} ${operatorLabel(condition.operator).toLowerCase()} ${value}`.trim();
