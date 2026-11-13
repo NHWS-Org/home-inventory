@@ -1271,7 +1271,6 @@ useEffect(() => {
                 setMetadataFilterSummary(null);
                 window.history.replaceState(null, '', location.pathname);
               }}
-              metadataEditor={canEdit ? <Link to="/filters" className="flex min-h-11 items-center justify-center rounded-xl border border-gray-300 text-sm text-blue-700 dark:border-gray-600 dark:text-blue-300">Gestisci filtri salvati</Link> : undefined}
             />
           )}
           {filterApplyError && <p role="alert" className="mb-2 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">{filterApplyError}</p>}
@@ -1490,11 +1489,6 @@ useEffect(() => {
             <span className="inline md:hidden">📥</span>
             <span className="hidden md:inline">📥 Da inventario</span>
           </button>
-        )}
-        {(isInventory || isChecklist) && canEdit && (
-          <Link to="/filters" aria-label="Gestisci filtri salvati" title="Gestisci filtri salvati" className="flex h-10 min-w-12 items-center justify-center rounded-xl border border-gray-300 px-3 text-blue-700 dark:border-gray-600 dark:text-blue-300">
-            <span className="inline md:hidden">⚙️</span><span className="hidden md:inline">Gestisci filtri</span>
-          </Link>
         )}
         {(isInventory || isChecklist) && canEdit && (
           <button
