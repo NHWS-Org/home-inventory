@@ -81,6 +81,8 @@ METADATA_FIELD_TYPE_SPECS: Final[dict[MetadataFieldType, MetadataFieldTypeSpec]]
             MetadataFilterOperator.LESS_THAN,
             MetadataFilterOperator.LESS_THAN_OR_EQUAL,
             MetadataFilterOperator.BETWEEN,
+            MetadataFilterOperator.IS_NULL,
+            MetadataFilterOperator.IS_NOT_NULL,
         ),
     ),
     MetadataFieldType.BOOLEAN: MetadataFieldTypeSpec(
@@ -89,6 +91,8 @@ METADATA_FIELD_TYPE_SPECS: Final[dict[MetadataFieldType, MetadataFieldTypeSpec]]
         supported_filter_operators=(
             MetadataFilterOperator.EQUALS,
             MetadataFilterOperator.NOT_EQUALS,
+            MetadataFilterOperator.IS_NULL,
+            MetadataFilterOperator.IS_NOT_NULL,
         ),
     ),
     MetadataFieldType.DATE: MetadataFieldTypeSpec(
@@ -102,6 +106,8 @@ METADATA_FIELD_TYPE_SPECS: Final[dict[MetadataFieldType, MetadataFieldTypeSpec]]
             MetadataFilterOperator.LESS_THAN,
             MetadataFilterOperator.LESS_THAN_OR_EQUAL,
             MetadataFilterOperator.BETWEEN,
+            MetadataFilterOperator.IS_NULL,
+            MetadataFilterOperator.IS_NOT_NULL,
         ),
     ),
     MetadataFieldType.LIST: MetadataFieldTypeSpec(

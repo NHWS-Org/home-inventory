@@ -16,6 +16,7 @@ from metadata_model import (
     get_value_column_for_type,
 )
 from models import Inventory, Item, ItemMetadataValue, MetadataDefinition, MetadataDefinitionAssignment, RoleEnum, User
+from notification_service import emit_item_updated
 from routes.auth import get_current_user
 from routes.item import _snapshot_item, _write_item_version
 from routes.inventory import can_access_inventory
@@ -408,6 +409,39 @@ def _touch_item_for_metadata_change(
         merge_quantity_updates=False,
         extra_diff={"metadata": metadata_changes},
     )
+
+
+def _metadata_schema_state(db: Session) -> dict[int, tuple]:
+    """Capture effective shared metadata, not audit timestamps or redundant scopes."""
+    result = {}
+    for item in db.query(Item).all():
+        definitions = _resolve_applicable_definitions(db, item.inventory)
+        schema = tuple(sorted(
+            (definition.id, definition.key, definition.label, definition.description,
+             definition.field_type, repr(definition.list_options), definition.sort_order,
+             definition.is_required)
+            for definition in definitions
+        ))
+        values = tuple(
+            (value.definition_id, repr(_snapshot_metadata_value(value)),
+             value.definition.key, value.definition.label, value.definition.field_type,
+             repr(value.definition.list_options))
+            for value in db.query(ItemMetadataValue).filter(
+                ItemMetadataValue.item_id == item.id,
+            ).order_by(ItemMetadataValue.definition_id).all()
+        )
+        result[item.id] = (schema, values)
+    return result
+
+
+def _notify_metadata_schema_change(db: Session, before: dict[int, tuple], user: User) -> None:
+    db.flush()
+    after = _metadata_schema_state(db)
+    for item_id, state in before.items():
+        if after.get(item_id) != state:
+            item = db.get(Item, item_id)
+            if item is not None:
+                emit_item_updated(db, item, ["metadata"], user.id)
 
 
 # ---------------------------------------------------------------------------
@@ -823,9 +857,11 @@ def update_metadata_definition(
             MetadataDefinition.id != definition_id,
         ).first():
             raise HTTPException(status_code=409, detail="Chiave metadato già esistente")
+    before = _metadata_schema_state(db)
     for field, value in updates.items():
         setattr(definition, field, value)
     definition.user_mod = user.id
+    _notify_metadata_schema_change(db, before, user)
     db.commit()
     db.refresh(definition)
     return definition
@@ -839,7 +875,9 @@ def delete_metadata_definition(
 ):
     _require_admin(user)
     definition = _get_definition_or_404(db, definition_id)
+    before = _metadata_schema_state(db)
     db.delete(definition)
+    _notify_metadata_schema_change(db, before, user)
     db.commit()
     return {"detail": "Definizione metadato eliminata"}
 
@@ -891,6 +929,7 @@ def create_metadata_assignment(
     if dup_q.first():
         raise HTTPException(status_code=409, detail="Assegnazione già presente per questo scope")
 
+    before = _metadata_schema_state(db)
     assignment = MetadataDefinitionAssignment(
         definition_id=definition_id,
         scope=payload.scope.value,
@@ -900,6 +939,7 @@ def create_metadata_assignment(
         user_mod=user.id,
     )
     db.add(assignment)
+    _notify_metadata_schema_change(db, before, user)
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -922,7 +962,9 @@ def delete_metadata_assignment(
             raise HTTPException(status_code=403, detail="Accesso negato")
     else:
         _require_admin(user)
+    before = _metadata_schema_state(db)
     db.delete(assignment)
+    _notify_metadata_schema_change(db, before, user)
     db.commit()
     return {"detail": "Assegnazione metadato eliminata"}
 
@@ -1094,22 +1136,15 @@ def delete_item_metadata_value(
     return {"detail": "Valore metadato eliminato"}
 
 
-@router.put("/values/bulk-upsert", response_model=List[ItemMetadataValueResponse])
-def bulk_upsert_item_metadata_values(
-    payload: ItemMetadataBulkUpsertRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    item = _get_item_or_404(db, payload.item_id)
-    inventory = _get_inventory_or_404(db, item.inventory_id)
-    if not can_access_inventory(user, inventory, action="edit"):
-        raise HTTPException(status_code=403, detail="Accesso negato")
+def _upsert_metadata_values(
+    db: Session, item: Item, inventory: Inventory, user: User, values: list[ItemMetadataValueUpsert],
+) -> tuple[list[ItemMetadataValueResponse], list[dict[str, Any]]]:
     definitions = {
         cast(int, d.id): d for d in _resolve_applicable_definitions(db, inventory, include_inactive=True)
     }
     result: List[ItemMetadataValueResponse] = []
     metadata_changes: list[dict[str, Any]] = []
-    for entry in payload.values:
+    for entry in values:
         definition = definitions.get(entry.definition_id)
         if not definition:
             raise HTTPException(
@@ -1146,6 +1181,20 @@ def bulk_upsert_item_metadata_values(
                 "to": after_value,
             })
         result.append(_to_value_response(value, definition))
+    return result, metadata_changes
+
+
+@router.put("/values/bulk-upsert", response_model=List[ItemMetadataValueResponse])
+def bulk_upsert_item_metadata_values(
+    payload: ItemMetadataBulkUpsertRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    item = _get_item_or_404(db, payload.item_id)
+    inventory = _get_inventory_or_404(db, item.inventory_id)
+    if not can_access_inventory(user, inventory, action="edit"):
+        raise HTTPException(status_code=403, detail="Accesso negato")
+    result, metadata_changes = _upsert_metadata_values(db, item, inventory, user, payload.values)
     _touch_item_for_metadata_change(db, item, inventory, user, metadata_changes)
     db.commit()
     return result

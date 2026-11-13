@@ -134,6 +134,7 @@ class ItemBase(BaseModel):
 
 class ItemCreate(ItemBase):
     barcodes: List['ItemBarcodeCreate'] = []
+    metadata_values: List['ItemMetadataValueUpsert'] = Field(default_factory=list)
 
 class ItemUpdate(BaseModel):
     name: Optional[str]
@@ -228,7 +229,6 @@ class ItemResponse(ItemBase, LoggingResponse):
         from_attributes = True
 
 ItemBase.model_rebuild()
-ItemCreate.model_rebuild()
 ItemUpdate.model_rebuild()
 ItemDelete.model_rebuild()
 
@@ -485,6 +485,7 @@ ItemMetadataValueUpdate.model_rebuild()
 ItemMetadataValueResponse.model_rebuild()
 ItemMetadataValueUpsert.model_rebuild()
 ItemMetadataBulkUpsertRequest.model_rebuild()
+ItemCreate.model_rebuild()
 ItemResponse.model_rebuild()
 
 

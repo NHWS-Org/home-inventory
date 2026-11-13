@@ -56,6 +56,9 @@ DB_COMPATIBILITY_MATRIX: dict[tuple[str, str], dict[str, str]] = {
 }
 
 CORE_RESTORE_TABLES = {
+    "scheduled_triggers",
+    "trigger_runs",
+    "trigger_subscriptions",
     "shared_inventories",
     "shared_inventory_groups",
     "item_versions",
@@ -74,6 +77,9 @@ CORE_RESTORE_TABLES = {
 }
 
 RESTORE_DELETE_ORDER = [
+    "trigger_runs",
+    "trigger_subscriptions",
+    "scheduled_triggers",
     "shared_inventories",
     "shared_inventory_groups",
     "list_assignments",
@@ -110,6 +116,9 @@ RESTORE_INSERT_ORDER = [
     "inventory_versions",
     "filter_templates",
     "settings",
+    "scheduled_triggers",
+    "trigger_runs",
+    "trigger_subscriptions",
 ]
 
 
@@ -433,7 +442,6 @@ def _restore_backup_rows(
     _safe_delete_table(db, "push_subscriptions")
     _safe_delete_table(db, "notifications")
     _safe_delete_table(db, "notification_events")
-    _safe_delete_table(db, "notification_rules")
     selected_tables = set(CORE_RESTORE_TABLES) | {"users"}
     overwrite_roles = payload.mode == "advanced" and payload.overwrite_users_roles
     if overwrite_roles:

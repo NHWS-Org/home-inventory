@@ -1,9 +1,92 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cleanupDeviceSessions, getDeviceSessions, getUserInfo, revokeDeviceSession, updateMe, type DeviceSession } from "../api";
 import { Link, useLocation } from "react-router-dom";
+import { FiAlertCircle, FiCheckCircle, FiChevronDown, FiClock, FiSlash } from "react-icons/fi";
 import PushNotificationsPanel from "../components/PushNotificationsPanel";
-import { disablePushForBrowser } from "../utils/pushNotifications";
+import NotificationPreferences from "../components/NotificationPreferences";
+import { disablePushForBrowser, type PushBrowserState } from "../utils/pushNotifications";
+import { SESSION_RENEWED } from "../utils/sessionRenewal";
 import { useAuth } from "../useAuth";
+
+import { useDesktopLayout } from "../useDesktopLayout";
+
+type ProfileTab = "personal" | "password" | "push" | "notifications" | "devices";
+
+function ProfileSection({ title, headingId, badge, children, sectionId, desktop, active }: {
+  title: string;
+  headingId?: string;
+  badge?: ReactNode;
+  children: ReactNode;
+  sectionId: ProfileTab;
+  desktop: boolean;
+  active: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      id={`profile-panel-${sectionId}`}
+      role={desktop ? "tabpanel" : undefined}
+      aria-labelledby={desktop ? `profile-tab-${sectionId}` : undefined}
+      hidden={desktop && !active}
+      tabIndex={desktop ? 0 : undefined}
+      className="min-w-0 focus-visible:outline-2 focus-visible:outline-blue-500"
+    >
+      <details
+        className={desktop ? "group" : "group rounded-xl border border-gray-200 dark:border-gray-700"}
+        open={desktop || expanded}
+        onToggle={event => { if (!desktop) setExpanded(event.currentTarget.open); }}
+      >
+        <summary hidden={desktop} className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-blue-500 dark:hover:bg-gray-800">
+          <h2 id={desktop ? undefined : headingId} className="text-base font-bold">{title}</h2>
+          <span className="flex shrink-0 items-center gap-3">
+            {badge}
+            <FiChevronDown aria-hidden="true" className="transition-transform group-open:rotate-180" />
+          </span>
+        </summary>
+        <div className={desktop ? "space-y-4" : "space-y-4 border-t border-gray-200 p-4 dark:border-gray-700"}>
+          {desktop && <h2 id={headingId} className="text-lg font-bold">{title}</h2>}
+          {children}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+export function PushStatusBadge({ state }: { state: PushBrowserState }) {
+  const active = state === "active";
+  const checking = state === "checking";
+  const error = state === "error";
+  const label = checking ? "Verifica notifiche push in corso"
+    : error ? "Stato notifiche push non disponibile"
+    : active ? "Notifiche push attive su questo browser"
+    : "Notifiche push non attive su questo browser";
+  const Icon = checking ? FiClock : error ? FiAlertCircle : active ? FiCheckCircle : FiSlash;
+  return (
+    <span role="status" title={label} className={
+      error ? "text-amber-700 dark:text-amber-400"
+        : active ? "text-green-700 dark:text-green-400" : "text-gray-500 dark:text-gray-400"
+    }>
+      <Icon aria-hidden="true" className="h-5 w-5" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+export function DeviceCountBadge({ status, sessions }: {
+  status: "loading" | "ready" | "error";
+  sessions: DeviceSession[];
+}) {
+  const count = sessions.filter((session) => !session.revoked_at && !session.is_expired).length;
+  const label = status === "loading" ? "Verifica dispositivi in corso"
+    : status === "error" ? "Numero dispositivi non disponibile"
+    : `${count} ${count === 1 ? "sessione attiva" : "sessioni attive"}`;
+  return (
+    <span role="status" title={label} className="inline-flex min-w-7 items-center justify-center rounded-full bg-gray-100 px-2 py-0.5 text-sm font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+      <span aria-hidden="true">{status === "ready" ? count : status === "loading" ? "…" : "!"}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
 
 const ProfilePage = () => {
   const { user } = useAuth();
@@ -27,8 +110,36 @@ const ProfilePage = () => {
   const [sessionMessage, setSessionMessage] = useState("");
   const [sessionNotice, setSessionNotice] = useState("");
   const [sessionsBusy, setSessionsBusy] = useState(false);
+  const [sessionsStatus, setSessionsStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [pushState, setPushState] = useState<PushBrowserState>("checking");
+  const desktop = useDesktopLayout();
+  const [activeTab, setActiveTab] = useState<ProfileTab>("personal");
+  const sessionsRequest = useRef(0);
 
   const emailInputRef = useRef<HTMLInputElement | null>(null);
+  const tabs = ([
+    { id: "personal", title: "Dati Anagrafici", badge: null },
+    { id: "password", title: "Cambia Password", badge: null },
+    { id: "push", title: "Attivazione notifiche push", badge: <PushStatusBadge state={pushState} /> },
+    { id: "notifications", title: "Preferenze notifiche", badge: null },
+    { id: "devices", title: "Dispositivi connessi", badge: <DeviceCountBadge status={sessionsStatus} sessions={deviceSessions} /> },
+  ] satisfies { id: ProfileTab; title: string; badge: ReactNode }[])
+    .filter(tab => tab.id !== "push" || user?.role?.name !== "viewer");
+  const selectedTab = tabs.some(tab => tab.id === activeTab) ? activeTab : "personal";
+
+  function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight": next = (index + 1) % tabs.length; break;
+      case "ArrowLeft": next = (index + tabs.length - 1) % tabs.length; break;
+      case "Home": next = 0; break;
+      case "End": next = tabs.length - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    setActiveTab(tabs[next].id);
+    document.getElementById(`profile-tab-${tabs[next].id}`)?.focus();
+  }
 
   useEffect(() => {
     getUserInfo()
@@ -47,11 +158,32 @@ const ProfilePage = () => {
       });
   }, []);
 
-  useEffect(() => {
-    getDeviceSessions()
-      .then(setDeviceSessions)
-      .catch(() => setSessionMessage("Errore nel recupero dei dispositivi."));
+  const refreshSessions = useCallback(async () => {
+    const request = ++sessionsRequest.current;
+    try {
+      const sessions = await getDeviceSessions();
+      if (request === sessionsRequest.current) {
+        setDeviceSessions(sessions);
+        setSessionsStatus("ready");
+      }
+    } catch {
+      if (request === sessionsRequest.current) setSessionsStatus("error");
+    }
   }, []);
+
+  useEffect(() => {
+    const requestRef = sessionsRequest;
+    refreshSessions();
+    window.addEventListener(SESSION_RENEWED, refreshSessions);
+    window.addEventListener("focus", refreshSessions);
+    const timer = window.setInterval(refreshSessions, 60_000);
+    return () => {
+      requestRef.current++;
+      window.clearInterval(timer);
+      window.removeEventListener(SESSION_RENEWED, refreshSessions);
+      window.removeEventListener("focus", refreshSessions);
+    };
+  }, [refreshSessions]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -188,6 +320,7 @@ const ProfilePage = () => {
         await disablePushForBrowser(user.username);
       }
       await revokeDeviceSession(session.id);
+      sessionsRequest.current++;
       if (session.is_current) {
         localStorage.removeItem("access_token");
         window.location.assign("/login");
@@ -198,6 +331,7 @@ const ProfilePage = () => {
           item.id === session.id ? { ...item, revoked_at: new Date().toISOString() } : item
         )
       );
+      void refreshSessions();
     } catch {
       setSessionMessage("Errore nella disconnessione del dispositivo.");
     } finally {
@@ -213,11 +347,7 @@ const ProfilePage = () => {
     try {
       const deleted = await cleanupDeviceSessions();
       setSessionNotice(`Sessioni eliminate: ${deleted}. I dispositivi attivi restano connessi.`);
-      try {
-        setDeviceSessions(await getDeviceSessions());
-      } catch {
-        setSessionMessage("Pulizia completata, ma aggiornamento elenco non riuscito. Ricaricare la pagina.");
-      }
+      await refreshSessions();
     } catch {
       setSessionMessage("Pulizia delle sessioni non riuscita. Riprovare.");
     } finally {
@@ -226,12 +356,35 @@ const ProfilePage = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-8 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-8">
+    <div className="w-full min-w-0 max-w-md mx-auto mt-4 p-4 bg-white dark:bg-gray-900 dark:text-white shadow-md rounded space-y-3 md:max-w-full md:mx-0 md:mt-0 md:shadow-none md:rounded-none">
       <Link to={returnPath} className="inline-flex min-h-11 items-center rounded-xl bg-gray-100 px-4 font-medium text-blue-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-blue-300 dark:hover:bg-gray-700">
         ← Torna indietro
       </Link>
-      <div>
-        <h2 className="text-xl font-bold mb-4">Dati Anagrafici</h2>
+      {desktop && (
+        <div role="tablist" aria-label="Sezioni profilo" className="sticky top-0 z-10 mb-4 flex flex-wrap gap-2 border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+          {tabs.map((tab, index) => (
+            <button
+              key={tab.id}
+              id={`profile-tab-${tab.id}`}
+              type="button"
+              role="tab"
+              aria-selected={selectedTab === tab.id}
+              aria-controls={`profile-panel-${tab.id}`}
+              tabIndex={selectedTab === tab.id ? 0 : -1}
+              onClick={() => setActiveTab(tab.id)}
+              onKeyDown={event => navigateTabs(event, index)}
+              className={`flex min-h-11 items-center gap-2 px-4 py-2 transition-colors focus-visible:outline-2 focus-visible:outline-blue-500 ${
+                selectedTab === tab.id
+                  ? "border-b-2 border-blue-500 font-semibold text-blue-600 dark:border-blue-400 dark:text-blue-400"
+                  : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+            >
+              {tab.title}{tab.badge}
+            </button>
+          ))}
+        </div>
+      )}
+      <ProfileSection title="Dati Anagrafici" sectionId="personal" desktop={desktop} active={selectedTab === "personal"}>
         <form onSubmit={handleProfileSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-100">Email</label>
@@ -275,10 +428,9 @@ const ProfilePage = () => {
             {message} (chiude tra {messageCountdown}s)
           </p>
         )}
-      </div>
+      </ProfileSection>
 
-      <div>
-        <h2 className="text-xl font-bold mb-4">Cambia Password</h2>
+      <ProfileSection title="Cambia Password" sectionId="password" desktop={desktop} active={selectedTab === "password"}>
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-100">Nuova Password</label>
@@ -334,14 +486,16 @@ const ProfilePage = () => {
             {passwordMessage} (chiude tra {passwordCountdown}s)
           </p>
         )}
-      </div>
+      </ProfileSection>
 
-      <section>
-        <PushNotificationsPanel />
-      </section>
+      {user?.role?.name === "viewer"
+        ? <ProfileSection title="Preferenze notifiche" sectionId="notifications" desktop={desktop} active={selectedTab === "notifications"}><p className="text-sm">Le notifiche delle modifiche sono riservate a chi può modificare inventari e liste. Gli utenti con sola lettura non le ricevono.</p></ProfileSection>
+        : <>
+            <ProfileSection title="Attivazione notifiche push" sectionId="push" desktop={desktop} active={selectedTab === "push"} headingId="profile-push-heading" badge={<PushStatusBadge state={pushState} />}><PushNotificationsPanel state={pushState} setState={setPushState} /></ProfileSection>
+            <ProfileSection title="Preferenze notifiche" sectionId="notifications" desktop={desktop} active={selectedTab === "notifications"} headingId="notification-preferences-heading"><NotificationPreferences /></ProfileSection>
+          </>}
 
-      <section>
-        <h2 id="profile-devices-heading" className="text-xl font-bold mb-4">Dispositivi connessi</h2>
+      <ProfileSection title="Dispositivi connessi" sectionId="devices" desktop={desktop} active={selectedTab === "devices"} headingId="profile-devices-heading" badge={<DeviceCountBadge status={sessionsStatus} sessions={deviceSessions} />}>
         <p className="mb-2 text-sm">Elimina subito solo le tue sessioni scadute o disconnesse, senza disconnettere i dispositivi attivi.</p>
         <button type="button" onClick={handleCleanupSessions} disabled={sessionsBusy}
           className="mb-3 min-h-11 rounded border px-3 py-2 text-sm disabled:opacity-50">
@@ -349,7 +503,15 @@ const ProfilePage = () => {
         </button>
         {sessionNotice && <p role="status" className="mb-3 text-sm">{sessionNotice}</p>}
         {sessionMessage && <p role="alert" className="mb-3 text-sm text-red-600">{sessionMessage}</p>}
-        {deviceSessions.length === 0 ? (
+        {sessionsStatus === "error" && (
+          <div className="mb-3 text-sm">
+            <p role="alert" className="text-red-600">Errore nel recupero dei dispositivi.</p>
+            <button type="button" onClick={() => void refreshSessions()} className="min-h-11 rounded border px-3">Riprova</button>
+          </div>
+        )}
+        {sessionsStatus === "loading" ? (
+          <p role="status" className="text-sm">Caricamento dispositivi...</p>
+        ) : sessionsStatus === "error" ? null : deviceSessions.length === 0 ? (
           <p className="text-sm text-gray-600 dark:text-gray-300">Nessun dispositivo registrato.</p>
         ) : (
           <ul aria-labelledby="profile-devices-heading" tabIndex={0}
@@ -392,7 +554,7 @@ const ProfilePage = () => {
             })}
           </ul>
         )}
-      </section>
+      </ProfileSection>
     </div>
   );
 };

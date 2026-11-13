@@ -20,9 +20,97 @@ Per avviare il progetto con Docker, clona questo repository ed esegui:
 docker-compose up --build -d
 ```
 
-- API backend: <http://localhost:3000/api>
-- Frontend: <http://localhost:3000>
+- API backend: <https://localhost/api>
+- Frontend: <https://localhost>
 - Credenziali predefinite: `admin` / `12345`
+
+La homepage mostra agli utenti autenticati gli inventari e le liste accessibili
+piu recenti. Il limite `UI_RECENT_ITEMS_LIMIT` e configurato dall'admin; gli
+altri utenti possono leggerne solo il valore necessario alla homepage.
+
+### HTTPS e certificati frontend
+
+Nginx espone HTTP sulla porta 80 solo per il redirect permanente (308) verso
+HTTPS sulla porta 443, conservando percorso e query string.
+Entrambi i Compose pubblicano di default le porte host 80 e 443, modificabili
+con `FRONTEND_HTTP_PORT` e `FRONTEND_PORT`. Un eventuale `FRONTEND_PORT=3000`
+gia configurato resta valido: il redirect punta a HTTPS sulla porta 3000.
+I reverse proxy devono collegarsi alla porta HTTPS, non alla porta HTTP di
+redirect, per evitare cicli. La connessione al backend nella rete Docker resta HTTP.
+HTTP e HTTPS sono origini browser diverse: occorre accedere nuovamente e
+riattivare le notifiche push su ciascun dispositivo dopo il passaggio a HTTPS.
+
+Di default viene creata una **CA privata locale**, persistita nel volume Docker
+`frontendtls`, che firma un certificato server valido per `localhost`,
+`127.0.0.1` e `::1`. Per accedere da altri dispositivi impostare nel `.env`
+privato root o nella shell, prima di creare il container:
+
+```dotenv
+TLS_HOSTS=192.168.1.10,inventario.example.com
+FRONTEND_HTTP_PORT=80
+FRONTEND_PORT=443
+```
+
+Indicare gli IP e/o nomi DNS effettivamente usati dai browser, separati da
+virgole, senza schema o porta. Il nome deve risolvere verso il server e l'IP
+deve restare stabile; per un IPv6 nell'URL usare le parentesi, ad esempio
+`https://[::1]:3000`. Un certificato per un nome non copre automaticamente
+l'IP o altri nomi. Ricreare il frontend dopo una modifica a `TLS_HOSTS`: la
+CA rimane uguale e il certificato server viene rigenerato. La CA dura 10 anni;
+il certificato server dura 365 giorni e viene rinnovato automaticamente a
+meno di 30 giorni dalla scadenza, con controllo ogni 12 ore e riavvio a caldo
+di Nginx. Un container fermo rinnova al successivo avvio. Se il rinnovo fallisce
+il messaggio compare nei log e viene riprovato. Una CA prossima alla scadenza
+richiede sostituzione manuale e nuova installazione della fiducia.
+
+**La CA locale non è attendibile automaticamente**: senza installarla e
+abilitarne esplicitamente la fiducia su ogni dispositivo, il browser mostrerà
+un avviso e le funzioni che richiedono un contesto sicuro, come Web Push,
+potrebbero non funzionare. Esportare solo il certificato pubblico:
+
+```bash
+docker cp inventory-frontend:/var/lib/frontend-tls/ca/cert.pem ./home-inventory-ca.crt
+openssl x509 -in ./home-inventory-ca.crt -noout -fingerprint -sha256
+```
+
+Trasferirlo mediante un canale fidato e verificare l'impronta prima di
+installarlo come CA attendibile. Su iOS/iPadOS occorre installare il profilo e
+abilitare esplicitamente la fiducia completa nelle impostazioni certificati.
+Non distribuire **mai** la chiave privata della CA: chi la possiede può
+impersonare siti sui dispositivi che la considerano attendibile. Proteggere e
+salvare separatamente il volume `frontendtls` (contiene chiavi private);
+`docker compose down -v` lo elimina. La perdita o sostituzione della CA richiede
+di ristabilire la fiducia su ogni dispositivo. Non condividere il volume tra
+istanze frontend contemporanee.
+
+Per usare invece un certificato proprio, impostare entrambi i percorsi
+**all'interno del container** tramite `TLS_CERT_FILE` e `TLS_KEY_FILE` e montare
+file leggibili in sola lettura, usando percorsi assoluti. Ad esempio, in un override Compose privato:
+
+```yaml
+services:
+  frontend:
+    environment:
+      TLS_CERT_FILE: /run/custom-tls/fullchain.pem
+      TLS_KEY_FILE: /run/custom-tls/privkey.pem
+    volumes:
+      - /percorso/privato/certificati:/run/custom-tls:ro
+```
+
+Il certificato deve includere la catena necessaria e corrispondere al nome
+usato; coppie mancanti, non corrispondenti o scadute bloccano l'avvio. Il
+rinnovo dei certificati esterni spetta al loro gestore: dopo la sostituzione
+ricreare o riavviare il frontend per validare e ricaricare la coppia. Non
+inserire chiavi o certificati privati nel repository o nelle variabili env.
+
+Questa modalità automatica **non usa Let's Encrypt** e non dà fiducia pubblica,
+anche se `TLS_HOSTS` contiene un dominio pubblico. Per un certificato
+pubblicamente attendibile usare una coppia fornita da una CA o un reverse
+proxy HTTPS esterno con ACME. Let's Encrypt supporta anche IP pubblici
+verificabili, ma non IP privati/localhost; HTTP-01 richiede la porta pubblica
+80. Un dominio pubblico con DNS corretto è normalmente la scelta più pratica.
+La configurazione del proxy, la validazione ACME e i relativi rinnovi sono
+responsabilità del gestore esterno.
 
 ### Database e backup
 
@@ -143,6 +231,49 @@ riavvio. Con chiave esplicita/file verificare il messaggio di configurazione,
 mai il suo valore. Provare una rotazione soltanto sull'installazione di test:
 il vecchio token deve dare 401 e un nuovo login deve riuscire.
 
+#### Rinnovo della sessione
+
+La durata predefinita e di 14400 minuti (10 giorni), configurabile con
+`ACCESS_TOKEN_EXPIRE_MINUTES` nel backend. Quando, dopo un'interazione
+dell'utente, resta meno del 50% della durata del JWT, il browser richiede un
+nuovo token per la stessa sessione dispositivo. Con 10 giorni, la richiesta
+parte quando ne restano meno di 5; i controlli periodici automatici non
+mantengono viva una sessione inattiva. La scadenza della sessione viene
+estesa e, se presente e verificabile nel browser, anche la sottoscrizione
+push esistente, senza superare la sua scadenza nativa. Non viene richiesto
+un nuovo permesso browser. Se il push non puo essere verificato, viene
+mostrato un avviso e occorre controllarlo nel Profilo.
+
+Il rinnovo richiede un token ancora valido, una sessione non revocata e
+connettivita: dopo la scadenza o la revoca occorre accedere di nuovo e
+riattivare il push. I token precedenti restano validi fino alla propria
+scadenza o alla revoca della sessione. Il rinnovo permette anche a chi
+possiede un token rubato di prolungare una sessione attiva: disconnettere
+il dispositivo o revocare tutte le sessioni se si sospetta una compromissione.
+
+#### Recupero password da container
+
+Se non e disponibile un amministratore gia autenticato, dalla macchina che
+gestisce Compose eseguire sul **backend in esecuzione**:
+
+```sh
+docker compose exec backend python -m reset_password NOME_UTENTE
+```
+
+Con il compose di sviluppo usare
+`docker compose -f docker-compose-dev.yml exec backend python -m reset_password NOME_UTENTE`.
+Il comando richiede un terminale interattivo e chiede due volte la nuova
+password senza mostrarla: non inserirla nella riga di comando o in variabili
+d'ambiente. La password deve essere non vuota e non superare 72 byte UTF-8.
+L'operazione aggiorna l'hash e revoca tutte le sessioni e i token precedenti
+di quell'utente, inclusi quelli legacy senza sessione tracciata, nella stessa
+transazione. Gli altri utenti non sono coinvolti. I dispositivi dell'utente
+devono accedere nuovamente e riattivare il push; le preferenze restano salvate.
+L'accesso al container e privilegiato: riservarlo agli amministratori
+dell'installazione. Ricostruire il backend e applicare le migrazioni prima di
+usare il comando. Un ripristino di un vecchio backup puo ripristinare anche
+vecchie password e sessioni: ripetere il reset dopo il ripristino se necessario.
+
 #### Operazioni amministrative di sicurezza
 
 In **Impostazioni > Sicurezza**, solo gli amministratori possono:
@@ -223,10 +354,63 @@ La conversione accetta dump data-only generati dalla vecchia applicazione con `-
 
 ### Barcode e QR code
 
+- Nell'elenco inventari e liste, il pulsante QR in alto a destra di ogni riga apre il codice del contenitore e permette di stamparlo. Le righe compatte mantengono nome e dettagli senza riservare una fascia vuota al pulsante. La versione di contenitori e item compare accanto a "Ultima modifica", non nel nome.
+- Su mobile gli item affiancano dettagli e controlli quantità: i pulsanti +/− e la spunta mantengono un'area di almeno 44 px, mentre cronologia e assegnazione usano pulsanti secondari da 36 px. Metadati e informazioni di modifica sono più compatti, senza nascondere descrizioni o valori.
+- Il pulsante ↑ negli elenchi inventari/liste e item torna all'inizio della pagina, mostrando anche i filtri.
+- Su mobile la barra degli item mostra solo la ricerca libera e il pulsante opzioni. Ordinamento, barcode, priorità delle liste e filtri salvati sono nel pannello dal basso; i filtri avanzati attivi compaiono come chip rimovibili. La cancellazione della ricerca non modifica gli altri filtri. In modalità modifica, selezione e deselezione di tutti gli item sono nel menu azioni.
+- Le barre filtri usano il layout compatto sotto 1280 px, anche con la sidebar desktop aperta, e passano automaticamente al layout esteso senza ricaricare la pagina. Nei dettagli, tra 768 e 1279 px, le azioni principali restano fisse in alto a destra durante lo scorrimento e quelle secondarie sono nel menu «⋯»; il pannello filtri è centrato. La versione dell'inventario/lista segue la data di modifica, non il titolo. La barra mobile resta invariata.
+- Anche gli elenchi inventari/liste usano la barra mobile compatta con ricerca e ordinamento nel pannello dal basso. Negli item i termini cercati sono evidenziati in nome, descrizione e valori dei metadati, senza distinguere maiuscole e minuscole.
+- Le corrispondenze di ricerca usano un'evidenziazione gialla con testo scuro in grassetto e bordo, visibile sia nel tema chiaro sia in quello scuro.
+- I campi della barra filtri compatta usano testo a 16 px su mobile per evitare lo zoom automatico al focus su iPhone, senza limitare lo zoom manuale.
 - Ogni articolo può avere più codici (EAN/UPC/QR e altri), gestibili dalla schermata di modifica.
 - Il pulsante "Scansiona", nelle pagine inventario e checklist, consente di usare la fotocamera (desktop o mobile), un lettore USB/Bluetooth (che funziona come una tastiera) oppure l'inserimento manuale. La fotocamera richiede HTTPS (o localhost).
 - Un codice sconosciuto consente di creare un nuovo articolo o associarlo a uno esistente. Ogni codice è univoco all'interno del proprio inventario.
 - Ricerca dei dati EAN tramite Open Food Facts, Open Beauty Facts, Open Pet Food Facts e Open Products Facts, e dei libri (ISBN-10/ISBN-13, normalizzati a ISBN-13) tramite Open Library con fallback su Google Books (imposta `GOOGLE_BOOKS_API_KEY` per evitare i limiti di quota senza chiave): gratuita e senza chiave API, con cache locale. I farmaci sono riconosciuti (EAN, codice AIC a 9 cifre, GTIN estratto dal DataMatrix GS1) ma non esiste un'API pubblica per codice: l'anagrafica arriva solo se presente nelle fonti sopra. Si può disattivare impostando `BARCODE_LOOKUP_ENABLED=false`. Quando è attiva, i codici vengono inviati ai servizi esterni.
+
+### Filtri salvati e gestione trigger
+
+**Gestione filtri** unisce campi degli item e metadati. Scegli il campo,
+l'operatore e il valore; combina **tutte** le condizioni oppure **almeno una**.
+La quantita riguarda gli inventari, mentre stato **Completato** e priorita
+riguardano le liste. L'ambito compatibile e i permessi determinano quali
+contenitori possono usare il filtro. I filtri esistenti restano disponibili.
+
+Su desktop le pagine sono nella sezione **Organizzazione** della sidebar; su
+mobile si aprono dalla voce **Account** della barra inferiore, insieme a
+profilo, impostazioni, About, tema ed Esci. Senza accesso la barra mobile
+mostra solo **Home** e **Accedi**; About e tema sono in fondo alla pagina.
+
+Per le date puoi scegliere una data fissa, **OGGI** oppure **OGGI + X giorni**.
+X puo essere positivo, zero o negativo: ad esempio `OGGI + 7` trova date
+relative alla prossima settimana e `OGGI - 3` a tre giorni fa. Anche i limiti
+di un intervallo possono essere relativi. **Prova filtro** mostra i risultati
+senza inviare notifiche.
+
+Esempi di filtri con tutte le condizioni:
+
+- Inventari: **Scadenza prima di OGGI** e **Quantita maggiore di 0**.
+- Liste: **Scadenza prima di OGGI** e **Completato = No**.
+
+**Gestione trigger** associa un filtro salvato a un orario e ai giorni della
+settimana, con un fuso esplicito (ad esempio `Europe/Rome`). Il fuso del trigger
+governa anche la valutazione di OGGI. Puoi limitare i contenitori, mettere
+il trigger in pausa e provare l'esecuzione senza inviare notifiche.
+Ogni contenitore con corrispondenze genera il proprio avviso; il conteggio
+si riferisce all'esecuzione, non necessariamente ai risultati al momento
+dell'apertura.
+
+In **Gestione profilo**, abilita **Avvisi da trigger** scegliendo
+**Disattivate / Solo Inbox / Inbox + Push**, poi seleziona i trigger da seguire.
+La categoria e disattivata per default. Ricevere un avviso richiede accesso
+corrente al filtro e al contenitore; l'iscrizione non concede nuovi permessi.
+Il creatore puo ricevere questi eventi del sistema. Per il push resta
+necessario il consenso del browser.
+
+Le esecuzioni pianificate richiedono il servizio `notification-worker`:
+ricostruisci sia backend sia frontend e abilita il profilo Compose
+`notifications`. Le migrazioni vengono applicate all'avvio del backend;
+crea un backup prima dell'aggiornamento. Per i dettagli di consegna e
+deduplicazione consulta [la guida notifiche](docs/notifications.md).
 
 ### Assegnazioni lista → inventario
 
@@ -252,12 +436,12 @@ condivisa tramite anchor YAML.
 
 ### Notifiche (in sviluppo)
 
-La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR delle sub-issue confluiscono in questo branch e solo dopo le sette fasi viene aperta la PR verso `release/1.6.0`. Vedi [piano, stato e test manuali](docs/notifications.md). La fase 3 aggiunge regole configurabili via API e inbox nel database, elaborata dal worker opt-in (profilo Compose `notifications`). La fase 4 aggiunge il backend Web Push/VAPID, disabilitato di default e legato alle sessioni. La fase 5 aggiunge consenso browser, service worker minimo e gestione da Profilo; editor preferenze e inbox frontend restano fasi successive. Nessuna regola viene preattivata. [Configurazione VAPID e restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni); [test e limiti della fase 5](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
+La feature e in sviluppo per fasi sul branch `38-feature-device-notification-on-logged-device`: tutte le PR confluiscono in questo branch prima della release. Le [preferenze personali](docs/notifications.md#modello-aggiornato) decidono quali modifiche ricevere per inventari/liste modificabili: quantita e spunte, dettagli degli elementi e nome contenitore (tutti disattivati di default). Non servono regole condivise. Campanella e inbox mostrano stato lettura; il Profilo salva automaticamente ogni scelta. Il worker e opt-in (profilo Compose `notifications`) e Web Push richiede consenso browser e preferenza evento. [Configurazione VAPID e restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni); [consenso browser](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
 
 Sottoscrizioni e code push transitorie sono escluse dai backup/confronti DB e
 svuotate al restore, per non riattivare consensi o invii obsoleti.
 
-Le notifiche quantita accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Anche il completamento checklist attende questa finestra. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
+Le notifiche quantita e singole spunte accorpano le correzioni nella stessa finestra della cronologia (45 secondi, costante condivisa); tornare al valore iniziale annulla l'avviso pendente. Non sono limitate a soglie o completamento dell'intera lista. Entrambi i Compose controllano la salute del worker tramite heartbeat e query DB; dettagli e log nel [monitoraggio worker](docs/notifications.md#monitoraggio-worker).
 
 ### Automazioni agentiche (GitHub Copilot)
 
@@ -350,9 +534,56 @@ To run this project with Docker, clone this repository and run:
 docker-compose up --build -d
 ```
 
-- Backend API: <http://localhost:3000/api>
-- Frontend: <http://localhost:3000>
+- Backend API: <https://localhost/api>
+- Frontend: <https://localhost>
 - Default credentials: `admin` / `12345`
+
+The home page shows authenticated users their most recently modified accessible
+inventories and lists. The admin configures `UI_RECENT_ITEMS_LIMIT`; other users
+can read only the value needed by the home page.
+
+### Frontend HTTPS
+
+The frontend listens on HTTP port 80 only to permanently redirect (308) to
+HTTPS port 443, preserving the path and query string. Both Compose files publish
+host ports 80 and 443 by default (override with `FRONTEND_HTTP_PORT` and
+`FRONTEND_PORT`). An existing `FRONTEND_PORT=3000` remains supported: redirects
+target HTTPS port 3000. Reverse proxies must target HTTPS rather than the HTTP
+redirect port to avoid loops. Traffic from nginx to the backend within Docker
+remains HTTP. HTTP and HTTPS are different browser origins:
+users must log in again and re-enable push notifications on each device.
+
+By default a persistent local CA in Docker volume `frontendtls` signs a
+365-day server certificate for localhost, 127.0.0.1 and ::1. Add the actual
+client-facing IP addresses and/or DNS names as a comma-separated `TLS_HOSTS`
+in the private root `.env` or shell (for example
+`TLS_HOSTS=192.168.1.10,inventory.example.com`), then recreate the frontend.
+The DNS name must resolve to the server. Server certificates are checked every
+12 hours, renewed within 30 days of expiry and reloaded in nginx; renewal also
+occurs on startup. The local CA lasts 10 years and must be replaced manually
+before expiry, requiring trust to be re-established on every device.
+
+The local CA is **not publicly trusted**. Export only its public certificate
+with `docker cp inventory-frontend:/var/lib/frontend-tls/ca/cert.pem ./home-inventory-ca.crt`,
+verify its SHA-256 fingerprint and install/trust it securely on each client.
+On iOS/iPadOS the installed certificate profile also requires full trust in
+certificate settings. Without trust, browsers warn and secure-context features
+such as Web Push may not work. Protect and back up the volume separately: it
+contains the CA private key, whose compromise allows impersonation of sites
+to devices trusting that CA. Never distribute the private key. `docker compose
+down -v` removes the volume; do not share it between concurrent frontend
+instances.
+
+Alternatively mount a certificate chain and matching private key read-only and
+set `TLS_CERT_FILE` and `TLS_KEY_FILE` to their paths inside the container.
+Both paths must be absolute.
+See the [Compose example](#https-e-certificati-frontend). Invalid or expired
+provided certificates fail startup. External certificate renewal is managed
+outside the app; restart/recreate the frontend to validate and reload them.
+Automatic local certificates are not Let's Encrypt certificates, even for
+public domain names. For public trust, provide a CA-issued certificate or use
+an external ACME reverse proxy. Let's Encrypt supports verifiable public IPs,
+but not private IPs or localhost; HTTP-01 requires public port 80.
 
 ### Database and backups
 
@@ -438,6 +669,35 @@ survive restart with a stable key; after a deliberate test key rotation, old
 tokens must fail while a new login succeeds. See the [Italian configuration
 examples](#chiave-jwt-e-configurazione-privata) for Docker secrets.
 
+#### Session renewal
+
+The default session lifetime is 14400 minutes (10 days), configurable with
+`ACCESS_TOKEN_EXPIRE_MINUTES`. After user interaction, a JWT with less than
+half its lifetime remaining is renewed for the same device session. Background
+polling does not keep an inactive session alive. An existing push subscription
+is extended only when the browser can confirm it, and never beyond its native
+expiration; no new browser permission is requested. A warning is shown if push
+could not be verified. Renewal requires a valid, unrevoked token and network
+access; after expiry or revocation, sign in and enable push again. Previous
+tokens remain valid until their own expiry or session revocation. A stolen
+token can also renew an active session: revoke the device or all sessions if
+compromise is suspected.
+
+#### Password recovery from the container
+
+If no administrator is already signed in, run
+`docker compose exec backend python -m reset_password USERNAME` on the host.
+For the development compose, add `-f docker-compose-dev.yml` after `docker compose`.
+The command requires an interactive terminal and prompts twice without echoing
+the password; do not put it in command arguments or environment variables.
+Passwords must be nonempty and at most 72 UTF-8 bytes. The password update
+atomically revokes the user's sessions and older tokens, including untracked
+legacy tokens; other users are unaffected. The user must sign in and enable
+push again on each device. Notification preferences are retained. Container
+access is privileged and should be restricted to installation administrators.
+Rebuild the backend and apply migrations first. Restoring an older backup can
+restore old passwords and sessions; repeat the reset after restore if needed.
+
 **Settings > Sicurezza** provides two separate admin-only actions: revoke
 all sessions without changing the signing key, and rotate the automatically
 managed key while also revoking every session. Both require the current
@@ -498,10 +758,56 @@ Conversion accepts data-only dumps generated by the old application with `--colu
 
 ### Barcodes and QR codes
 
+- In the inventory and checklist overview, the QR button at the top right of each row opens the container's code for printing. Compact rows retain the name and details without reserving an empty strip for the button. Container and item versions appear next to "Ultima modifica" (last modified), not in the name.
+- On mobile, item details sit alongside quantity controls: +/− buttons and completion checkboxes retain targets of at least 44 px, while history and assignment use secondary 36 px buttons. Metadata and modification details are more compact without hiding descriptions or values.
+- The ↑ button in inventory/checklist and item lists returns to the top of the page, including the filters.
+- On mobile, the item toolbar only shows free-text search and the options button. Sorting, barcodes, checklist priority and saved filters live in a bottom sheet; active advanced filters appear as removable chips. Clearing search preserves other filters. In edit mode, select/deselect all live in the actions menu.
+- Filter toolbars use the compact layout below 1280 px, including with the desktop sidebar open, and switch automatically to the expanded layout without reloading. On detail pages between 768 and 1279 px, primary actions stay fixed at the top right while scrolling, secondary actions live in the “⋯” menu, and filters open in a centered dialog. Inventory/checklist versions follow the modification date instead of the title. The mobile toolbar is unchanged.
+- Inventory/checklist overviews also use the compact mobile search bar with sorting in the bottom sheet. Item search matches are highlighted case-insensitively in names, descriptions and metadata values.
+- Search matches use yellow highlighting with bold dark text and an outline, visible in both light and dark themes.
+- Compact filter controls use 16 px text on mobile to prevent iPhone focus auto-zoom without restricting manual zoom.
 - Each item can have multiple barcodes (EAN/UPC/QR and others), managed from the item edit screen.
 - The "Scan" button on inventory and checklist pages lets you use a camera (desktop or mobile), a USB/Bluetooth barcode reader (which acts like a keyboard), or manual entry. Camera access requires HTTPS (or localhost).
 - An unknown code can be used to create an item or link the code to an existing one. Each code must be unique within its inventory.
 - EAN lookup uses Open Food Facts, Open Beauty Facts, Open Pet Food Facts, and Open Products Facts; books (ISBN-10/13, normalized to ISBN-13) use Open Library with a Google Books fallback (set `GOOGLE_BOOKS_API_KEY` to avoid keyless quota limits). Medicines are recognized (EAN, 9-digit Italian AIC, GTIN extracted from the GS1 DataMatrix) but have no public per-code API, so details appear only if the sources above know them. It is free, requires no API key, and uses a local cache. Disable it by setting `BARCODE_LOOKUP_ENABLED=false`. When enabled, codes are sent to these external services.
+
+### Saved filters and trigger management
+
+**Filter management** combines item fields and metadata. Choose the field,
+operator and value, then match **all** or **any** conditions. Quantity applies
+to inventories; completion and priority apply to checklists. Field compatibility
+and permissions determine eligible containers. Existing filters remain available.
+
+On desktop these pages live in the sidebar **Organization** section; on mobile
+open them from the bottom bar **Account** item, together with profile,
+settings, About, theme and sign out. Signed-out mobile users see only **Home**
+and **Sign in**; About and theme are at the bottom of the page.
+
+Date conditions support a fixed date, **TODAY**, or **TODAY + X days**, with
+positive, zero or negative offsets. Range boundaries can also be relative.
+**Try filter** previews matches without sending notifications.
+
+Examples with all conditions:
+
+- Inventories: **Expiry before TODAY** and **Quantity greater than 0**.
+- Checklists: **Expiry before TODAY** and **Completed = No**.
+
+**Trigger management** associates a saved filter with a time, weekdays and
+an explicit timezone such as `Europe/Rome`. That timezone also determines
+TODAY. Restrict containers, pause a trigger or preview its execution without
+sending notifications. Each matching container generates a separate alert;
+the count is an execution snapshot, not necessarily the result when opened.
+
+In **Profile management**, choose **Disabled / Inbox only / Inbox + Push**
+for **Trigger alerts**, then subscribe to individual triggers. This category
+is disabled by default. Current filter and container access is required;
+subscribing never grants permissions. The creator can receive system events.
+Push still requires browser consent.
+
+Scheduled execution requires `notification-worker`: rebuild backend and frontend
+and enable the Compose `notifications` profile. Backend startup applies
+migrations; back up your data before updating. See the
+[notification guide](docs/notifications.md) for delivery and deduplication details.
 
 ### List-to-inventory assignments
 
@@ -528,12 +834,12 @@ or `COMPOSE_PROFILES=notifications` in the shell/private root `.env`.
 
 ### Notifications (in development)
 
-The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device`: all sub-issue PRs target this branch, with a final PR into `release/1.6.0` only after all seven phases. See [plan, status and manual checks (Italian)](docs/notifications.md). Phase 3 adds API-configured rules and a database inbox processed by the opt-in worker (Compose profile `notifications`). Phase 4 adds a session-bound Web Push/VAPID backend, disabled by default. Phase 5 adds browser consent, a minimal service worker and profile controls; preference editing and the frontend inbox remain for later phases. No rules are enabled automatically. See [VAPID configuration and restore limits](docs/notifications.md#fase-4-web-push-backend-e-sessioni) and [phase 5 checks and limitations](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
+The feature is being developed in gated phases on `38-feature-device-notification-on-logged-device` before release integration. [Personal preferences (Italian)](docs/notifications.md#modello-aggiornato) select changes to editable inventories/checklists: quantity and individual checks, item details and container names (all off by default). No shared rules are required. The bell and inbox track read state; Profile automatically saves each toggle. The worker is opt-in (Compose profile `notifications`); Web Push requires both browser consent and an event preference. See [VAPID configuration and restore](docs/notifications.md#fase-4-web-push-backend-e-sessioni) and [browser consent](docs/notifications.md#fase-5-service-worker-e-consenso-browser).
 
 Transient push subscriptions and delivery queues are excluded from backups/DB
 comparisons and cleared on restore to prevent obsolete consent or send replay.
 
-Quantity notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. Checklist completion also waits for this window. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
+Quantity and individual check notifications coalesce corrections within the same window as history (45 seconds, shared constant); returning to the initial value cancels the pending alert. They are not limited to thresholds or whole-checklist completion. Both Compose files check worker health using a heartbeat and database query; see [worker monitoring (Italian)](docs/notifications.md#monitoraggio-worker).
 
 ### Agentic workflows (GitHub Copilot)
 

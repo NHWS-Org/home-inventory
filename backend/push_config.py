@@ -3,13 +3,18 @@
 import base64
 from dataclasses import dataclass
 import hashlib
+import logging
 import os
 from pathlib import Path
+import tempfile
 from urllib.parse import urlsplit
 from cryptography.exceptions import UnsupportedAlgorithm
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+
+
+logger = logging.getLogger(__name__)
 
 
 class PushConfigurationError(RuntimeError):
@@ -24,7 +29,41 @@ class PushConfig:
     subject: str
 
 
-def load_push_config() -> PushConfig | None:
+def _create_missing_private_key(path: Path) -> None:
+    try:
+        if path.exists() or path.is_symlink():
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=".vapid-", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            try:
+                key = ec.generate_private_key(ec.SECP256R1())
+                stream.write(key.private_bytes(
+                    serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption(),
+                ))
+                stream.flush()
+                os.fsync(stream.fileno())
+                # Publish a complete key without replacing a concurrent startup's winner.
+                try:
+                    os.link(temporary, path)
+                except FileExistsError:
+                    return
+            finally:
+                temporary.unlink(missing_ok=True)
+        logger.info(
+            "VAPID private key generated at %s; keep it on persistent storage. "
+            "Key value is never logged.", path,
+        )
+    except OSError:
+        raise PushConfigurationError(
+            "Cannot persist the VAPID private key; check its path and storage permissions"
+        ) from None
+
+
+def load_push_config(*, create_if_missing: bool = False) -> PushConfig | None:
     enabled = os.getenv("WEB_PUSH_ENABLED", "false").lower()
     if enabled not in ("true", "false"):
         raise PushConfigurationError("WEB_PUSH_ENABLED must be true or false")
@@ -44,6 +83,8 @@ def load_push_config() -> PushConfig | None:
         )
     ):
         raise PushConfigurationError("Configure a persistent VAPID PEM key and valid contact subject")
+    if create_if_missing:
+        _create_missing_private_key(Path(path))
     try:
         private = serialization.load_pem_private_key(Path(path).read_bytes(), password=None)
     except (OSError, ValueError, TypeError, UnsupportedAlgorithm):

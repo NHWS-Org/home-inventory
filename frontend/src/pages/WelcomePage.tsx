@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import {
-  getUserInfo,
   getApiWelcomeInfo,
   getRecentInventoriesAndChecklists,
   InventoryOrChecklistRecent,
-  getSetting
+  getRecentItemsLimit
 } from "../api";
+import { useAuth } from "../useAuth";
 
 const WelcomePage = () => {
   const [welcomeInfo, setWelcomeInfo] = useState<null | {
@@ -20,28 +20,23 @@ const WelcomePage = () => {
     };
   }>(null);
 
-  const [recenti, setRecenti] = useState<InventoryOrChecklistRecent[]>([]);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { user } = useAuth();
+  const [welcomeError, setWelcomeError] = useState("");
+  const [reloadRecent, setReloadRecent] = useState(0);
+  const [recentResult, setRecentResult] = useState<{
+    userId: number; username: string; reload: number; rows: InventoryOrChecklistRecent[]; error: string;
+  } | null>(null);
+  const currentResult = recentResult?.userId === user?.id && recentResult?.username === user?.username
+    && recentResult?.reload === reloadRecent ? recentResult : null;
+  const recenti = currentResult?.rows ?? [];
+  const recentError = currentResult?.error ?? "";
+  const recentLoading = !!user?.username && currentResult === null;
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    getApiWelcomeInfo().then(setWelcomeInfo);
-
-    getUserInfo()
-      .then(() => {
-        setIsLoggedIn(true);
-        getSetting("UI_RECENT_ITEMS_LIMIT").then((limitSetting) => {
-          const limit = limitSetting?.value && !isNaN(Number(limitSetting.value)) ? Number(limitSetting.value) : 5;
-          getRecentInventoriesAndChecklists(limit).then((data) => {
-            console.log("Dati ricevuti da /recents:", data);
-            setRecenti(data);
-          });
-        });
-      })
-      .catch(() => {
-        setIsLoggedIn(false);
-      });
-
+    getApiWelcomeInfo().then(setWelcomeInfo).catch(() => {
+      setWelcomeError("Impossibile caricare le informazioni della homepage.");
+    });
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
     };
@@ -50,14 +45,31 @@ const WelcomePage = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    if (!user?.username) return () => { active = false; };
+    const userId = user.id;
+    const username = user.username;
+    getRecentItemsLimit()
+      .then(getRecentInventoriesAndChecklists)
+      .then(rows => { if (active) setRecentResult({ userId, username, reload: reloadRecent, rows, error: "" }); })
+      .catch(() => {
+        if (active) setRecentResult({ userId, username, reload: reloadRecent, rows: [], error: "Impossibile caricare gli ultimi inventari e liste. Riprova." });
+      });
+    return () => { active = false; };
+  }, [user?.id, user?.username, reloadRecent]);
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <h1 className="text-3xl font-bold text-center">{welcomeInfo?.title ?? "Benvenuto"}</h1>
+      {welcomeError && <p role="alert">{welcomeError}</p>}
+      {recentError && <div role="alert">{recentError} {user?.username && <button type="button" className="underline" onClick={() => setReloadRecent(value => value + 1)}>Riprova</button>}</div>}
+      {recentLoading && <p role="status">Caricamento ultimi inventari e liste...</p>}
 
       {welcomeInfo && (
         <div className="text-gray-700 dark:text-gray-300">
           <p className="mb-2 font-bold">{welcomeInfo.message}</p>
-          {isLoggedIn && recenti.length > 0 && (
+          {user?.username && recenti.length > 0 && (
             <div className="bg-white dark:bg-black shadow-md border border-gray-200 rounded p-4 mb-6">
               <h2 className="text-lg font-semibold mb-2">Ultimi inventari e liste usati:</h2>
               <table className="w-full table-auto text-left text-sm border-collapse">

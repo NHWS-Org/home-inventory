@@ -121,6 +121,26 @@ async function browserSubscription(): Promise<PushSubscription | null> {
   return registration?.pushManager.getSubscription() ?? null;
 }
 
+export async function pushRenewalSnapshot(username: string): Promise<{
+  id: number;
+  endpoint: string;
+  expiration_time: number | null;
+} | null> {
+  if (localStorage.getItem(OWNER_KEY) !== username) return null;
+  const storedId = localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username));
+  if (!storedId || !Number.isSafeInteger(Number(storedId)) || Number(storedId) <= 0) {
+    throw new Error("Impossibile verificare la sottoscrizione push.");
+  }
+  if (detectPushAvailability(currentEnvironment()) !== "supported" || Notification.permission !== "granted") {
+    throw new Error("Permesso push non disponibile.");
+  }
+  const subscription = await browserSubscription();
+  if (!subscription || subscription.expirationTime !== null && subscription.expirationTime <= Date.now()) {
+    throw new Error("Sottoscrizione push assente o scaduta.");
+  }
+  return { id: Number(storedId), endpoint: subscription.endpoint, expiration_time: subscription.expirationTime };
+}
+
 export async function inspectPushBrowser(username: string): Promise<{
   state: PushBrowserState;
   configuration?: PushConfiguration;
@@ -128,6 +148,7 @@ export async function inspectPushBrowser(username: string): Promise<{
   const availability = detectPushAvailability(currentEnvironment());
   if (availability !== "supported") return { state: availability };
   if (Notification.permission === "denied") return { state: "denied" };
+  if (Notification.permission !== "granted") return { state: "permission-required" };
 
   let configuration: PushConfiguration;
   try {
@@ -143,7 +164,11 @@ export async function inspectPushBrowser(username: string): Promise<{
     const registration = await navigator.serviceWorker.register("/push-sw.js", { scope: "/" });
     const subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
-      return { state: Notification.permission === "granted" ? "expired" : "permission-required", configuration };
+      const owner = localStorage.getItem(OWNER_KEY);
+      const storedId = owner === username
+        ? localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username))
+        : null;
+      return { state: storedId ? "expired" : "permission-required", configuration };
     }
     if (subscription.expirationTime !== null && subscription.expirationTime <= Date.now()) {
       await subscription.unsubscribe();
@@ -195,6 +220,37 @@ async function deleteKnownSubscription(subscriptionId: number): Promise<void> {
   }
 }
 
+export type PushActivationStage = "configuration" | "worker" | "subscription" | "registration";
+
+export class PushActivationError extends Error {
+  constructor(
+    public readonly stage: PushActivationStage,
+    public readonly status: number | undefined,
+    public readonly cause: unknown,
+  ) {
+    super(`Push activation failed: ${stage}`);
+    this.name = "PushActivationError";
+  }
+}
+
+export function activationErrorMessage(error: PushActivationError): string {
+  const stages = {
+    configuration: "configurazione Web Push",
+    worker: "registrazione del service worker",
+    subscription: "creazione o verifica della sottoscrizione nel browser",
+    registration: "registrazione della sottoscrizione sul server",
+  };
+  return `Attivazione non riuscita: ${stages[error.stage]}${error.status ? ` (HTTP ${error.status})` : ""}. Riprova.`;
+}
+
+async function activationStep<T>(stage: PushActivationStage, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw new PushActivationError(stage, axios.isAxiosError(error) ? error.response?.status : undefined, error);
+  }
+}
+
 export async function enablePushForBrowser(
   username: string,
   requestPermission: () => Promise<NotificationPermission> = () => Notification.requestPermission(),
@@ -210,12 +266,14 @@ export async function enablePushForBrowser(
   const permission = await permissionRequest;
   if (permission !== "granted") throw new Error("denied");
 
-  const configuration = await getPushConfiguration();
-  const decodedKey = decodeVapidPublicKey(configuration.public_key);
+  const { configuration, decodedKey } = await activationStep("configuration", async () => {
+    const configuration = await getPushConfiguration();
+    return { configuration, decodedKey: decodeVapidPublicKey(configuration.public_key) };
+  });
   const applicationServerKey = new Uint8Array(new ArrayBuffer(decodedKey.byteLength));
   applicationServerKey.set(decodedKey);
-  const registration = await navigator.serviceWorker.register("/push-sw.js", { scope: "/" });
-  let subscription = await registration.pushManager.getSubscription();
+  const registration = await activationStep("worker", () => navigator.serviceWorker.register("/push-sw.js", { scope: "/" }));
+  let subscription = await activationStep("subscription", () => registration.pushManager.getSubscription());
   const nativeKey = subscription?.options.applicationServerKey
     ? bytesToBase64Url(new Uint8Array(subscription.options.applicationServerKey))
     : null;
@@ -232,29 +290,30 @@ export async function enablePushForBrowser(
   );
   if (staleSubscription && storedOwner === username) {
     const storedId = localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username));
-    if (storedId) await deleteKnownSubscription(Number(storedId));
+    if (storedId) await activationStep("registration", () => deleteKnownSubscription(Number(storedId)));
   }
   if (subscription && staleSubscription) {
-    await subscription.unsubscribe();
+    const removed = await activationStep("subscription", () => subscription!.unsubscribe());
+    if (!removed) throw new PushActivationError("subscription", undefined, new Error("Unsubscribe failed"));
     subscription = null;
   }
   if (!subscription && storedOwner === username) {
     const storedId = localStorage.getItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username));
-    if (storedId && !staleSubscription) await deleteKnownSubscription(Number(storedId));
+    if (storedId && !staleSubscription) await activationStep("registration", () => deleteKnownSubscription(Number(storedId)));
   }
   if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
+    subscription = await activationStep("subscription", () => registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey,
-    });
+    }));
   }
 
   let savedId: number | null = null;
   try {
-    const saved = await savePushSubscription({
+    const saved = await activationStep("registration", () => savePushSubscription({
       ...subscription.toJSON(),
       expirationTime: subscription.expirationTime,
-    });
+    }));
     savedId = saved.id;
     localStorage.setItem(subscriptionStorageKey(SUBSCRIPTION_ID_PREFIX, username), String(saved.id));
     localStorage.setItem(subscriptionStorageKey(PUBLIC_KEY_PREFIX, username), configuration.public_key);
@@ -293,10 +352,9 @@ export async function disablePushForBrowser(username: string): Promise<void> {
     }
   } catch (error) {
     failure ??= error;
-  } finally {
-    clearStoredOwnership(username);
   }
   if (failure) throw failure;
+  clearStoredOwnership(username);
 }
 
 export async function testPushOnBrowser(): Promise<void> {

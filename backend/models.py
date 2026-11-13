@@ -82,6 +82,7 @@ class User(Base, LoggingData):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255), unique=True, index=True)
     hashed_password = Column(String(255))
+    auth_revoked_before = Column(BigInteger, nullable=True)
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=False)
     is_blocked = Column(Boolean, default=False)
     email = Column(String(255), nullable=True)
@@ -221,41 +222,20 @@ class NotificationPreference(Base, LoggingData):
     __table_args__ = (
         UniqueConstraint("user_id", "event_type", name="uq_notification_preferences_user_event"),
         CheckConstraint(
-            "event_type IN ('inventory_shared', 'item_quantity_changed', 'checklist_completed')",
+            "event_type IN ('item_quantity_changed', 'item_updated', 'inventory_updated', 'filter_trigger_matched')",
             name="ck_notification_preferences_event_type",
+        ),
+        CheckConstraint(
+            "NOT push_enabled OR in_app_enabled",
+            name="ck_notification_preferences_push_requires_inbox",
         ),
     )
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     event_type = Column(String(32), nullable=False)
-    in_app_enabled = Column(Boolean, nullable=False, default=True, server_default="1")
+    in_app_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
     push_enabled = Column(Boolean, nullable=False, default=False, server_default="0")
-    include_own_actions = Column(Boolean, nullable=False, default=False, server_default="0")
-
-################################################
-class NotificationRule(Base, LoggingData):
-    __tablename__ = "notification_rules"
-    __table_args__ = (
-        CheckConstraint(
-            "event_type IN ('inventory_shared', 'item_quantity_changed', 'checklist_completed')",
-            name="ck_notification_rules_event_type",
-        ),
-        CheckConstraint(
-            "(event_type = 'item_quantity_changed' AND threshold IS NOT NULL AND threshold >= 0)"
-            " OR (event_type != 'item_quantity_changed' AND threshold IS NULL)",
-            name="ck_notification_rules_threshold",
-        ),
-    )
-
-    id = Column(Integer, primary_key=True)
-    inventory_id = Column(
-        Integer, ForeignKey("inventories.id", ondelete="CASCADE"), nullable=False, index=True,
-    )
-    event_type = Column(String(32), nullable=False)
-    threshold = Column(Integer, nullable=True)
-    recipients = Column(JSON, nullable=False)
-    enabled = Column(Boolean, nullable=False, default=True, server_default="1")
 
 ################################################
 class SecurityAudit(Base):
@@ -551,3 +531,66 @@ class FilterTemplate(Base, LoggingData):
     filter_type = Column(String(32), nullable=False)  # "numeric", "date", "text", "composite"
     criteria = Column(JSON, nullable=False)  # JSON: {"filter_type": ..., "criteria": [...], "match_mode": "all"|"any"}
     is_shared = Column(Boolean, nullable=False, default=False)
+
+
+class ScheduledTrigger(Base, LoggingData):
+    __tablename__ = "scheduled_triggers"
+    __table_args__ = (
+        CheckConstraint("notify_mode IN ('always', 'changed')", name="ck_scheduled_triggers_mode"),
+        CheckConstraint("revision >= 1", name="ck_scheduled_triggers_revision"),
+        CheckConstraint(
+            "(last_result_count IS NULL OR last_result_count >= 0) AND "
+            "(last_container_count IS NULL OR last_container_count >= 0)",
+            name="ck_scheduled_triggers_counts",
+        ),
+        UniqueConstraint("user_ins", "name", name="uq_scheduled_triggers_owner_name"),
+        Index("ix_scheduled_triggers_enabled", "enabled", "id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), nullable=False)
+    filter_id = Column(Integer, ForeignKey("filter_templates.id", ondelete="CASCADE"), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True, server_default="1")
+    time = Column(String(5), nullable=False)
+    timezone = Column(String(64), nullable=False)
+    weekdays = Column(JSON, nullable=False)
+    inventory_ids = Column(JSON, nullable=True)
+    notify_mode = Column(String(16), nullable=False)
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
+    baseline = Column(JSON, nullable=True)
+    last_run_at = Column(DateTime, nullable=True)
+    last_result_count = Column(Integer, nullable=True)
+    last_container_count = Column(Integer, nullable=True)
+    last_error = Column(String(64), nullable=True)
+
+
+class TriggerSubscription(Base, LoggingData):
+    __tablename__ = "trigger_subscriptions"
+    __table_args__ = (UniqueConstraint("trigger_id", "user_id", name="uq_trigger_subscriptions_user"),)
+
+    id = Column(Integer, primary_key=True)
+    trigger_id = Column(Integer, ForeignKey("scheduled_triggers.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False, server_default="0")
+
+
+class TriggerRun(Base):
+    __tablename__ = "trigger_runs"
+    __table_args__ = (
+        UniqueConstraint("trigger_id", "scheduled_at", name="uq_trigger_runs_instant"),
+        UniqueConstraint("trigger_id", "logical_date", name="uq_trigger_runs_day"),
+        CheckConstraint("status IN ('completed', 'failed')", name="ck_trigger_runs_status"),
+        CheckConstraint(
+            "(result_count IS NULL OR result_count >= 0) AND (container_count IS NULL OR container_count >= 0)",
+            name="ck_trigger_runs_counts",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    trigger_id = Column(Integer, ForeignKey("scheduled_triggers.id", ondelete="CASCADE"), nullable=False)
+    scheduled_at = Column(DateTime, nullable=False)
+    logical_date = Column(Date, nullable=False)
+    status = Column(String(16), nullable=False)
+    result_count = Column(Integer, nullable=True)
+    container_count = Column(Integer, nullable=True)
+    error = Column(String(64), nullable=True)

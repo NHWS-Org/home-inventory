@@ -15,11 +15,11 @@ if [[ "$CHANNEL" != "release" && "$CHANNEL" != "dev" ]]; then
 fi
 
 # Ottiene le versioni per backend e frontend
-BACKEND_VERSION=$(grep '^API_VERSION=' backend/.env | cut -d '=' -f2)
+BACKEND_VERSION=$(cat backend/VERSION)
 FRONTEND_VERSION=$(jq -r '.version' frontend/package.json)
 
-if [[ -z "$BACKEND_VERSION" || "$BACKEND_VERSION" == "null" ]]; then
-  echo "Errore: impossibile ottenere la versione del Backend."
+if [[ ! "$BACKEND_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo "Errore: versione del Backend non valida in backend/VERSION." >&2
   exit 1
 fi
 if [[ -z "$FRONTEND_VERSION" || "$FRONTEND_VERSION" == "null" ]]; then

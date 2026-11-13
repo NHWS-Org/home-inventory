@@ -1,8 +1,11 @@
 import os
 from app_version import API_VERSION
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+from dependencies import get_current_user, get_db
+from models import Setting, User
 from telemetry_service import get_public_stats
 
 load_dotenv()
@@ -53,6 +56,17 @@ def get_api_version():
 @router.get("/health-check", response_model=HealthCheckResponse)
 def get_health():
     return {"status": "Everything is OK", "version": API_VERSION}
+
+@router.get("/recent-items-limit")
+def recent_items_limit(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    setting = db.get(Setting, "UI_RECENT_ITEMS_LIMIT")
+    try:
+        limit = int(setting.value) if setting is not None else None
+    except (TypeError, ValueError):
+        limit = None
+    if limit is None or limit < 1:
+        raise HTTPException(status_code=500, detail="Impostazione UI_RECENT_ITEMS_LIMIT mancante o non valida")
+    return {"limit": limit}
 
 #################################################
 # Statistiche aggregate della community per la tab "About"

@@ -26,12 +26,12 @@ from urllib3.exceptions import NewConnectionError
 from urllib3.util.connection import create_connection
 
 from models import (
-    DeviceSession, Inventory, Item, NotificationEvent, NotificationPreference,
+    DeviceSession, Item, Notification, NotificationEvent, NotificationPreference,
     PushDelivery, PushSubscription, User,
 )
-from notification_contracts import ItemQuantityChangedData, notification_event_adapter
+from notification_contracts import notification_event_adapter
 from notification_outbox import LEASE_SECONDS, MAX_ATTEMPTS, RETRY_SECONDS, utcnow
-from notification_rules import can_receive, event_recipients
+from notification_service import can_receive, event_inventory, event_recipients
 from push_config import PushConfig, load_push_config
 
 logger = logging.getLogger(__name__)
@@ -191,23 +191,19 @@ def authorized_subscription(
     ):
         return None
     data = notification_event_adapter.validate_python(event.payload)
-    inventory = db.get(Inventory, data.inventory_id)
+    inventory = event_inventory(db, event)
     if inventory is None or not can_receive(user, inventory):
         return None
     if user.id not in event_recipients(db, event):
         return None
-    if isinstance(data, ItemQuantityChangedData):
-        item = db.get(Item, data.item_id)
-        if item is None or item.inventory_id != inventory.id:
-            return None
     preference = db.scalar(select(NotificationPreference).where(
         NotificationPreference.user_id == user.id,
         NotificationPreference.event_type == data.event_type,
     ))
     if (
-        preference is None or not preference.push_enabled
+        preference is None or not preference.in_app_enabled or not preference.push_enabled
         or preference.data_mod > event.created_at
-        or event.actor_id == user.id and not preference.include_own_actions
+        or event.actor_id == user.id
     ):
         return None
     return subscription
@@ -263,11 +259,65 @@ class SendResult:
     retry_after: int | None = None
 
 
-def send_push(subscription: PushSubscription, config: PushConfig, event_key: str) -> SendResult:
-    payload = json.dumps({
-        "title": "Home Inventory", "body": "Hai una nuova notifica",
-        "url": "/notifications", "tag": event_key,
-    }, separators=(",", ":"))
+def notification_push_payload(db: Session, event: NotificationEvent) -> dict[str, str]:
+    inventory = event_inventory(db, event)
+    if inventory is None:
+        raise ValueError("Notification resource no longer exists")
+    data = event.payload
+    item = db.get(Item, data["item_id"]) if "item_id" in data else None
+    item_name = item.name if item is not None else None
+    symbol = "🟡✎"
+    if data["event_type"] == "filter_trigger_matched":
+        symbol = "🔎"
+        item_name = data["filter_name"]
+        action = f"{data['count']} elementi corrispondenti"
+    elif data["event_type"] == "item_updated" and data.get("operation") == "deleted":
+        item_name = data["details"]["name"]
+        symbol = "🔴✕"
+        action = ""
+    elif data["event_type"] == "item_updated" and data.get("operation") == "created":
+        quantity = data["quantity"]
+        item_name = data.get("details", {}).get("name", item_name)
+        symbol = "🟢＋"
+        action = (
+            "Completato" if quantity >= 1 else "Da fare"
+        ) if inventory.type == "CHECKLIST" else f"×{quantity}"
+    elif data["event_type"] == "item_quantity_changed":
+        if inventory.type == "CHECKLIST":
+            symbol = "🟡☑" if data["quantity"] >= 1 else "🟡☐"
+            action = "Completato" if data["quantity"] >= 1 else "Da fare"
+        else:
+            delta = data["quantity"] - data["previous_quantity"]
+            symbol = "🟡↑" if delta > 0 else "🟡↓"
+            action = f"{delta:+d} ({data['previous_quantity']} → {data['quantity']})"
+    else:
+        labels = {
+            "name": "Titolo", "description": "Descrizione", "priority": "Priorità",
+            "inventory_id": "Inventario/lista", "barcodes": "Barcode", "metadata": "Metadati",
+            "assignment": "Assegnazione", "assignments": "Assegnazioni",
+        }
+        details = data.get("details", {})
+        action = " · ".join(
+            f"{labels.get(field, field)}: {details[field] if details[field] is not None else '(vuoto)'}"
+            if field in details else f"{labels.get(field, field)}: modificato"
+            for field in data["changed_fields"]
+        )
+    def compact(value: str, limit: int) -> str:
+        text = " ".join(value.split())
+        return text if len(text) <= limit else text[:limit - 1] + "…"
+    kind = "☑" if inventory.type == "CHECKLIST" else "📦"
+    path = "checklists" if inventory.type == "CHECKLIST" else "inventories"
+    return {
+        "title": compact(f"{kind} {inventory.name}", 40),
+        "body": compact(f"{symbol} " + " · ".join(
+            part for part in (item_name, action) if part
+        ), 500),
+        "url": f"/{path}/{inventory.id}", "tag": event.event_key,
+    }
+
+
+def send_push(subscription: PushSubscription, config: PushConfig, payload: dict[str, str]) -> SendResult:
+    encoded_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     with SafePushSession() as transport:
         try:
             response = webpush(
@@ -275,7 +325,7 @@ def send_push(subscription: PushSubscription, config: PushConfig, event_key: str
                     "endpoint": subscription.endpoint,
                     "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
                 },
-                data=payload, vapid_private_key=Vapid(private_key=config.private_key),
+                data=encoded_payload, vapid_private_key=Vapid(private_key=config.private_key),
                 vapid_claims={"sub": config.subject}, ttl=PUSH_TTL_SECONDS,
                 timeout=10, requests_session=transport,
             )
@@ -338,7 +388,14 @@ def process_push(
                     delivery.status = "cancelled"
                     delivery.last_error = "no_longer_authorized"
                 else:
-                    result = sender(subscription, config, db.get(NotificationEvent, delivery.event_id).event_key)
+                    event = db.get(NotificationEvent, delivery.event_id)
+                    payload = notification_push_payload(db, event)
+                    if db.scalar(select(Notification.id).where(
+                        Notification.event_id == event.id,
+                        Notification.user_id == subscription.user_id,
+                    )) is not None:
+                        payload["url"] += f"?notification_event={event.event_key}"
+                    result = sender(subscription, config, payload)
                     if result.status_code in (201, 202):
                         delivery.status = "accepted"
                         delivery.accepted_at = utcnow()

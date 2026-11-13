@@ -34,6 +34,10 @@ import { InventoryWithMatches, ChecklistWithMatches } from "../types"
 import InventoryQrDialog from '../components/InventoryQrDialog'
 import { useBottomSheetDrag } from '../components/useBottomSheetDrag'
 import { FiGrid } from 'react-icons/fi'
+import { scrollPageToTop } from '../utils/scrollPageToTop'
+import MobileItemFilters from '../components/MobileItemFilters'
+import { useDesktopLayout } from '../useDesktopLayout'
+import { renderHighlightedText } from '../utils/highlightText'
 
 function NewItemModal({ isOpen, onClose, onCreate, isInventory }: {
   isOpen: boolean
@@ -127,27 +131,9 @@ function EditNameModal({ isOpen, onClose, onSave, name, onNameChange }: {
   );
 }
 
-function renderHighlightedText(text: string): React.ReactNode {
-  if (!text) return null;
-  const parts = text.split(/\*\*(.*?)\*\*/g);
-  if (parts.length === 1) return text;
-  return parts.map((part, index) => {
-    if (!part) return null;
-    if (index % 2 === 1) {
-      return (
-        <span
-          key={index}
-          style={{ backgroundColor: '#cce5ff', padding: '0 2px', borderRadius: '2px' }}
-        >
-          {part}
-        </span>
-      );
-    }
-    return part;
-  });
-}
-
 export default function GenericListPage() {
+  const desktop = useDesktopLayout();
+  const compactControls = !useDesktopLayout(1280);
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -336,11 +322,85 @@ export default function GenericListPage() {
   if (loading) return <p>Caricamento...</p>;
   if (error) return <p>Errore: {error}</p>;
 
+  const actions = (
+    <div className={desktop
+      ? 'relative mb-2 flex flex-wrap justify-end gap-2'
+      : 'fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-row gap-2 rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90'}>
+      {editMode && selectedItems.length > 0 && (
+        <button onClick={async () => {
+          const deletableIds = items.filter(inv => selectedItems.includes(inv.id) && inv.item_count === 0).map(inv => inv.id);
+          const nonDeletable = items.filter(inv => selectedItems.includes(inv.id) && inv.item_count > 0);
+          if (deletableIds.length === 0 && nonDeletable.length > 0) {
+            showMessage((isInventory ? 'Puoi eliminare solo inventari vuoti.' : 'Puoi eliminare solo liste vuote.'), 'error');
+            return;
+          }
+          if (window.confirm('Sei sicuro di voler cancellare gli elementi selezionati senza oggetti?')) {
+            for (const id of deletableIds) {
+              if (isInventory) await deleteInventory(id);
+              else await deleteChecklist(id);
+            }
+            setItems((prev) => prev.filter((i) => !deletableIds.includes(i.id)));
+            setSelectedItems([]);
+            setEditMode(false);
+            showMessage('Eliminazione completata.', 'success');
+          }
+        }} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-red-600 px-3 py-2 text-white shadow-lg hover:bg-red-700">
+          <span className="inline md:hidden">🗑️ </span>
+          <span className="hidden md:inline">Elimina </span>
+        </button>
+      )}
+      {canEdit && (
+        <>
+          <button onClick={() => setIsModalOpen(true)} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-white shadow-lg hover:bg-blue-600">
+            <span className="inline md:hidden">➕</span>
+            <span className="hidden md:inline">Nuovo</span>
+          </button>
+          <button onClick={() => { setEditMode((prev) => !prev); setSelectedItems([]); }}
+            className={desktop ? 'flex h-10 min-w-12 items-center justify-center rounded-xl border border-gray-300 px-3 py-2 dark:border-gray-600' : `flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg ${editMode ? 'bg-yellow-700' : 'bg-yellow-500 hover:bg-yellow-600'}`}>
+            <span className="inline md:hidden">{editMode ? '✖️' : '✏️'}</span>
+            <span className="hidden md:inline">{editMode ? 'Chiudi' : 'Modifica'}</span>
+          </button>
+        </>
+      )}
+      <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} aria-label="Torna in cima alla pagina" title="Torna in cima alla pagina"
+        className={desktop ? 'flex h-10 min-w-12 items-center justify-center rounded-xl border border-gray-300 px-3 py-2 text-sm dark:border-gray-600' : 'flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-600 px-3 py-2 text-lg text-white shadow-lg hover:bg-gray-700'}>
+        <span aria-hidden="true">↑</span>
+        <span className="ml-1 hidden md:inline">In cima</span>
+      </button>
+    </div>
+  );
+
   return (
     <div className="p-4">
-      <div className="flex justify-between items-center mb-4">
+      <div className="hidden justify-between items-center mb-4 md:flex">
         <h1 className="hidden text-2xl font-bold md:block">{isInventory ? 'Inventari' : 'Liste'}</h1>
       </div>
+      {desktop && actions}
+      {compactControls && (
+        <MobileItemFilters
+          search={searchQuery}
+          onSearch={setSearchQuery}
+          placeholder="Cerca per oggetto…"
+          sortBy={sortBy}
+          sortOptions={[
+            { value: 'name', label: 'Nome' },
+            { value: 'date', label: 'Data modifica' },
+            { value: 'created', label: 'Data creazione' },
+            { value: 'item_count', label: 'Numero di oggetti' },
+          ]}
+          onSortBy={(value) => { localStorage.setItem(isInventory ? 'inventory_sortBy' : 'checklist_sortBy', value); setSortBy(value); }}
+          sortOrder={sortOrder}
+          onSortOrder={(value) => { localStorage.setItem(isInventory ? 'inventory_sortOrder' : 'checklist_sortOrder', value); setSortOrder(value); }}
+          onReset={() => { setSearchQuery(''); setSelectedItems([]); }}
+          selectionActions={editMode ? (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setSelectedItems(items.map(item => item.id))} className="min-h-11 flex-1 rounded-xl bg-blue-500 px-2 text-sm text-white">Seleziona tutti</button>
+              <button type="button" onClick={() => setSelectedItems([])} className="min-h-11 flex-1 rounded-xl bg-gray-500 px-2 text-sm text-white">Deseleziona tutti</button>
+            </div>
+          ) : undefined}
+        />
+      )}
+      {!compactControls && <>
       <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 mb-4">
         <div className="flex items-center gap-2">
           <input
@@ -417,6 +477,7 @@ export default function GenericListPage() {
           </div>
         )}
       </div>
+      </>}
       {canEdit && (
         <>
           <NewItemModal
@@ -449,7 +510,7 @@ export default function GenericListPage() {
           {getSortedItems().map((inv) => (
             <li
               key={inv.id}
-              className={`relative p-4 pb-16 sm:pb-4 border rounded shadow cursor-pointer flex justify-between items-center text-black dark:text-white ${
+              className={`relative p-2 sm:p-4 border rounded shadow cursor-pointer flex justify-between items-center text-black dark:text-white ${
                 selectedItems.includes(inv.id)
                   ? "bg-yellow-100"
                   : "hover:bg-gray-100 dark:hover:bg-gray-600"
@@ -471,12 +532,10 @@ export default function GenericListPage() {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-grow gap-2">
                     <div className="flex items-center gap-2">
                       <h2 className={`text-lg font-semibold ${selectedItems.includes(inv.id) ? "dark:text-black" : "" }`}>{inv.name}</h2>
-                      <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
-                        v{inv.version_num}
-                      </span>
                     </div>
                     <p className="text-sm text-gray-500 dark:ext-gray-300 sm:ml-4 text-right sm:text-right w-full sm:w-auto">
-                      Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
+                      Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}{" "}
+                      <span className="whitespace-nowrap">· v{inv.version_num}</span>
                     </p>
                     {canManage && (
                     <button
@@ -503,31 +562,29 @@ export default function GenericListPage() {
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-grow gap-2">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-semibold">{inv.name}</h2>
-                    <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
-                      v{inv.version_num}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-500 sm:ml-4">
-                    Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}
-                  </p>
+                <div className="flow-root min-w-0 flex-1">
                   <button
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
                       setQrTarget({ name: inv.name, path: `/${basePath}/${inv.id}` });
                     }}
-                    className="absolute bottom-4 right-4 grid h-11 w-11 place-items-center rounded-xl bg-indigo-600 text-xl text-white hover:bg-indigo-700 sm:static sm:flex sm:h-10 sm:w-auto sm:items-center sm:justify-center sm:rounded-xl sm:px-3 sm:text-sm"
+                    className="float-right mb-1 ml-3 grid h-11 w-11 place-items-center rounded-xl bg-indigo-600 text-xl text-white hover:bg-indigo-700 sm:flex sm:w-auto sm:items-center sm:justify-center sm:px-3 sm:text-sm"
                     aria-label={`Mostra QR code per ${inv.name}`}
                     title={`Mostra QR code per ${inv.name}`}
                   >
                     <FiGrid className="sm:hidden" aria-hidden="true" />
                     <span className="hidden sm:inline">QR code</span>
                   </button>
+                  <h2 className="break-words text-base font-semibold [overflow-wrap:anywhere] sm:text-lg">
+                    {inv.name}
+                  </h2>
+                  <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+                    Creatore: {inv.owner.username} | Oggetti: {inv.item_count} | Ultima modifica: {new Date(inv.data_mod).toLocaleString()}{" "}
+                    <span className="whitespace-nowrap">· v{inv.version_num}</span>
+                  </p>
                   {inv.matching_items && inv.matching_items.length > 0 && (
-                    <div className="mt-2 p-2 border rounded bg-yellow-50">
+                    <div className="clear-both mt-2 p-2 border rounded bg-yellow-50">
                       <p className="text-xs font-medium text-gray-700">Corrispondenze trovate:</p>
                       <ul className="text-sm list-disc list-inside dark:text-black">
                         {inv.matching_items.map((item: {
@@ -580,61 +637,7 @@ export default function GenericListPage() {
           ))}
         </ul>
       )}
-      <div
-        className={`z-40 gap-2 flex ${
-          window.innerWidth >= 768
-            ? 'fixed top-4 right-4 flex-row'
-            : 'fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 -translate-x-1/2 flex-row rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90'
-        }`}
-      >
-        {editMode && selectedItems.length > 0 && (
-          <button
-            onClick={async () => {
-              const deletableIds = items
-                .filter(inv => selectedItems.includes(inv.id) && inv.item_count === 0)
-                .map(inv => inv.id);
-              const nonDeletable = items
-                .filter(inv => selectedItems.includes(inv.id) && inv.item_count > 0);
-              if (deletableIds.length === 0 && nonDeletable.length > 0) {
-                showMessage((isInventory ? 'Puoi eliminare solo inventari vuoti.' : 'Puoi eliminare solo liste vuote.'), 'error');
-                return;
-              }
-              if (window.confirm('Sei sicuro di voler cancellare gli elementi selezionati senza oggetti?')) {
-                for (const id of deletableIds) {
-                  if (isInventory) await deleteInventory(id);
-                  else await deleteChecklist(id);
-                }
-                setItems((prev) => prev.filter((i) => !deletableIds.includes(i.id)));
-                setSelectedItems([]);
-                setEditMode(false);
-                showMessage('Eliminazione completata.', 'success');
-              }
-            }}
-            className="flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg bg-red-600 hover:bg-red-700"
-          >
-            <span className="inline md:hidden">🗑️ </span>
-            <span className="hidden md:inline">Elimina </span>
-          </button>
-        )}
-        {canEdit && (
-          <>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg bg-blue-500 hover:bg-blue-600"
-            >
-              <span className="inline md:hidden">➕</span>
-              <span className="hidden md:inline">Nuovo</span>
-            </button>
-            <button
-              onClick={() => { setEditMode((prev) => !prev); setSelectedItems([]); }}
-              className={`flex h-10 min-w-12 items-center justify-center rounded-xl px-3 py-2 text-white shadow-lg ${editMode ? 'bg-yellow-700' : 'bg-yellow-500 hover:bg-yellow-600'}`}
-            >
-              <span className="inline md:hidden">{editMode ? '✖️' : '✏️'}</span>
-              <span className="hidden md:inline">{editMode ? 'Chiudi' : 'Modifica'}</span>
-            </button>
-          </>
-        )}
-      </div>
+      {!desktop && actions}
       {message && (
         <div
           className={`fixed z-50 p-3 rounded shadow-lg text-white transition-opacity duration-1000 ${

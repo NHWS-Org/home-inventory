@@ -263,6 +263,8 @@ def list_filter_templates(
 
     result: list[FilterTemplateListWithScope] = []
     for template in templates:
+        if isinstance(template.criteria, dict) and template.criteria.get("version") == 2:
+            continue
         definition_ids = template_definition_ids.get(template.id, [])
         if not include_incompatible and not _is_compatible_with_inventory(assignments_by_def, inventory, definition_ids):
             continue
@@ -309,6 +311,8 @@ def get_filter_template(
         or template.user_ins == user.id
         or template.is_shared
     ):
+        if isinstance(template.criteria, dict) and template.criteria.get("version") == 2:
+            raise HTTPException(409, "Filtro generico: utilizzare /filters")
         return template
 
     raise HTTPException(status_code=403, detail="Accesso negato")
@@ -356,6 +360,8 @@ def update_filter_template(
     template = _get_filter_template_or_404(db, template_id)
     if template.user_ins != user.id and user.role.name != RoleEnum.admin.value:
         raise HTTPException(status_code=403, detail="Accesso negato")
+    if isinstance(template.criteria, dict) and template.criteria.get("version") == 2:
+        raise HTTPException(409, "Filtro generico: utilizzare /filters")
 
     updates = payload.model_dump(exclude_unset=True)
     if "name" in updates and updates["name"]:
@@ -372,6 +378,8 @@ def update_filter_template(
         setattr(template, field, value)
 
     template.user_mod = user.id
+    from trigger_service import invalidate_filter_triggers
+    invalidate_filter_triggers(db, template.id)
     db.commit()
     db.refresh(template)
     return template
@@ -387,6 +395,8 @@ def delete_filter_template(
     if template.user_ins != user.id and user.role.name != RoleEnum.admin.value:
         raise HTTPException(status_code=403, detail="Accesso negato")
 
+    from trigger_service import delete_filter_triggers
+    delete_filter_triggers(db, template.id)
     db.delete(template)
     db.commit()
     return {"detail": "Template filtro eliminato"}

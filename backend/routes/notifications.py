@@ -1,111 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dependencies import get_current_user, get_db
-from models import (
-    Group, Inventory, Notification, NotificationEvent, NotificationPreference, NotificationRule, User,
-)
-from notification_contracts import (
-    NotificationEventType, NotificationPreferenceInput, NotificationRuleInput,
-    notification_event_adapter,
-)
+from models import Inventory, Item, Notification, NotificationEvent, NotificationPreference, User
+from notification_contracts import NotificationBulkAction, NotificationEventType, NotificationPreferenceInput
 from notification_outbox import utcnow
-from notification_rules import can_receive
+from notification_service import can_receive, default_in_app, event_inventory, trigger_inbox_authorized
 from routes.push import router as push_router
 
 router = APIRouter()
-
-
-def managed_inventory(db: Session, user: User, inventory_id: int) -> Inventory:
-    inventory = db.get(Inventory, inventory_id)
-    if inventory is None:
-        raise HTTPException(404, "Inventario non trovato")
-    if user.role.name != "admin" and inventory.owner_id != user.id:
-        raise HTTPException(403, "Solo proprietario o admin possono gestire le regole")
-    return inventory
-
-
-def validate_scope(db: Session, inventory: Inventory, config: NotificationRuleInput) -> None:
-    if (
-        config.event_type == "item_quantity_changed" and inventory.type != "INVENTORY"
-        or config.event_type == "checklist_completed" and inventory.type != "CHECKLIST"
-    ):
-        raise HTTPException(422, "Evento non disponibile per questo tipo di contenitore")
-    for recipient in config.recipients:
-        if recipient.kind == "user":
-            user = db.get(User, recipient.id)
-            if user is None or not can_receive(user, inventory):
-                raise HTTPException(422, "Destinatario non autorizzato")
-        elif recipient.kind == "group":
-            group = db.get(Group, recipient.id)
-            if group is None or not any(
-                share.group_id == recipient.id for share in inventory.shared_with_groups
-            ):
-                raise HTTPException(422, "Gruppo non condiviso con il contenitore")
-
-
-def rule_response(rule: NotificationRule) -> dict:
-    return {
-        "id": rule.id, "inventory_id": rule.inventory_id, "event_type": rule.event_type,
-        "threshold": rule.threshold, "recipients": rule.recipients, "enabled": rule.enabled,
-    }
-
-
-@router.get("/rules/{inventory_id}")
-def list_rules(inventory_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    managed_inventory(db, user, inventory_id)
-    return [rule_response(rule) for rule in db.scalars(select(NotificationRule).where(
-        NotificationRule.inventory_id == inventory_id,
-    ).order_by(NotificationRule.id))]
-
-
-@router.post("/rules/{inventory_id}", status_code=201)
-def create_rule(
-    inventory_id: int, payload: NotificationRuleInput,
-    db: Session = Depends(get_db), user=Depends(get_current_user),
-):
-    inventory = managed_inventory(db, user, inventory_id)
-    validate_scope(db, inventory, payload)
-    rule = NotificationRule(
-        inventory_id=inventory_id, **payload.model_dump(),
-        data_ins=utcnow(), data_mod=utcnow(), user_ins=user.id, user_mod=user.id,
-    )
-    db.add(rule)
-    db.commit()
-    db.refresh(rule)
-    return rule_response(rule)
-
-
-@router.put("/rules/{inventory_id}/{rule_id}")
-def update_rule(
-    inventory_id: int, rule_id: int, payload: NotificationRuleInput,
-    db: Session = Depends(get_db), user=Depends(get_current_user),
-):
-    inventory = managed_inventory(db, user, inventory_id)
-    rule = db.get(NotificationRule, rule_id)
-    if rule is None or rule.inventory_id != inventory_id:
-        raise HTTPException(404, "Regola non trovata")
-    validate_scope(db, inventory, payload)
-    for name, value in payload.model_dump().items():
-        setattr(rule, name, value)
-    rule.user_mod = user.id
-    rule.data_mod = utcnow()
-    db.commit()
-    return rule_response(rule)
-
-
-@router.delete("/rules/{inventory_id}/{rule_id}")
-def delete_rule(
-    inventory_id: int, rule_id: int, db: Session = Depends(get_db), user=Depends(get_current_user),
-):
-    managed_inventory(db, user, inventory_id)
-    rule = db.get(NotificationRule, rule_id)
-    if rule is None or rule.inventory_id != inventory_id:
-        raise HTTPException(404, "Regola non trovata")
-    db.delete(rule)
-    db.commit()
-    return {"message": "Regola eliminata"}
 
 
 @router.get("/preferences")
@@ -115,9 +22,8 @@ def preferences(db: Session = Depends(get_db), user=Depends(get_current_user)):
     ))}
     return [{
         "event_type": kind.value,
-        "in_app_enabled": stored[kind.value].in_app_enabled if kind.value in stored else True,
+        "in_app_enabled": stored[kind.value].in_app_enabled if kind.value in stored else default_in_app(kind.value),
         "push_enabled": stored[kind.value].push_enabled if kind.value in stored else False,
-        "include_own_actions": stored[kind.value].include_own_actions if kind.value in stored else False,
     } for kind in NotificationEventType]
 
 
@@ -135,33 +41,37 @@ def set_preference(
             user_id=user.id, event_type=event_type.value, user_ins=user.id,
         )
         db.add(row)
+    settings = payload.model_dump()
     row.in_app_enabled = payload.in_app_enabled
     row.push_enabled = payload.push_enabled
-    row.include_own_actions = payload.include_own_actions
     row.user_mod = user.id
     db.commit()
-    return {"event_type": event_type.value, **payload.model_dump()}
+    return {"event_type": event_type.value, **settings}
 
 
-def accessible_notification(db: Session, row: Notification, user: User) -> NotificationEvent | None:
+def accessible_notification_context(
+    db: Session, row: Notification, user: User,
+) -> tuple[NotificationEvent, Inventory] | None:
     record = db.get(NotificationEvent, row.event_id)
     if record is None or record.schema_version != 1:
         return None
-    data = notification_event_adapter.validate_python(record.payload)
-    inventory = db.get(Inventory, data.inventory_id)
-    return record if inventory is not None and can_receive(user, inventory) else None
+    inventory = event_inventory(db, record)
+    return (record, inventory) if (
+        inventory is not None and can_receive(user, inventory) and trigger_inbox_authorized(db, user, record)
+    ) else None
 
 
-@router.get("")
-def inbox(
-    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db), user=Depends(get_current_user),
-):
-    result = []
-    skipped = 0
+def accessible_notification(db: Session, row: Notification, user: User) -> NotificationEvent | None:
+    context = accessible_notification_context(db, row, user)
+    return context[0] if context is not None else None
+
+
+def accessible_notifications(db: Session, user: User, *, unread_only: bool = False):
     last_id = None
-    while len(result) < limit:
+    while True:
         query = select(Notification).where(Notification.user_id == user.id)
+        if unread_only:
+            query = query.where(Notification.read_at.is_(None))
         if last_id is not None:
             query = query.where(Notification.id < last_id)
         rows = db.scalars(query.order_by(Notification.id.desc()).limit(100)).all()
@@ -169,19 +79,105 @@ def inbox(
             break
         last_id = rows[-1].id
         for row in rows:
-            record = accessible_notification(db, row, user)
-            if record is None:
-                continue
-            if skipped < offset:
-                skipped += 1
-                continue
-            result.append({
-                "id": row.id, "created_at": row.created_at, "read_at": row.read_at,
-                "event": record.payload,
-            })
-            if len(result) == limit:
-                break
+            context = accessible_notification_context(db, row, user)
+            if context is not None:
+                yield row, context[0], context[1]
+
+
+def action_time(record: NotificationEvent) -> datetime:
+    value = record.payload.get("scheduled_at", record.payload.get("action_at"))
+    result = datetime.fromisoformat(value) if value else record.created_at
+    return result.astimezone(timezone.utc).replace(tzinfo=None) if result.tzinfo else result
+
+
+@router.get("")
+def inbox(
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), unread_only: bool = False,
+    db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    result = []
+    authorized = sorted(
+        accessible_notifications(db, user, unread_only=unread_only),
+        key=lambda entry: (action_time(entry[1]), entry[0].id), reverse=True,
+    )
+    for row, record, inventory in authorized[offset:offset + limit]:
+        item_id = record.payload.get("item_id")
+        item = db.get(Item, item_id) if item_id is not None else None
+        result.append({
+            "id": row.id, "created_at": row.created_at, "read_at": row.read_at,
+            "action_at": action_time(record),
+            "event": record.payload, "inventory_type": inventory.type,
+            "inventory_name": inventory.name, "item_name": item.name if item is not None else None,
+        })
     return result
+
+
+@router.get("/unread-count")
+def unread_count(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return {"count": sum(1 for _ in accessible_notifications(db, user, unread_only=True))}
+
+
+@router.put("/read-all")
+def read_all(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    read_at = utcnow()
+    updated = 0
+    for row, _record, _inventory in accessible_notifications(db, user, unread_only=True):
+        row.read_at = read_at
+        updated += 1
+    if updated:
+        db.commit()
+    return {"updated": updated}
+
+
+def change_notifications(db: Session, user: User, payload: NotificationBulkAction) -> dict[str, int]:
+    if payload.all:
+        rows = [row for row, _record, _inventory in accessible_notifications(db, user, unread_only=payload.unread_only)]
+    else:
+        rows = list(db.scalars(select(Notification).where(
+            Notification.user_id == user.id, Notification.id.in_(set(payload.ids)),
+        )))
+        if len(rows) != len(set(payload.ids)) or any(
+            accessible_notification(db, row, user) is None for row in rows
+        ):
+            raise HTTPException(404, "Notifica non trovata o accesso revocato")
+    changed = 0
+    read_at = utcnow()
+    for row in rows:
+        if payload.action == "delete":
+            db.delete(row)
+            changed += 1
+        elif row.read_at is None:
+            row.read_at = read_at
+            changed += 1
+    if changed:
+        db.commit()
+    return {"updated": changed}
+
+
+@router.post("/bulk")
+def bulk_notifications(
+    payload: NotificationBulkAction, db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    return change_notifications(db, user, payload)
+
+
+@router.delete("/{notification_id}")
+def delete_notification(
+    notification_id: int = Path(gt=0), db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    return change_notifications(db, user, NotificationBulkAction(action="delete", ids=[notification_id]))
+
+
+@router.put("/events/{event_key}/read")
+def read_event_notification(
+    event_key: UUID, db: Session = Depends(get_db), user=Depends(get_current_user),
+):
+    row = db.scalar(select(Notification).join(
+        NotificationEvent, NotificationEvent.id == Notification.event_id,
+    ).where(Notification.user_id == user.id, NotificationEvent.event_key == str(event_key)))
+    if row is None:
+        raise HTTPException(404, "Notifica non trovata")
+    return read_notification(row.id, db, user)
 
 
 @router.put("/{notification_id}/read")

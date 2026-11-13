@@ -10,18 +10,9 @@ import tempfile
 from threading import Event
 import time
 
-from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
-
-from database import SessionLocal
-from models import NotificationEvent, PushDelivery, PushSubscription
-from notification_outbox import LEASE_SECONDS, claim_event, process_claim
-from push_config import load_push_config
-from web_push import claim_push, process_push
-
 logger = logging.getLogger(__name__)
 HEARTBEAT_PATH = Path(tempfile.gettempdir()) / "home-inventory-notification-worker.json"
-HEARTBEAT_MAX_AGE_SECONDS = LEASE_SECONDS * 2
+HEARTBEAT_MAX_AGE_SECONDS = 120
 
 
 def write_heartbeat(path: Path = HEARTBEAT_PATH) -> None:
@@ -30,7 +21,9 @@ def write_heartbeat(path: Path = HEARTBEAT_PATH) -> None:
     temporary.replace(path)
 
 
-def check_health(factory=SessionLocal, path: Path = HEARTBEAT_PATH) -> bool:
+def check_health(factory=None, path: Path = HEARTBEAT_PATH) -> bool:
+    started = time.monotonic()
+    logger.info("Healthcheck: checking worker heartbeat")
     try:
         heartbeat = json.loads(path.read_text())
         pid = heartbeat["pid"]
@@ -41,26 +34,45 @@ def check_health(factory=SessionLocal, path: Path = HEARTBEAT_PATH) -> bool:
         if not 0 <= age <= HEARTBEAT_MAX_AGE_SECONDS:
             raise ValueError("Stale heartbeat")
         os.kill(pid, 0)
-        with factory() as db:
-            db.execute(select(NotificationEvent.id).limit(1))
-            db.execute(select(PushDelivery.id).limit(1))
-    except (OSError, ValueError, KeyError, TypeError, SQLAlchemyError) as exc:
-        logger.error("Notification worker healthcheck failed (%s)", type(exc).__name__)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        logger.error("Notification worker healthcheck failed at heartbeat (%s)", type(exc).__name__)
         return False
+    logger.info("Healthcheck: checking database")
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        if factory is None:
+            from database import SessionLocal
+
+            factory = SessionLocal
+        with factory() as db:
+            db.execute(text("SELECT id FROM notification_events LIMIT 1"))
+            db.execute(text("SELECT id FROM push_deliveries LIMIT 1"))
+            db.execute(text("SELECT id FROM scheduled_triggers LIMIT 1"))
+            db.execute(text("SELECT id FROM trigger_runs LIMIT 1"))
+    except (OSError, ValueError, SQLAlchemyError) as exc:
+        logger.error("Notification worker healthcheck failed at database (%s)", type(exc).__name__)
+        return False
+    logger.info("Notification worker healthcheck passed in %.3fs", time.monotonic() - started)
     return True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Database-backed notification outbox worker")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--once", action="store_true", help="Process at most one event and exit")
+    mode.add_argument("--once", action="store_true", help="Run one bounded scheduler/outbox/push cycle and exit")
     mode.add_argument("--status", action="store_true", help="Report queue counts without processing")
     mode.add_argument("--healthcheck", action="store_true", help="Check worker heartbeat and database")
     mode.add_argument("--reset-push", action="store_true", help="Discard subscriptions and push work after an offline database restore")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.healthcheck:
         raise SystemExit(0 if check_health() else 1)
+    from sqlalchemy import func, select
+    from database import SessionLocal
+    from models import NotificationEvent, PushDelivery, PushSubscription
+
     if args.reset_push:
         with SessionLocal.begin() as db:
             deliveries = db.query(PushDelivery).delete()
@@ -78,14 +90,28 @@ def main() -> None:
         logger.info("Notification queue counts: %s", counts)
         logger.info("Web Push queue counts: %s", push_counts)
         return
+    from notification_outbox import claim_event, process_claim
+    from push_config import load_push_config
+    from web_push import claim_push, process_push
+    from trigger_service import run_due_triggers
+
     config = load_push_config()
-    logger.info("Notification rules enabled; Web Push %s", "enabled" if config else "disabled")
+    logger.info(
+        "Notification worker started (pid=%s); personal notifications enabled; Web Push %s",
+        os.getpid(), "enabled" if config else "disabled",
+    )
     stop = Event()
+
+    def request_stop(signum, _frame):
+        logger.info("Notification worker received signal %s; stopping", signum)
+        stop.set()
+
     for signum in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(signum, lambda _signum, _frame: stop.set())
+        signal.signal(signum, request_stop)
     HEARTBEAT_PATH.unlink(missing_ok=True)
     try:
         while not stop.is_set():
+            run_due_triggers(SessionLocal)
             claim = claim_event(SessionLocal)
             if claim is not None:
                 succeeded = process_claim(SessionLocal, claim)
@@ -106,6 +132,7 @@ def main() -> None:
                 stop.wait(2)
     finally:
         HEARTBEAT_PATH.unlink(missing_ok=True)
+        logger.info("Notification worker stopped (pid=%s)", os.getpid())
 
 
 if __name__ == "__main__":

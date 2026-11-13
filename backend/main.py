@@ -20,11 +20,14 @@ from routes.backup import router as backup_router
 from routes.audit import router as audit_router
 from routes.metadata import router as metadata_router
 from routes.filters import router as filters_router
+from routes.generic_filters import router as generic_filters_router
+from routes.triggers import router as triggers_router
 from routes.notifications import router as notifications_router
 from fastapi.middleware.cors import CORSMiddleware
 from models import Inventory, Item, User
 from scheduler import start_scheduler
 from fastapi.responses import JSONResponse
+from push_config import load_push_config
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("uvicorn.access").addFilter(
@@ -33,6 +36,7 @@ logging.getLogger("uvicorn.access").addFilter(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    load_push_config(create_if_missing=True)
     db = SessionLocal()
     try:
         init_roles_and_admin(db)
@@ -89,6 +93,8 @@ app.include_router(backup_router, prefix="/backup", tags=["Backups"])
 app.include_router(audit_router, prefix="/audit", tags=["Audit"])
 app.include_router(metadata_router, prefix="/metadata", tags=["Metadata"])
 app.include_router(filters_router, prefix="/filter-templates", tags=["Filter Templates"])
+app.include_router(generic_filters_router, prefix="/filters", tags=["Filters"])
+app.include_router(triggers_router, prefix="/triggers", tags=["Triggers"])
 app.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
 
 @app.get("/")

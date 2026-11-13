@@ -22,6 +22,7 @@ import {
   ItemMetadataValue,
   ItemMetadataValueCreate,
   ItemMetadataValueUpdate,
+  ItemMetadataValueUpsert,
   ItemMetadataBulkUpsertRequest,
   TextMetadataFilterRequest,
   TextMetadataFilterResponse,
@@ -60,6 +61,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
+      const requestAuthorization = error.config?.headers?.Authorization;
+      const currentToken = localStorage.getItem('access_token');
+      if (typeof requestAuthorization === 'string' && requestAuthorization !== `Bearer ${currentToken}`) {
+        return Promise.reject(error);
+      }
       localStorage.removeItem('access_token');
       if (
         typeof window !== 'undefined' &&
@@ -165,7 +171,7 @@ export async function revokeDeviceSession(sessionId: number): Promise<void> {
 
 export interface PushConfiguration {
   public_key: string;
-  payload_mode: "generic";
+  payload_mode: "detailed";
   ttl_seconds: number;
 }
 
@@ -186,7 +192,7 @@ export async function getPushSubscriptions(): Promise<PushSubscriptionRecord[]> 
 export async function savePushSubscription(subscription: PushSubscriptionJSON): Promise<{
   id: number;
   expires_at: string;
-  payload_mode: "generic";
+  payload_mode: "detailed";
 }> {
   return (await api.post("/notifications/push/subscriptions", {
     ...subscription,
@@ -223,6 +229,10 @@ export async function getUsers(): Promise<User[]> {
 export async function getApiVersion(): Promise<{ version: string }> {
   const response = await api.get<{ version: string }>("/system/version");
   return response.data;
+}
+
+export async function getRecentItemsLimit(): Promise<number> {
+  return (await api.get<{ limit: number }>("/system/recent-items-limit")).data.limit;
 }
 
 export interface AboutStats {
@@ -421,6 +431,7 @@ export async function createItem(data: {
   priority?: number;
   inventory_id: number;
   barcodes?: { code: string; format?: string | null }[];
+  metadata_values?: ItemMetadataValueUpsert[];
 }): Promise<InventoryItem> {
   const response = await api.post('/item/', data);
   return response.data as InventoryItem;

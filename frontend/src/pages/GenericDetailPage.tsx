@@ -4,11 +4,9 @@ import {
   getInventoryById, getInventoryItems,
   getChecklistById, getChecklistItems,
   createItem, updateItem, deleteItem,
-  getMetadataDefinitions, listAllMetadataDefinitions, getItemMetadataValues,
-  getFilterTemplates, getFilterTemplate,
-  filterItemsByTextMetadata, filterItemsByNumericMetadata, filterItemsByDateMetadata, filterItemsByBooleanMetadata,
+  getMetadataDefinitions, getItemMetadataValues,
   bulkUpsertItemMetadataValues, deleteItemMetadataValue, createAssignment, deleteAssignment } from "../api";
-import { Inventory, InventoryItem, Item, User, MetadataDefinition, ItemMetadataValue, ItemMetadataValueUpsert, FilterTemplate, FilterTemplateListItem } from "../types";
+import { Inventory, InventoryItem, Item, User, MetadataDefinition, ItemMetadataValue, ItemMetadataValueUpsert } from "../types";
 import { Dialog } from "@headlessui/react";
 import { FiArrowLeft, FiClock } from 'react-icons/fi';
 import { createPortal } from 'react-dom';
@@ -16,14 +14,20 @@ import { useContext } from "react";
 import { AuthContext } from "../auth-context";
 import { useSwipeable } from 'react-swipeable';
 import { HistoryModal } from "../components/HistoryModal";
-import MetadataFilterManager from "../components/MetadataFilterManager";
 import { ITEMS_CHANGED_EVENT } from "../components/GlobalBarcodeScan";
 import ItemBarcodesEditor from "../components/ItemBarcodesEditor";
 import { useBottomSheetDrag } from "../components/useBottomSheetDrag";
 import { AddFromInventoryDialog, AssignExistingListItemDialog, AssignToListDialog, EditAssignmentDialog, ListLinkField, SourceAssignmentsDialog } from "../components/AssignmentDialogs";
+import { isAxiosError } from "axios";
+import { scrollPageToTop } from "../utils/scrollPageToTop";
+import MobileItemFilters from "../components/MobileItemFilters";
+import { useDesktopLayout } from "../useDesktopLayout";
+import { highlightSearchText } from "../utils/highlightText";
+import { evaluateFilter, getFilter, getFilters, type FilterResponse } from "../filtersApi";
 
 interface Props {
   item: Item;
+  search?: string;
   isMobile: boolean;
   isChecklist: boolean;
   isInventory: boolean;
@@ -39,6 +43,16 @@ interface Props {
 }
 
 type MetadataDraftMap = Record<number, ItemMetadataValueUpsert>;
+
+async function createItemWithFeedback(data: Parameters<typeof createItem>[0]) {
+  try {
+    return await createItem(data);
+  } catch (error) {
+    const detail = isAxiosError<{ detail?: string }>(error) ? error.response?.data?.detail : undefined;
+    window.alert(typeof detail === "string" ? `Creazione non riuscita: ${detail}` : "Creazione non riuscita. Riprova.");
+    return null;
+  }
+}
 
 const ITEM_PRIORITY_OPTIONS = [
   { value: 2, label: "🔥🔥 Molto alta" },
@@ -268,7 +282,7 @@ function MetadataFieldsSection({
 }
 
 export function SwipeableItemRow({
-  item, isMobile, isChecklist, isInventory, user,
+  item, search = '', isMobile, isChecklist, isInventory, user,
   isEditMode, selectedItems, setSelectedItems, setItemBeingEdited,
   updateItem, deleteItem, setItems, setIsCloning, 
 }: Props) {
@@ -403,12 +417,6 @@ export function SwipeableItemRow({
     }
   };
 
-  const actionGridColumns = isEditMode && !isViewer
-    ? (isInventory ? 'grid-cols-6' : 'grid-cols-4')
-    : isInventory && !isViewer
-      ? 'grid-cols-5'
-      : 'grid-cols-2';
-
   return (
     <div
       ref={combinedRef}
@@ -451,7 +459,7 @@ export function SwipeableItemRow({
 
       {/* Actual list item */}
       <li
-        className={`relative border p-2 rounded shadow-sm flex flex-col md:flex-row md:justify-between md:items-center
+        className={`relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 border px-2 py-1.5 rounded shadow-sm md:items-center md:gap-y-0 md:p-2
     ${isEditMode && selectedItems.includes(item.id) ? "bg-blue-100 dark:bg-blue-900" : "bg-white dark:bg-gray-800"}
     md:hover:bg-gray-100 dark:md:hover:bg-gray-700
     ${(isChecklist && item.quantity > 0) || (isInventory && item.quantity === 0) ? "text-gray-400" : ""}`}
@@ -465,7 +473,7 @@ export function SwipeableItemRow({
           }
         }}
       >
-        <div className="flex w-full flex-row items-start gap-2 md:w-auto md:items-center">
+        <div className="col-start-1 row-start-1 flex min-w-0 flex-row items-start gap-2 md:items-center">
           {isEditMode && (
             <div className="flex shrink-0 items-center md:mr-1">
               <span className="text-base">
@@ -473,9 +481,9 @@ export function SwipeableItemRow({
               </span>
             </div>
           )}
-          <div className="flex flex-col">
-            <div className="font-semibold flex items-center gap-2">
-              <span>{item.name}</span>
+          <div className="flex min-w-0 flex-col">
+            <div className="font-semibold flex flex-wrap items-center gap-x-2 gap-y-1 leading-5 md:leading-normal">
+              <span className="min-w-0 break-words [overflow-wrap:anywhere]">{highlightSearchText(item.name, search)}</span>
               {isChecklist && (
                 <span ref={priorityMenuRef} className="relative inline-flex">
                   <button
@@ -517,9 +525,6 @@ export function SwipeableItemRow({
                   )}
                 </span>
               )}
-              <span className="text-xs font-mono bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
-                v{item.version_num}
-              </span>
               {(item.barcodes?.length ?? 0) > 0 && (
                 <span
                   className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 px-2 py-1 rounded whitespace-nowrap"
@@ -530,14 +535,14 @@ export function SwipeableItemRow({
               )}
             </div>
             {item.description && (
-              <div className="text-sm text-gray-500 dark:text-gray-200">{item.description}</div>
+              <div className="break-words text-sm leading-tight text-gray-500 dark:text-gray-200 md:leading-5">{highlightSearchText(item.description, search)}</div>
             )}
             {isChecklist && item.assignment && (
               <button
                 type="button"
                 disabled={isViewer}
                 onClick={(e) => { e.stopPropagation(); setAssignDialog('edit'); }}
-                className={`mt-1 min-h-11 max-w-full self-start rounded-xl px-3 py-2 text-sm ${
+                className={`mt-1 min-h-9 max-w-full self-start break-words rounded-lg px-2 py-1 text-xs md:min-h-11 md:rounded-xl md:px-3 md:py-2 md:text-sm ${
                   item.quantity === 0 && ((item.assignment.source_stock ?? 0) < item.assignment.qty || (item.assignment.source_net_qty ?? 0) < 0)
                     ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
@@ -552,7 +557,7 @@ export function SwipeableItemRow({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setAssignDialog('link'); }}
-                className="mt-1 min-h-11 self-start rounded-xl bg-blue-100 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                className="mt-1 hidden min-h-11 self-start rounded-xl bg-blue-100 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900 dark:text-blue-200 md:block"
               >
                 📥 Assegna
               </button>
@@ -561,7 +566,7 @@ export function SwipeableItemRow({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setAssignDialog('sources'); }}
-                className={`mt-1 min-h-11 max-w-full self-start rounded-xl px-3 py-2 text-sm ${
+                className={`mt-1 min-h-9 max-w-full self-start break-words rounded-lg px-2 py-1 text-xs md:min-h-11 md:rounded-xl md:px-3 md:py-2 md:text-sm ${
                   (item.net_qty ?? 0) < 0
                     ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                     : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
@@ -579,74 +584,89 @@ export function SwipeableItemRow({
                   .map((value) => (
                     <span
                       key={value.id}
-                      className="rounded-full bg-slate-100 px-2 py-0.5 text-sm text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+                      className="max-w-full break-words rounded-full bg-slate-100 px-1.5 py-0.5 text-xs leading-4 text-slate-700 dark:bg-slate-700 dark:text-slate-100 md:px-2 md:text-sm md:leading-5"
                     >
-                      {value.definition_label}: {formatItemMetadataValue(value)}
+                      {value.definition_label}: {highlightSearchText(formatItemMetadataValue(value), search)}
                     </span>
                   ))}
               </div>
             )}
-            <div className="mt-1 text-xs text-gray-400">
-              Ultima modifica: {item.username_mod} - {new Date(item.data_mod).toLocaleString()}
-            </div>
           </div>
         </div>
-        <div className={`mt-2 grid w-full ${actionGridColumns} gap-1.5 md:mt-0 md:flex md:w-auto md:items-center md:justify-end`}>
-          <button
-            type="button"
-            className="col-span-1 min-h-11 w-full rounded-lg bg-gray-200 px-1 text-base text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm md:whitespace-nowrap"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsItemHistoryOpen(true);
-            }}
-            title="Visualizza cronologia item"
-            aria-label="Visualizza cronologia item"
-          >
-            <span className="inline md:hidden">🕓</span>
-            <span className="hidden md:inline">Cronologia</span>
-          </button>
-          {isInventory && !isViewer && !isEditMode && (
+        <div className="col-start-1 row-start-2 min-w-0 self-center break-words text-[11px] leading-4 text-gray-400 md:mt-1 md:text-xs">
+          <span className="sr-only md:not-sr-only">Ultima modifica: </span>
+          {item.username_mod} - {new Date(item.data_mod).toLocaleString()}{" "}
+          <span className="whitespace-nowrap">· v{item.version_num}</span>
+        </div>
+        <div className="contents md:col-start-2 md:row-start-1 md:row-span-2 md:flex md:items-center md:justify-end md:gap-1.5">
+          <div className="col-start-2 row-start-2 flex flex-wrap justify-end gap-1 md:contents">
             <button
               type="button"
-            className="col-span-1 min-h-11 w-full rounded-lg bg-gray-200 px-1 text-base text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:min-h-0 md:w-auto md:rounded md:px-3 md:py-1 md:text-sm md:whitespace-nowrap"
-              onClick={(e) => { e.stopPropagation(); setAssignDialog('assign'); }}
-              title="Assegna a una lista"
-              aria-label="Assegna a una lista"
+              className="h-9 w-9 shrink-0 rounded-lg bg-gray-200 text-sm text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:h-auto md:w-auto md:rounded md:px-3 md:py-1 md:whitespace-nowrap"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsItemHistoryOpen(true);
+              }}
+              title="Visualizza cronologia item"
+              aria-label="Visualizza cronologia item"
             >
-              <span className="inline md:hidden">📋</span>
-              <span className="hidden md:inline">📋 Assegna</span>
+              <span className="inline md:hidden">🕓</span>
+              <span className="hidden md:inline">Cronologia</span>
             </button>
-          )}
-          {isEditMode && !isViewer && (
-            <>
+            {isInventory && !isViewer && !isEditMode && (
               <button
                 type="button"
-                className="col-span-1 min-h-11 w-full rounded-lg bg-yellow-500 px-1 text-lg text-white md:min-h-0 md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cloneItem();
-                }}
-                aria-label="Clona item"
+                className="h-9 w-9 shrink-0 rounded-lg bg-gray-200 text-sm text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600 md:h-auto md:w-auto md:rounded md:px-3 md:py-1 md:whitespace-nowrap"
+                onClick={(e) => { e.stopPropagation(); setAssignDialog('assign'); }}
+                title="Assegna a una lista"
+                aria-label="Assegna a una lista"
               >
-                <span className="inline md:hidden">📄</span>
-                <span className="hidden md:inline">📄 Clona</span>
+                <span className="inline md:hidden">📋</span>
+                <span className="hidden md:inline">📋 Assegna</span>
               </button>
+            )}
+            {isChecklist && !item.assignment && !isViewer && !isEditMode && (
               <button
                 type="button"
-                className="col-span-1 min-h-11 w-full rounded-lg bg-blue-500 px-1 text-lg text-white md:min-h-0 md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setItemBeingEdited(item);
-                }}
-                aria-label="Modifica item"
+                onClick={(e) => { e.stopPropagation(); setAssignDialog('link'); }}
+                className="h-9 w-9 shrink-0 rounded-lg bg-blue-100 text-sm text-blue-800 dark:bg-blue-900 dark:text-blue-200 md:hidden"
+                title="Assegna da inventario"
+                aria-label="Assegna da inventario"
               >
-                <span className="inline md:hidden">✏️</span>
-                <span className="hidden md:inline">✏️ Modifica</span>
+                📥
               </button>
-            </>
-          )}
+            )}
+            {isEditMode && !isViewer && (
+              <>
+                <button
+                  type="button"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-yellow-500 text-base text-white md:h-auto md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cloneItem();
+                  }}
+                  aria-label="Clona item"
+                >
+                  <span className="inline md:hidden">📄</span>
+                  <span className="hidden md:inline">📄 Clona</span>
+                </button>
+                <button
+                  type="button"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-blue-500 text-base text-white md:h-auto md:w-auto md:rounded md:px-2 md:py-1 md:text-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setItemBeingEdited(item);
+                  }}
+                  aria-label="Modifica item"
+                >
+                  <span className="inline md:hidden">✏️</span>
+                  <span className="hidden md:inline">✏️ Modifica</span>
+                </button>
+              </>
+            )}
+          </div>
           {isChecklist ? (
-            <div className="col-span-1 flex min-h-11 w-full items-center justify-center md:h-full">
+            <label className="col-start-2 row-start-1 flex h-11 min-w-11 items-center justify-end self-center md:h-full md:min-w-0">
               <input
                 type="checkbox"
                 checked={item.quantity > 0}
@@ -655,13 +675,12 @@ export function SwipeableItemRow({
                   if (isViewer) return;
                   toggleChecked(e.target.checked);
                 }}
-                className="h-10 w-10 accent-blue-600 focus:ring-2 rounded shadow-sm border-2 border-gray-400 dark:border-gray-600"
-                style={{ minWidth: '2.5rem', minHeight: '2.5rem' }}
+                className="h-11 w-11 accent-blue-600 focus:ring-2 rounded shadow-sm border-2 border-gray-400 dark:border-gray-600 md:h-10 md:w-10"
                 aria-label="Completato"
               />
-            </div>
+            </label>
           ) : isInventory && !isViewer ? (
-            <div className="col-span-3 grid w-full grid-cols-3 gap-1.5 md:col-span-1 md:flex md:w-auto md:items-center">
+            <div className="col-start-2 row-start-1 grid grid-cols-[44px_minmax(28px,auto)_44px] items-center gap-1 self-center md:flex md:gap-1.5">
               <button
                 type="button"
                 aria-label="Diminuisci quantità"
@@ -700,7 +719,7 @@ export function SwipeableItemRow({
               </button>
             </div>
           ) : (
-            <span className="min-w-[24px] text-center">{item.quantity}</span>
+            <span className="col-start-2 row-start-1 min-w-[36px] self-center text-center md:min-w-[24px]">{item.quantity}</span>
           )}
         </div>
       </li>
@@ -732,7 +751,8 @@ export function SwipeableItemRow({
 }
 
 export default function InventoryDetailPage() {
-  const isMobile = window.innerWidth < 768;
+  const isMobile = !useDesktopLayout();
+  const compactControls = !useDesktopLayout(1280);
   const authContext = useContext(AuthContext);
   const user = authContext?.user ?? null;
   const isAdmin = user?.role?.name === 'admin';
@@ -782,20 +802,34 @@ export default function InventoryDetailPage() {
     return 'desc';
   });
   const [itemBeingEdited, setItemBeingEdited] = useState<Item | null>(null);
-  const detailTopRef = useRef<HTMLDivElement>(null);
   const filtroParam = filterText;
   const [isCloning, setIsCloning] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [metadataDefinitions, setMetadataDefinitions] = useState<MetadataDefinition[]>([]);
-  const [allMetadataDefinitions, setAllMetadataDefinitions] = useState<MetadataDefinition[]>([]);
   const [newItemMetadataDrafts, setNewItemMetadataDrafts] = useState<MetadataDraftMap>({});
   const [editingMetadataDrafts, setEditingMetadataDrafts] = useState<MetadataDraftMap>({});
   const [editingMetadataValues, setEditingMetadataValues] = useState<ItemMetadataValue[]>([]);
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [metadataFilteredItemIds, setMetadataFilteredItemIds] = useState<number[] | null>(null);
   const [metadataFilterSummary, setMetadataFilterSummary] = useState<string | null>(null);
-  const [filterTemplates, setFilterTemplates] = useState<FilterTemplateListItem[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | ''>('');
+  const [filterTemplates, setFilterTemplates] = useState<FilterResponse[]>([]);
+  const initialFilterId = new URLSearchParams(location.search).get('filter_id');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | ''>(
+    initialFilterId && /^[1-9]\d*$/.test(initialFilterId) ? Number(initialFilterId) : '',
+  );
+  const [filterApplyError, setFilterApplyError] = useState('');
+  const filterEvaluationRequest = useRef(0);
+
+  useEffect(() => {
+    if (!initialFilterId) return;
+    if (!/^[1-9]\d*$/.test(initialFilterId)) {
+      setFilterApplyError('Il filtro collegato alla notifica non è valido.');
+      return;
+    }
+    setSelectedTemplateId(Number(initialFilterId));
+    setMetadataFilteredItemIds(null);
+    setMetadataFilterSummary(null);
+  }, [initialFilterId]);
 
   const editingMetadataRecap = metadataDefinitions
     .filter((definition) => definition.is_active)
@@ -822,16 +856,27 @@ useEffect(() => {
 
     const definitionsData = await getMetadataDefinitions(Number(id), true);
     setMetadataDefinitions(definitionsData);
-    const allDefsData = await listAllMetadataDefinitions(true);
-    setAllMetadataDefinitions(allDefsData);
-    const templatesData = await getFilterTemplates(Number(id), true);
-    setFilterTemplates(templatesData);
+    try {
+      const filtersData = await getFilters();
+      const targetType = isChecklist ? 'CHECKLIST' : 'INVENTORY';
+      setFilterTemplates(filtersData.filter(filter =>
+        (filter.container_type === null || filter.container_type === targetType)
+        && !filter.validation_error
+        && filter.scope_preview.scope_type !== 'none'
+        && (filter.scope_preview.scope_type === 'global'
+          || filter.scope_preview.scope_type === 'all_inventories' && targetType === 'INVENTORY'
+          || filter.scope_preview.scope_type === 'all_checklists' && targetType === 'CHECKLIST'
+          || filter.scope_preview.inventories.some(container => container.id === Number(id))),
+      ));
+    } catch {
+      setFilterApplyError('Impossibile caricare i filtri salvati.');
+    }
 
     const itemsData = await getItems(Number(id));
     if (Array.isArray(itemsData)) setItems(itemsData as Item[]);
   };
   fetchData();
-}, [id, isInventory]);
+}, [id, isInventory, isChecklist]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -893,10 +938,16 @@ useEffect(() => {
   useEffect(() => {
     if (selectedTemplateId === '') return;
     const exists = filterTemplates.some((template) => template.id === selectedTemplateId);
-    if (!exists) {
+    if (!exists && filterTemplates.length > 0) {
+      filterEvaluationRequest.current += 1;
+      if (initialFilterId && Number(initialFilterId) === selectedTemplateId) {
+        setFilterApplyError('Il filtro collegato alla notifica non è disponibile per questo contenitore.');
+      }
       setSelectedTemplateId('');
+      setMetadataFilteredItemIds(null);
+      setMetadataFilterSummary(null);
     }
-  }, [filterTemplates, selectedTemplateId]);
+  }, [filterTemplates, selectedTemplateId, initialFilterId]);
 
   useEffect(() => {
     localStorage.setItem("item_sortBy", sortBy);
@@ -1008,113 +1059,113 @@ useEffect(() => {
         }
       };
 
-    const applyTemplateToList = useCallback(async (templateId: number) => {
+    const applyTemplateToList = useCallback(async (filterId: number) => {
+      const request = ++filterEvaluationRequest.current;
+      setFilterApplyError('');
       try {
-        const template: FilterTemplate = await getFilterTemplate(templateId);
-        const root = template.criteria as Record<string, unknown>;
-        const filterType = (root?.filter_type as string) || template.filter_type;
-        const matchMode = (root?.match_mode as 'all' | 'any') || 'all';
-        const criteria = Array.isArray(root?.criteria) ? root.criteria : [];
-
-        if (!criteria.length) {
-          alert('Il template non contiene criteri validi.');
+        const filter = await getFilter(filterId);
+        if (filter.validation_error || filter.conditions.length === 0) {
+          if (request === filterEvaluationRequest.current) {
+            setMetadataFilteredItemIds(null);
+            setMetadataFilterSummary(null);
+            setFilterApplyError(filter.validation_error || 'Il filtro non contiene condizioni valide.');
+          }
           return;
         }
-
-        const asSet = (ids: number[]) => new Set(ids);
-        const intersect = (a: Set<number>, b: Set<number>) => new Set([...a].filter((x) => b.has(x)));
-        const union = (a: Set<number>, b: Set<number>) => new Set([...a, ...b]);
-
-        const byType = {
-          text: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'TEXT' || raw.field_type === 'LIST' || raw.value_text != null || filterType === 'text';
-          }),
-          numeric: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'NUMBER' || raw.value_number != null || filterType === 'numeric';
-          }),
-          date: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'DATE' || raw.value_date != null || filterType === 'date';
-          }),
-          boolean: criteria.filter((c) => {
-            const raw = c as Record<string, unknown>;
-            return raw.field_type === 'BOOLEAN' || raw.value_boolean != null || filterType === 'boolean';
-          }),
-        };
-
-        const resultSets: Set<number>[] = [];
-
-        if (byType.text.length > 0) {
-          const response = await filterItemsByTextMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.text as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (byType.numeric.length > 0) {
-          const response = await filterItemsByNumericMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.numeric as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (byType.date.length > 0) {
-          const response = await filterItemsByDateMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.date as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (byType.boolean.length > 0) {
-          const response = await filterItemsByBooleanMetadata({
-            inventory_id: Number(id),
-            match_mode: matchMode,
-            criteria: byType.boolean as never,
-          });
-          resultSets.push(asSet(response.item_ids));
-        }
-
-        if (resultSets.length === 0) {
-          alert('Tipo template non supportato.');
-          return;
-        }
-
-        let finalSet = resultSets[0];
-        for (let i = 1; i < resultSets.length; i += 1) {
-          finalSet = matchMode === 'all' ? intersect(finalSet, resultSets[i]) : union(finalSet, resultSets[i]);
-        }
-
-        const itemIds = Array.from(finalSet.values()).sort((a, b) => a - b);
+        const result = await evaluateFilter(filterId, {
+          inventory_id: Number(id),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Rome',
+        });
+        if (request !== filterEvaluationRequest.current) return;
+        const container = result.containers.find(item => item.id === Number(id));
+        const itemIds = container?.item_ids ?? [];
         setMetadataFilteredItemIds(itemIds);
-        setMetadataFilterSummary(`Template "${template.name}" applicato (${itemIds.length} risultati)`);
-        return;
-
+        setMetadataFilterSummary(`${filter.name} (${itemIds.length} risultati)`);
       } catch {
-        alert('Errore durante l\'applicazione del template.');
+        if (request !== filterEvaluationRequest.current) return;
+        setMetadataFilteredItemIds(null);
+        setMetadataFilterSummary(null);
+        setFilterApplyError('Impossibile applicare il filtro. Potrebbe non essere compatibile con questo contenitore o non essere più accessibile.');
       }
     }, [id]);
 
   useEffect(() => {
-    if (selectedTemplateId === '' || !inventory) {
+    if (selectedTemplateId === '') {
+      filterEvaluationRequest.current += 1;
+      return;
+    }
+    if (!inventory) {
       return;
     }
 
+    setMetadataFilteredItemIds(null);
+    setMetadataFilterSummary(null);
     void applyTemplateToList(selectedTemplateId);
   }, [selectedTemplateId, inventory, items, applyTemplateToList]);
 
   const addItemSheetDrag = useBottomSheetDrag(() => setisInsertMode(false));
   const editItemSheetDrag = useBottomSheetDrag(() => setItemBeingEdited(null));
 
+  const compactActions = canEdit && (
+    <div className={isMobile
+      ? "fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center"
+      : "fixed right-4 top-4 z-40 flex justify-end rounded-2xl bg-white/95 p-1 shadow-lg backdrop-blur dark:bg-gray-900/95"}>
+      {isMoreActionsOpen && (
+        <div className={`${isMobile ? 'relative mb-2' : 'absolute right-0 top-full mt-2'} z-40 flex w-56 flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800`}>
+          {isEditMode && (
+            <>
+              <button type="button" onClick={() => setSelectedItems(sortedItems.map(item => item.id))} className="min-h-11 w-full rounded-xl bg-blue-500 px-3 text-left text-sm text-white">Seleziona tutti</button>
+              <button type="button" onClick={() => setSelectedItems([])} className="min-h-11 w-full rounded-xl bg-gray-500 px-3 text-left text-sm text-white">Deseleziona tutti</button>
+            </>
+          )}
+          {isEditMode && selectedItems.length > 0 && (
+            <button type="button" onClick={async () => {
+              if (!window.confirm('Sei sicuro di voler eliminare gli oggetti selezionati?')) return;
+              for (const selectedId of selectedItems) await deleteItem(selectedId);
+              setSelectedItems([]);
+              setIsEditMode(false);
+              const getItems = isInventory ? getInventoryItems : getChecklistItems;
+              const refreshed = inventory && await getItems(inventory.id);
+              if (refreshed) setItems(refreshed);
+              setIsMoreActionsOpen(false);
+            }} className="min-h-11 w-full rounded-xl bg-red-600 px-3 text-left text-sm font-medium text-white">🗑️ Elimina selezionati ({selectedItems.length})</button>
+          )}
+          {isChecklist && (
+            <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsAddFromInventoryOpen(true); }} className="min-h-11 w-full rounded-xl bg-emerald-600 px-3 text-left text-sm font-medium text-white">📥 Aggiungi da inventario</button>
+          )}
+          <button type="button" onClick={() => {
+            setIsMoreActionsOpen(false);
+            const now = new Date();
+            const header = `${inventory?.name} (${now.toLocaleString()})`;
+            const withQty = items.filter((item) => item.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
+            const zeroQty = items.filter((item) => item.quantity === 0).sort((a, b) => a.name.localeCompare(b.name));
+            const lines = [...withQty, ...zeroQty].map((item) => `- ${item.quantity}x ${item.name}${item.description ? ` (${item.description})` : ''}`);
+            window.open(`https://wa.me/?text=${encodeURIComponent([header, ...lines].join('\n'))}`, '_blank');
+          }} className="min-h-11 w-full rounded-xl bg-green-700 px-3 text-left text-sm font-medium text-white">📲 Condividi su WhatsApp</button>
+          {isAdmin && (
+            <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsShareModalOpen(true); }} className="min-h-11 w-full rounded-xl bg-green-600 px-3 text-left text-sm font-medium text-white">📤 Importa / esporta</button>
+          )}
+        </div>
+      )}
+      <div className={isMobile ? "relative z-40 flex gap-1 rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90" : "relative z-40 flex flex-wrap gap-2"}>
+        <button type="button" onClick={() => setisInsertMode(true)} aria-label="Aggiungi item" title="Aggiungi item"
+          className={isMobile ? "flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-lg text-white shadow-lg hover:bg-blue-600" : "min-h-11 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"}
+        >{isMobile ? '➕' : 'Nuovo'}</button>
+        <button type="button" onClick={() => { setIsEditMode((current) => !current); setSelectedItems([]); }} aria-label={isEditMode ? 'Esci dalla modifica' : 'Modifica item'} title={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
+          className={isMobile ? `flex h-10 w-12 items-center justify-center rounded-xl text-lg text-white shadow-lg ${isEditMode ? 'bg-yellow-700' : 'bg-yellow-500'}` : "min-h-11 rounded-xl border border-gray-300 px-4 text-sm dark:border-gray-600"}
+        >{isMobile ? (isEditMode ? '✖️' : '✏️') : (isEditMode ? 'Fine modifica' : 'Modifica')}</button>
+        <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} aria-label="Torna in cima alla pagina" title="Torna in cima alla pagina"
+          className={isMobile ? "flex h-10 w-12 items-center justify-center rounded-xl bg-gray-600 text-lg text-white shadow-lg" : "grid h-11 w-11 place-items-center rounded-xl border border-gray-300 dark:border-gray-600"}
+        >↑</button>
+        <button type="button" onClick={() => setIsMoreActionsOpen((open) => !open)} aria-label={isMoreActionsOpen ? 'Chiudi altre azioni' : 'Altre azioni'} aria-expanded={isMoreActionsOpen} title="Altre azioni"
+          className={isMobile ? "flex h-10 w-12 items-center justify-center rounded-xl bg-gray-700 text-lg text-white shadow-lg dark:bg-gray-600" : "grid h-11 w-11 place-items-center rounded-xl border border-gray-300 text-lg dark:border-gray-600"}
+        >⋯</button>
+      </div>
+    </div>
+  );
+
   return (
-    <div ref={detailTopRef} className="relative p-3 sm:p-4">
+    <div className="relative p-3 sm:p-4">
       {inventory && (
         <div className="fixed inset-x-4 top-20 z-50 md:hidden">
           <div className="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2">
@@ -1129,11 +1180,12 @@ useEffect(() => {
             </button>
           </div>
           <p className="mt-1 truncate px-1 text-xs leading-tight text-gray-600 dark:text-gray-300">
-            Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica: {new Date(inventory.data_mod).toLocaleString()}
+            Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica: {new Date(inventory.data_mod).toLocaleString()}{" "}
+            <span className="whitespace-nowrap">· v{inventory.version_num}</span>
           </p>
         </div>
       )}
-      <div className="relative z-10 bg-white pb-1 dark:bg-gray-900 md:sticky md:top-0">
+      <div className={`relative z-10 bg-white pb-1 dark:bg-gray-900 md:sticky md:top-0 ${compactControls ? 'md:pt-16' : ''}`}>
         <Link
           to={`/${basePath}${filtroParam ? `?filtro=${encodeURIComponent(filtroParam)}` : ""}`}
           className="mb-1 hidden text-sm text-blue-500 hover:underline md:inline-block"
@@ -1146,9 +1198,6 @@ useEffect(() => {
               <h2 className="flex items-center gap-1.5 text-lg font-bold sm:gap-2 sm:text-xl">
                 {isChecklist ? "Lista: " : "Inventario: "}
                 {inventory.name}
-                <span className="rounded bg-blue-100 px-1.5 py-0.5 font-mono text-xs text-blue-800 dark:bg-blue-900 dark:text-blue-200 sm:px-2 sm:py-1 sm:text-sm">
-                  v{inventory.version_num}
-                </span>
               </h2>
               <button
                 onClick={() => setIsHistoryOpen(true)}
@@ -1161,7 +1210,8 @@ useEffect(() => {
             </div>
             <p className="mb-1 hidden text-xs text-gray-600 dark:text-gray-400 sm:mb-2 sm:text-sm md:block">
               Creato da: {inventory.owner.username ? `${inventory.owner.username}` : "Sconosciuto"} | Data modifica:{" "}
-              {new Date(inventory.data_mod).toLocaleString()}
+              {new Date(inventory.data_mod).toLocaleString()}{" "}
+              <span className="whitespace-nowrap">· v{inventory.version_num}</span>
             </p>
             <hr className="mb-1 hidden sm:mb-2 md:block" />
           </>
@@ -1170,6 +1220,61 @@ useEffect(() => {
 
       {inventory ? (
         <div>
+          {compactControls && !isMobile && !canEdit && (
+            <div className="fixed right-4 top-4 z-40 flex justify-end rounded-2xl bg-white/95 p-1 shadow-lg backdrop-blur dark:bg-gray-900/95">
+              <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} aria-label="Torna in cima alla pagina" className="min-h-11 rounded-xl border border-gray-300 px-3 text-sm dark:border-gray-600">↑ In cima</button>
+            </div>
+          )}
+          {compactControls && (
+            <MobileItemFilters
+              search={filterText}
+              onSearch={setFilterText}
+              sortBy={isChecklist && sortBy === 'quantity' ? 'name' : sortBy}
+              sortOptions={[
+                { value: 'name', label: 'Nome' },
+                { value: 'date', label: 'Data modifica' },
+                ...(!isChecklist ? [{ value: 'quantity' as const, label: 'Quantità' }] : []),
+              ]}
+              onSortBy={(value) => { localStorage.setItem('item_sortBy', value); setSortBy(value); }}
+              sortOrder={sortOrder}
+              onSortOrder={(value) => { localStorage.setItem('item_sortOrder', value); setSortOrder(value); }}
+              checklist={isChecklist}
+              priorityOrder={prioritySortOrder}
+              onPriorityOrder={(value) => { localStorage.setItem('item_prioritySortOrder', value); setPrioritySortOrder(value); }}
+              barcode={barcodeFilter}
+              onBarcode={setBarcodeFilter}
+              templateId={selectedTemplateId}
+              templates={filterTemplates}
+              onTemplate={(value) => {
+                setSelectedTemplateId(value);
+                setFilterApplyError('');
+                if (value === '') {
+                  setMetadataFilteredItemIds(null);
+                  setMetadataFilterSummary(null);
+                }
+              }}
+              metadataSummary={metadataFilterSummary}
+              onClearMetadata={() => {
+                setSelectedTemplateId('');
+                setMetadataFilteredItemIds(null);
+                setMetadataFilterSummary(null);
+                setFilterApplyError('');
+                const params = new URLSearchParams(location.search);
+                params.delete('filter_id');
+                window.history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}`);
+              }}
+              onReset={() => {
+                setFilterText('');
+                setBarcodeFilter('all');
+                setSelectedTemplateId('');
+                setMetadataFilteredItemIds(null);
+                setMetadataFilterSummary(null);
+                window.history.replaceState(null, '', location.pathname);
+              }}
+            />
+          )}
+          {filterApplyError && <p role="alert" className="mb-2 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">{filterApplyError}</p>}
+          {!compactControls && (
           <div className="z-10 mb-2 flex flex-wrap items-center gap-1.5 border-b bg-white px-1 py-1.5 dark:bg-gray-900 sm:sticky sm:top-16 sm:mb-3 sm:gap-2 sm:py-2">
             <label htmlFor="sort-by-select" className="hidden sm:inline text-sm font-medium">Ordina per:</label>
             {isChecklist && (
@@ -1233,16 +1338,6 @@ useEffect(() => {
                   }}
                   className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none sm:w-auto"
                 />
-                <select
-                  value={barcodeFilter}
-                  onChange={(e) => setBarcodeFilter(e.target.value as 'all' | 'with' | 'without')}
-                  className="min-h-10 w-28 rounded border px-1.5 py-1 sm:min-h-0 sm:w-auto"
-                  title="Filtra per barcode"
-                >
-                  <option value="all">🏷️ Tutti</option>
-                  <option value="with">🏷️ Con barcode</option>
-                  <option value="without">🏷️ Senza barcode</option>
-                </select>
                 <button
                   type="button"
                   onClick={() => {
@@ -1256,28 +1351,38 @@ useEffect(() => {
                   <span className="inline sm:hidden" aria-hidden="true">❌</span>
                   <span className="hidden sm:inline">Cancella filtro</span>
                 </button>
+                <select
+                  value={barcodeFilter}
+                  onChange={(e) => setBarcodeFilter(e.target.value as 'all' | 'with' | 'without')}
+                  className="min-h-10 w-28 rounded border px-1.5 py-1 sm:min-h-0 sm:w-auto"
+                  title="Filtra per barcode"
+                >
+                  <option value="all">🏷️ Tutti</option>
+                  <option value="with">🏷️ Con barcode</option>
+                  <option value="without">🏷️ Senza barcode</option>
+                </select>
               </div>
             </div>
-            {(isInventory || isChecklist) && canEdit && (
+            {(isInventory || isChecklist) && (
               <div className="flex w-full items-center gap-1.5 sm:w-auto sm:gap-2">
-                <label className="hidden sm:inline text-sm font-medium whitespace-nowrap">Template filtro:</label>
+                <label className="hidden sm:inline text-sm font-medium whitespace-nowrap">Filtro salvato:</label>
                 <select
                   value={selectedTemplateId}
-                  onChange={async (e) => {
+                  onChange={(e) => {
                     const value = e.target.value;
                     if (!value) {
                       setSelectedTemplateId('');
                       setMetadataFilteredItemIds(null);
                       setMetadataFilterSummary(null);
+                      setFilterApplyError('');
                       return;
                     }
                     const templateId = Number(value);
                     setSelectedTemplateId(templateId);
-                    await applyTemplateToList(templateId);
                   }}
                   className="min-h-10 min-w-0 flex-1 rounded border px-2 py-1 sm:min-h-0 sm:flex-none sm:min-w-[220px]"
                 >
-                  <option value="">Template filtro: nessuno</option>
+                  <option value="">Filtro salvato: nessuno</option>
                   {filterTemplates.map((template) => (
                     <option key={template.id} value={template.id}>{template.name}</option>
                   ))}
@@ -1301,7 +1406,8 @@ useEffect(() => {
                 </div>
             )}
           </div>
-          {metadataFilterSummary && (
+          )}
+          {!compactControls && metadataFilterSummary && (
             <div className="mb-3 flex items-center gap-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950 dark:text-indigo-100">
               <span>{metadataFilterSummary}</span>
               <button
@@ -1322,6 +1428,7 @@ useEffect(() => {
               <SwipeableItemRow
                 key={item.id}
                 item={item}
+                search={filterText}
                 isMobile={isMobile}
                 isChecklist={isChecklist}
                 isInventory={isInventory}
@@ -1350,8 +1457,8 @@ useEffect(() => {
         <p>Caricamento {isChecklist ? "checklist" : "inventaro"}...</p>
       )}
 
-      {!isMobile && <div className="fixed right-4 top-4 z-40 flex flex-wrap justify-end gap-2">
-        <button type="button" onClick={() => detailTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-700 px-3 py-2 text-white shadow-lg hover:bg-gray-800" title="Torna in cima alla lista">
+      {!compactControls && <div className="fixed right-4 top-4 z-40 flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={(event) => scrollPageToTop(event.currentTarget)} className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-gray-700 px-3 py-2 text-white shadow-lg hover:bg-gray-800" aria-label="Torna in cima alla pagina" title="Torna in cima alla pagina">
           ↑ In cima
         </button>
         {isEditMode && selectedItems.length > 0 && (
@@ -1382,16 +1489,6 @@ useEffect(() => {
             <span className="inline md:hidden">📥</span>
             <span className="hidden md:inline">📥 Da inventario</span>
           </button>
-        )}
-        {(isInventory || isChecklist) && canEdit && (
-          <MetadataFilterManager
-            inventoryId={inventory?.id ?? Number(id)}
-            currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
-            definitions={metadataDefinitions}
-            allDefinitions={allMetadataDefinitions}
-            onTemplatesChanged={setFilterTemplates}
-            triggerClassName="!flex !h-10 !min-h-10 !min-w-12 !items-center !justify-center !rounded-xl !px-3 !py-2"
-          />
         )}
         {(isInventory || isChecklist) && canEdit && (
           <button
@@ -1447,98 +1544,9 @@ useEffect(() => {
         )}
       </div>}
 
-      {isMobile && canEdit && (isInventory || isChecklist) && (
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] left-1/2 z-40 flex -translate-x-1/2 flex-col items-center">
-          {isMoreActionsOpen && (
-            <>
-              <div className="relative z-40 mb-2 flex w-56 flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-800">
-                {isEditMode && selectedItems.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!window.confirm('Sei sicuro di voler eliminare gli oggetti selezionati?')) return;
-                      for (const selectedId of selectedItems) await deleteItem(selectedId);
-                      setSelectedItems([]);
-                      setIsEditMode(false);
-                      const getItems = isInventory ? getInventoryItems : getChecklistItems;
-                      const refreshed = inventory && await getItems(inventory.id);
-                      if (refreshed) setItems(refreshed);
-                      setIsMoreActionsOpen(false);
-                    }}
-                    className="min-h-11 w-full rounded-xl bg-red-600 px-3 text-left text-sm font-medium text-white"
-                  >🗑️ Elimina selezionati ({selectedItems.length})</button>
-                )}
-                {isChecklist && (
-                  <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsAddFromInventoryOpen(true); }} className="min-h-11 w-full rounded-xl bg-emerald-600 px-3 text-left text-sm font-medium text-white">
-                    📥 Aggiungi da inventario
-                  </button>
-                )}
-                <MetadataFilterManager
-                  inventoryId={inventory?.id ?? Number(id)}
-                  currentContainerType={isChecklist ? 'CHECKLIST' : 'INVENTORY'}
-                  definitions={metadataDefinitions}
-                  allDefinitions={allMetadataDefinitions}
-                  onTemplatesChanged={setFilterTemplates}
-                  triggerLabel="🧩 Filtri metadati"
-                  triggerClassName="!min-h-11 !w-full !rounded-xl !px-3 !py-2 !text-left !text-sm !font-medium !shadow-none"
-                  onDialogClose={() => setIsMoreActionsOpen(false)}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMoreActionsOpen(false);
-                    const now = new Date();
-                    const header = `${inventory?.name} (${now.toLocaleString()})`;
-                    const withQty = items.filter((item) => item.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
-                    const zeroQty = items.filter((item) => item.quantity === 0).sort((a, b) => a.name.localeCompare(b.name));
-                    const lines = [...withQty, ...zeroQty].map((item) => `- ${item.quantity}x ${item.name}${item.description ? ` (${item.description})` : ''}`);
-                    window.open(`https://wa.me/?text=${encodeURIComponent([header, ...lines].join('\n'))}`, '_blank');
-                  }}
-                  className="min-h-11 w-full rounded-xl bg-green-700 px-3 text-left text-sm font-medium text-white"
-                >📲 Condividi su WhatsApp</button>
-                {isAdmin && (
-                  <button type="button" onClick={() => { setIsMoreActionsOpen(false); setIsShareModalOpen(true); }} className="min-h-11 w-full rounded-xl bg-green-600 px-3 text-left text-sm font-medium text-white">
-                    📤 Importa / esporta
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-          <div className="relative z-40 flex gap-1 rounded-2xl bg-white/90 p-1 shadow-lg backdrop-blur dark:bg-gray-900/90">
-            <button
-              type="button"
-              onClick={() => setisInsertMode(true)}
-              aria-label="Aggiungi item"
-              title="Aggiungi item"
-              className="flex h-10 min-w-12 items-center justify-center rounded-xl bg-blue-500 px-3 py-2 text-lg text-white shadow-lg hover:bg-blue-600"
-            >➕</button>
-            <button
-              type="button"
-              onClick={() => { setIsEditMode((current) => !current); setSelectedItems([]); }}
-              aria-label={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
-              title={isEditMode ? 'Esci dalla modifica' : 'Modifica item'}
-              className={`flex h-10 w-12 items-center justify-center rounded-xl text-lg text-white shadow-lg ${isEditMode ? 'bg-yellow-700' : 'bg-yellow-500'}`}
-            >{isEditMode ? '✖️' : '✏️'}</button>
-            <button
-              type="button"
-              onClick={() => detailTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              aria-label="Torna in cima alla lista"
-              title="Torna in cima alla lista"
-              className="flex h-10 w-12 items-center justify-center rounded-xl bg-gray-600 text-lg text-white shadow-lg"
-            >↑</button>
-            <button
-              type="button"
-              onClick={() => setIsMoreActionsOpen((open) => !open)}
-              aria-label={isMoreActionsOpen ? 'Chiudi altre azioni' : 'Altre azioni'}
-              aria-expanded={isMoreActionsOpen}
-              title="Altre azioni"
-              className="flex h-10 w-12 items-center justify-center rounded-xl bg-gray-700 text-lg text-white shadow-lg dark:bg-gray-600"
-            >⋯</button>
-          </div>
-        </div>
-      )}
+      {compactControls && compactActions}
 
-      {isMobile && isMoreActionsOpen && createPortal(
+      {compactControls && isMoreActionsOpen && createPortal(
         <button type="button" aria-label="Chiudi altre azioni" onClick={() => setIsMoreActionsOpen(false)} className="fixed inset-0 z-[39]" />,
         document.body,
       )}
@@ -1558,12 +1566,16 @@ useEffect(() => {
               onSubmit={async (e) => {
                 e.preventDefault();
                 if (!inventory) return;
-                const newItem = await createItem({
+                const metadataValues = metadataDefinitions
+                  .map((definition) => normalizeMetadataDraft(definition, newItemMetadataDrafts[definition.id]))
+                  .filter((value): value is ItemMetadataValueUpsert => value !== null);
+                const newItem = await createItemWithFeedback({
                   name: newItemName,
                   description: newItemDescription,
                   quantity: newItemQuantity,
                   priority: isChecklist ? newItemPriority : 0,
                   inventory_id: inventory.id,
+                  metadata_values: metadataValues,
                 });
                 if (newItem) {
                   if (isChecklist && newItemLink) {
@@ -1573,17 +1585,6 @@ useEffect(() => {
                       window.alert(err instanceof Error ? err.message : "Collegamento non riuscito");
                     }
                   }
-                  const metadataValues = metadataDefinitions
-                    .map((definition) => normalizeMetadataDraft(definition, newItemMetadataDrafts[definition.id]))
-                    .filter((value): value is ItemMetadataValueUpsert => value !== null);
-
-                  if (metadataValues.length > 0) {
-                    await bulkUpsertItemMetadataValues({
-                      item_id: newItem.id,
-                      values: metadataValues,
-                    });
-                  }
-
                   const getItems = isInventory ? getInventoryItems : getChecklistItems;
                   const refreshed = inventory && await getItems(inventory.id);
                   if (refreshed) setItems(refreshed);
@@ -1734,25 +1735,18 @@ useEffect(() => {
                 e.preventDefault();
                 if (isCloning) {
                   if (!inventory) return;
-                  const newItem = await createItem({
+                  const metadataValues = metadataDefinitions
+                    .map((definition) => normalizeMetadataDraft(definition, editingMetadataDrafts[definition.id]))
+                    .filter((value): value is ItemMetadataValueUpsert => value !== null);
+                  const newItem = await createItemWithFeedback({
                     name: itemBeingEdited.name,
                     description: itemBeingEdited.description ?? "",
                     quantity: itemBeingEdited.quantity,
                     priority: isChecklist ? itemBeingEdited.priority ?? 0 : 0,
                     inventory_id: inventory.id,
+                    metadata_values: metadataValues,
                   });
                   if (newItem) {
-                    const metadataValues = metadataDefinitions
-                      .map((definition) => normalizeMetadataDraft(definition, editingMetadataDrafts[definition.id]))
-                      .filter((value): value is ItemMetadataValueUpsert => value !== null);
-
-                    if (metadataValues.length > 0) {
-                      await bulkUpsertItemMetadataValues({
-                        item_id: newItem.id,
-                        values: metadataValues,
-                      });
-                    }
-
                     const getItems = isInventory ? getInventoryItems : getChecklistItems;
                     const refreshed = inventory && await getItems(inventory.id);
                     if (refreshed) setItems(refreshed);

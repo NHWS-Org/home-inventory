@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, select, update
 from models import User, Item, Inventory, ItemVersion, ItemBarcode
 from assignment_service import apply_check_change, build_assignment_summary, pending_assigned_by_source
-from notification_rules import emit_item_change
+from notification_service import emit_item_change, emit_item_created, emit_item_deleted, emit_item_updated, emit_removed_item_links, remove_resource_events
 from quantity_changes import QUANTITY_MERGE_WINDOW_SECONDS
 from dependencies import get_db
 from schemas import ItemCreate, ItemUpdate, ItemDelete, ItemMetadataValueResponse, ItemResponse, ItemVersionResponse, VersionBulkDeleteRequest, ItemBarcodeCreate, ItemBarcodeResponse
@@ -87,6 +87,8 @@ def _write_item_version(
         if not diff:
             return
 
+        emit_item_updated(db, item, list(diff), user.id)
+
         # Accorpa aggiornamenti consecutivi di sola quantita in una sola versione
         # (stesso item, stesso utente, finestra temporale breve)
         if merge_quantity_updates and set(diff.keys()) == {"quantity"}:
@@ -154,6 +156,8 @@ def _write_item_version(
 
         emit_item_change(db, item, old_snapshot, user.id, now=changed_at)
 
+    if operation == "CREATE" and extra_diff:
+        diff.update(extra_diff)
     item_id = cast(int, item.id)
     inventory_id = cast(int, item.inventory_id)
     version = ItemVersion(
@@ -267,14 +271,22 @@ def create_item(item: ItemCreate, db: Session = Depends(get_db), user=Depends(ge
     new_barcodes = _dedupe_barcodes(item.barcodes)
     for code, _fmt in new_barcodes:
         _ensure_barcode_free(db, code, cast(int, inventory.id))
-    db_item = Item(**item.model_dump(exclude={"barcodes"}))
+    db_item = Item(**item.model_dump(exclude={"barcodes", "metadata_values"}))
     db_item.user_ins = user.id
     db_item.user_mod = user.id
     for code, fmt in new_barcodes:
         db_item.barcodes.append(ItemBarcode(code=code, format=fmt, user_ins=user.id, user_mod=user.id))
     db.add(db_item)
     db.flush()                                   # ottieni db_item.id senza commit
-    _write_item_version(db, db_item, "CREATE", user)
+    metadata_changes = []
+    if item.metadata_values:
+        from routes.metadata import _upsert_metadata_values
+        _, metadata_changes = _upsert_metadata_values(db, db_item, inventory, user, item.metadata_values)
+    _write_item_version(
+        db, db_item, "CREATE", user,
+        extra_diff={"metadata": metadata_changes} if metadata_changes else None,
+    )
+    emit_item_created(db, db_item, user.id)
     db.commit()
     db.refresh(db_item)
     inventory.data_mod = datetime.now(timezone.utc)
@@ -420,6 +432,9 @@ def delete_item(item_id: int, delete: ItemDelete, db: Session = Depends(get_db),
     _write_item_version(db, item, "DELETE", user)   # registra prima della delete
     item.inventory.data_mod = datetime.now(timezone.utc)
     item.inventory.user_mod = user.id
+    emit_removed_item_links(db, [item.id], user.id)
+    remove_resource_events(db, item_id=item.id)
+    emit_item_deleted(db, item, user.id)
     db.delete(item)
     db.commit()
     return {"detail": "Item eliminato"}

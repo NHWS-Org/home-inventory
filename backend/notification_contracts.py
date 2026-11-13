@@ -5,9 +5,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 
 class NotificationEventType(str, Enum):
-    INVENTORY_SHARED = "inventory_shared"
     ITEM_QUANTITY_CHANGED = "item_quantity_changed"
-    CHECKLIST_COMPLETED = "checklist_completed"
+    ITEM_UPDATED = "item_updated"
+    INVENTORY_UPDATED = "inventory_updated"
+    FILTER_TRIGGER_MATCHED = "filter_trigger_matched"
 
 
 class EventData(BaseModel):
@@ -16,17 +17,12 @@ class EventData(BaseModel):
     inventory_id: int = Field(gt=0)
 
 
-class InventorySharedData(EventData):
-    event_type: Literal["inventory_shared"] = "inventory_shared"
-    recipient_kind: Literal["user", "group"]
-    recipient_id: int = Field(gt=0)
-
-
 class ItemQuantityChangedData(EventData):
     event_type: Literal["item_quantity_changed"] = "item_quantity_changed"
     item_id: int = Field(gt=0)
     previous_quantity: int
     quantity: int
+    action_at: str | None = None
 
     @model_validator(mode="after")
     def require_change(self) -> "ItemQuantityChangedData":
@@ -35,52 +31,77 @@ class ItemQuantityChangedData(EventData):
         return self
 
 
-class ChecklistCompletedData(EventData):
-    event_type: Literal["checklist_completed"] = "checklist_completed"
+class ItemUpdatedData(EventData):
+    event_type: Literal["item_updated"] = "item_updated"
+    item_id: int | None = Field(default=None, gt=0)
+    changed_fields: list[str] = Field(min_length=1)
+    details: dict[str, str | int | None] = Field(default_factory=dict)
+    operation: Literal["created", "deleted"] | None = None
+    quantity: int | None = None
+
+    @model_validator(mode="after")
+    def validate_creation_quantity(self) -> "ItemUpdatedData":
+        if self.operation == "created" and self.quantity is None:
+            raise ValueError("La quantità iniziale è obbligatoria")
+        if self.operation != "created" and self.quantity is not None:
+            raise ValueError("La quantità iniziale richiede un evento di creazione")
+        if self.operation == "deleted":
+            if self.item_id is not None or not isinstance(self.details.get("name"), str):
+                raise ValueError("La cancellazione richiede il nome e non deve riferirsi all'ID dell'elemento")
+        elif self.item_id is None:
+            raise ValueError("L'ID dell'elemento è obbligatorio")
+        return self
+
+
+class InventoryUpdatedData(EventData):
+    event_type: Literal["inventory_updated"] = "inventory_updated"
+    changed_fields: list[str] = Field(min_length=1)
+    details: dict[str, str | int | None] = Field(default_factory=dict)
+
+
+class FilterTriggerMatchedData(EventData):
+    event_type: Literal["filter_trigger_matched"] = "filter_trigger_matched"
+    filter_id: int = Field(gt=0)
+    trigger_id: int = Field(gt=0)
+    filter_name: str
+    count: int = Field(gt=0)
+    scheduled_at: str
+    trigger_revision: int = Field(gt=0)
+    filter_fingerprint: str
 
 
 NotificationEventData = Annotated[
-    InventorySharedData | ItemQuantityChangedData | ChecklistCompletedData,
+    ItemQuantityChangedData | ItemUpdatedData | InventoryUpdatedData | FilterTriggerMatchedData,
     Field(discriminator="event_type"),
 ]
 notification_event_adapter = TypeAdapter(NotificationEventData)
 
 
-class NotificationRecipient(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    kind: Literal["owner", "participants", "user", "group", "event_recipient"]
-    id: int | None = Field(default=None, gt=0)
-
-    @model_validator(mode="after")
-    def validate_identity(self) -> "NotificationRecipient":
-        if (self.kind in ("user", "group")) != (self.id is not None):
-            raise ValueError("ID richiesto solo per utente o gruppo")
-        return self
-
-
-class NotificationRuleInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    event_type: Literal["inventory_shared", "item_quantity_changed", "checklist_completed"]
-    threshold: int | None = Field(default=None, ge=0, le=2147483647)
-    recipients: list[NotificationRecipient] = Field(min_length=1, max_length=50)
-    enabled: bool = True
-
-    @model_validator(mode="after")
-    def validate_rule(self) -> "NotificationRuleInput":
-        if (self.event_type == "item_quantity_changed") != (self.threshold is not None):
-            raise ValueError("Soglia richiesta solo per variazioni di quantita")
-        if self.event_type != "inventory_shared" and any(
-            recipient.kind == "event_recipient" for recipient in self.recipients
-        ):
-            raise ValueError("Destinatario evento disponibile solo per condivisioni")
-        return self
-
-
 class NotificationPreferenceInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    in_app_enabled: bool = True
+    in_app_enabled: bool = False
     push_enabled: bool = False
-    include_own_actions: bool = False
+
+    @model_validator(mode="after")
+    def require_inbox_for_push(self) -> "NotificationPreferenceInput":
+        if self.push_enabled and not self.in_app_enabled:
+            raise ValueError("Le notifiche Push richiedono anche Inbox")
+        return self
+
+
+class NotificationBulkAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    action: Literal["read", "delete"]
+    ids: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list)
+    all: bool = False
+    unread_only: bool = False
+
+    @model_validator(mode="after")
+    def require_scope(self) -> "NotificationBulkAction":
+        if self.all == bool(self.ids):
+            raise ValueError("Specificare gli ID oppure tutte le notifiche")
+        if self.unread_only and not self.all:
+            raise ValueError("unread_only è valido solo con all")
+        return self
