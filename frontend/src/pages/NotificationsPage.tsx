@@ -24,7 +24,12 @@ export function NotificationSummary({ row }: { row: InboxNotification }) {
 
 
 const GROUP_KEY = "notifications.groupByContainer";
-const iconButton = "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800";
+const iconButtonBase = "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors disabled:opacity-40";
+const iconButton = `${iconButtonBase} border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800`;
+const iconButtonActive = `${iconButtonBase} border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900`;
+const selectionButtonBase = `${iconButtonBase} border-slate-500 bg-slate-700 hover:border-slate-300 hover:bg-slate-600 disabled:hover:border-slate-500 disabled:hover:bg-slate-700`;
+const selectionButton = `${selectionButtonBase} text-white`;
+const selectionDangerButton = `${selectionButtonBase} text-red-300 hover:text-red-200`;
 const rowAction = "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800";
 
 function shortDate(row: InboxNotification): string {
@@ -296,11 +301,11 @@ export default function NotificationsPage() {
       {selecting ? (
         <div className="sticky top-0 z-20 bg-slate-800 text-white shadow md:rounded-b-xl" role="group" aria-label="Selezione notifiche">
           <div className="flex items-center gap-2 px-3 py-2">
-            <button type="button" disabled={busy} aria-label="Annulla selezione" title="Annulla selezione" onClick={clearSelection} className={`${iconButton} border-slate-600 bg-transparent text-white hover:bg-slate-700 dark:bg-transparent`}><FiX aria-hidden="true" /></button>
+            <button type="button" disabled={busy} aria-label="Annulla selezione" title="Annulla selezione" onClick={clearSelection} className={selectionButton}><FiX aria-hidden="true" /></button>
             {visibleCheckbox("inline-flex h-10 w-8 items-center justify-center")}
             <span role="status" className="min-w-0 flex-1 truncate font-semibold">{allSelected ? "Tutte selezionate" : `${selected.size} selezionate`}</span>
-            <button type="button" disabled={busy || !hasSelection} aria-label="Segna selezionate come lette" title="Segna selezionate come lette" onClick={() => void act("read")} className={`${iconButton} border-slate-600 bg-transparent text-white hover:bg-slate-700 dark:bg-transparent`}><FiCheck aria-hidden="true" /></button>
-            <button type="button" disabled={busy || !hasSelection} aria-label="Elimina selezionate" title="Elimina selezionate" onClick={() => void act("delete")} className={`${iconButton} border-slate-600 bg-transparent text-red-300 hover:bg-slate-700 dark:bg-transparent`}><FiTrash2 aria-hidden="true" /></button>
+            <button type="button" disabled={busy || !hasSelection} aria-label="Segna selezionate come lette" title="Segna selezionate come lette" onClick={() => void act("read")} className={selectionButton}><FiCheck aria-hidden="true" /></button>
+            <button type="button" disabled={busy || !hasSelection} aria-label="Elimina selezionate" title="Elimina selezionate" onClick={() => void act("delete")} className={selectionDangerButton}><FiTrash2 aria-hidden="true" /></button>
           </div>
           <p className="flex flex-wrap items-center gap-x-2 bg-slate-700/60 px-3 py-1.5 text-xs">
             <span>{allSelected ? `Tutte le notifiche${unreadOnly ? " da leggere" : ""}, anche non caricate` : `${visibleSelected} di ${rows.length} caricate`}</span>
@@ -321,7 +326,7 @@ export default function NotificationsPage() {
           </div>
           <span className="hidden flex-1 md:block" />
           <button type="button" aria-label="Raggruppa per contenitore" title="Raggruppa per contenitore" aria-pressed={grouped} onClick={toggleGrouped}
-            className={`${iconButton} ${grouped ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300" : ""}`}><FiLayers aria-hidden="true" /></button>
+            className={grouped ? iconButtonActive : iconButton}><FiLayers aria-hidden="true" /></button>
           <button type="button" aria-label="Seleziona notifiche" title="Seleziona notifiche" disabled={busy || !rows.length} onClick={() => setSelectMode(true)} className={`${iconButton} md:hidden`}><FiCheckSquare aria-hidden="true" /></button>
           <span className="hidden gap-2 md:flex">
             <button type="button" disabled={busy} aria-label="Aggiorna" title="Aggiorna" onClick={() => void load()} className={iconButton}><FiRefreshCw aria-hidden="true" /></button>
