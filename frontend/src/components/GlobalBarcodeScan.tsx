@@ -381,12 +381,12 @@ export default function GlobalBarcodeScan() {
                       })}
                     </ul>
                     {error && <p className="mb-2 mt-3 text-sm text-red-600" role="alert">{error}</p>}
+                    <button onClick={rescan} className="mt-3 min-h-12 w-full rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Scansiona un altro codice</button>
                     {matches.length > 0 && (
                       <button type="button" disabled={busy} onClick={closeAll} className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 px-4 font-medium text-white hover:bg-blue-700 disabled:opacity-50">
                         Chiudi
                       </button>
                     )}
-                    <button onClick={rescan} className="mt-3 min-h-12 w-full rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Scansiona un altro codice</button>
                   </>
                 ) : (
                   <>
