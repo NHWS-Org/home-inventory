@@ -54,7 +54,7 @@ function Location() {
   return createElement('output', { 'aria-label': 'Destinazione' }, useLocation().pathname);
 }
 
-test('a known barcode can be linked to an item of the other container type', async () => {
+test('an unknown barcode can be linked to an existing item', async () => {
   const adapter = api.defaults.adapter;
   try {
     for (const [type, targetUrl, targetName] of [
@@ -65,33 +65,33 @@ test('a known barcode can be linked to an item of the other container type', asy
       api.defaults.adapter = async config => {
         requests.push(config);
         const data = config.url === '/barcode/lookup'
-          ? { code: '123456', product: null, matches: [{ item_id: 10, name: 'Latte', inventory_id: 3, inventory_name: 'Origine', inventory_type: type, quantity: 1 }] }
+          ? { code: '123456', product: null, matches: [] }
           : config.url === '/inventory/' ? [{ id: 1, name: 'Inventario' }]
           : config.url === '/checklist/' ? [{ id: 2, name: 'Lista' }]
           : config.url === targetUrl ? [{ id: 20, name: targetName, inventory_id: type === 'INVENTORY' ? 2 : 1, quantity: 0 }]
           : { id: 99, code: '123456' };
         return { config, data, status: 200, statusText: 'OK', headers: {} };
       };
-      await act(async () => root.render(createElement(MemoryRouter, { key: type },
+      await act(async () => root.render(createElement(MemoryRouter, {
+        key: type, initialEntries: [type === 'INVENTORY' ? '/checklists/2' : '/inventories/1'],
+      },
         createElement(AuthContext.Provider, { value: { user: { username: 'admin', role: { name: 'admin' } } } },
           createElement(GlobalBarcodeScan)))));
       await act(async () => {
         for (const key of '123456') window.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true }));
         window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       });
-      const open = [...document.querySelectorAll('button')].find(button => button.textContent.includes('Associa a un altro tipo'));
+      const open = [...document.querySelectorAll('button')].find(button => button.textContent === 'Collega esistente');
       assert.ok(open);
       await act(async () => open.click());
-      const options = [...document.querySelectorAll('#barcode-target option')];
-      assert.equal(options.length, 1);
-      assert.equal(options[0].value, type === 'INVENTORY' ? 'checklists:2' : 'inventories:1');
+      assert.equal(document.querySelector('#barcode-target').value, type === 'INVENTORY' ? 'checklists:2' : 'inventories:1');
       const item = [...document.querySelectorAll('button')].find(button => button.textContent === targetName);
       assert.ok(item);
       await act(async () => item.click());
       await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Associa').click());
       assert.ok(requests.some(request => request.url === '/item/20/barcodes' && JSON.parse(request.data).code === '123456'));
       const dialog = document.querySelector('[role="dialog"]');
-      assert.ok(dialog.textContent.includes('Prodotti trovati'));
+      assert.ok(dialog.textContent.includes('Prodotto trovato'));
       assert.ok(dialog.textContent.includes(targetName));
       assert.equal(dialog.querySelector('li').textContent.includes(targetName), true);
       assert.ok(dialog.textContent.includes(type === 'INVENTORY' ? 'Segna completato' : '+1 pezzo'));
@@ -100,6 +100,38 @@ test('a known barcode can be linked to an item of the other container type', asy
       const actionLabel = type === 'INVENTORY' ? 'Segna completato' : '+1 pezzo';
       await act(async () => [...currentControls.querySelectorAll('button')].find(button => button.textContent === actionLabel).click());
       assert.ok(requests.some(request => request.url === '/item/20' && JSON.parse(request.data).quantity === 1));
+    }
+  } finally {
+    api.defaults.adapter = adapter;
+  }
+});
+
+test('found product dialog has a close button instead of the association action', async () => {
+  const adapter = api.defaults.adapter;
+  try {
+    for (const role of ['admin', 'viewer']) {
+      api.defaults.adapter = async config => ({
+        config, status: 200, statusText: 'OK', headers: {},
+        data: config.url === '/barcode/lookup'
+          ? { code: '123456', product: null, matches: [{ item_id: 10, name: 'Latte', inventory_id: 1, inventory_name: 'Dispensa', inventory_type: 'INVENTORY', quantity: 1 }] }
+          : config.url === '/inventory/' ? [{ id: 1, name: 'Dispensa' }]
+          : config.url === '/checklist/' ? [{ id: 2, name: 'Spesa' }] : [],
+      });
+      await act(async () => root.render(createElement(MemoryRouter, { key: role },
+        createElement(AuthContext.Provider, { value: { user: { username: 'utente', role: { name: role } } } },
+          createElement(GlobalBarcodeScan)))));
+      await act(async () => {
+        for (const key of '123456') window.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true }));
+        window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      const dialog = document.querySelector('[role="dialog"]');
+      assert.ok(dialog.textContent.includes('Prodotto trovato'));
+      assert.equal(dialog.textContent.includes('Associa a un altro tipo di contenitore'), false);
+      assert.ok([...dialog.querySelectorAll('button')].some(button => button.textContent === 'Scansiona un altro codice'));
+      const close = [...dialog.querySelectorAll('button')].find(button => button.textContent === 'Chiudi');
+      assert.ok(close);
+      await act(async () => close.click());
+      assert.equal(document.querySelector('[role="dialog"]'), null);
     }
   } finally {
     api.defaults.adapter = adapter;
