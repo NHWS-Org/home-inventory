@@ -36,6 +36,7 @@ const server = await createServer({
 const { default: GenericListPage } = await server.ssrLoadModule('/src/pages/GenericListPage.tsx');
 const { default: GenericDetailPage, SwipeableItemRow } = await server.ssrLoadModule('/src/pages/GenericDetailPage.tsx');
 const { default: MobileItemFilters } = await server.ssrLoadModule('/src/components/MobileItemFilters.tsx');
+const { default: GlobalBarcodeScan } = await server.ssrLoadModule('/src/components/GlobalBarcodeScan.tsx');
 const { AuthContext } = await server.ssrLoadModule('/src/auth-context.tsx');
 const { api } = await server.ssrLoadModule('/src/api.ts');
 const root = createRoot(document.getElementById('root'));
@@ -52,6 +53,48 @@ after(async () => {
 function Location() {
   return createElement('output', { 'aria-label': 'Destinazione' }, useLocation().pathname);
 }
+
+test('a known barcode can be linked to an item of the other container type', async () => {
+  const adapter = api.defaults.adapter;
+  try {
+    for (const [type, targetUrl, targetName] of [
+      ['INVENTORY', '/checklist/item/2/', 'Latte lista'],
+      ['CHECKLIST', '/inventory/item/1/', 'Latte inventario'],
+    ]) {
+      const requests = [];
+      api.defaults.adapter = async config => {
+        requests.push(config);
+        const data = config.url === '/barcode/lookup'
+          ? { code: '123456', product: null, matches: [{ item_id: 10, name: 'Latte', inventory_id: 3, inventory_name: 'Origine', inventory_type: type, quantity: 1 }] }
+          : config.url === '/inventory/' ? [{ id: 1, name: 'Inventario' }]
+          : config.url === '/checklist/' ? [{ id: 2, name: 'Lista' }]
+          : config.url === targetUrl ? [{ id: 20, name: targetName, inventory_id: type === 'INVENTORY' ? 2 : 1, quantity: 0 }]
+          : { id: 99, code: '123456' };
+        return { config, data, status: 200, statusText: 'OK', headers: {} };
+      };
+      await act(async () => root.render(createElement(MemoryRouter, { key: type },
+        createElement(AuthContext.Provider, { value: { user: { username: 'admin', role: { name: 'admin' } } } },
+          createElement(GlobalBarcodeScan)))));
+      await act(async () => {
+        for (const key of '123456') window.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true }));
+        window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      const open = [...document.querySelectorAll('button')].find(button => button.textContent.includes('Associa a un altro tipo'));
+      assert.ok(open);
+      await act(async () => open.click());
+      const options = [...document.querySelectorAll('#barcode-target option')];
+      assert.equal(options.length, 1);
+      assert.equal(options[0].value, type === 'INVENTORY' ? 'checklists:2' : 'inventories:1');
+      const item = [...document.querySelectorAll('button')].find(button => button.textContent === targetName);
+      assert.ok(item);
+      await act(async () => item.click());
+      await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Associa').click());
+      assert.ok(requests.some(request => request.url === '/item/20/barcodes' && JSON.parse(request.data).code === '123456'));
+    }
+  } finally {
+    api.defaults.adapter = adapter;
+  }
+});
 
 test('mobile filter sheet preserves search independence, sort state and removable filters', async () => {
   function Harness({ checklist }) {

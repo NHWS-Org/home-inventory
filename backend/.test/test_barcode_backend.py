@@ -1,4 +1,7 @@
 import pytest
+import importlib
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -9,7 +12,7 @@ from barcode_service import is_valid_gtin, normalize_code
 from database import Base
 from dependencies import get_db
 from main import app
-from models import BarcodeProductCache, Inventory, Item, Role, User
+from models import BarcodeProductCache, Inventory, Item, ItemBarcode, Role, User
 from routes.auth import get_current_user
 
 
@@ -32,7 +35,9 @@ def ctx():
     db.commit()
     inv_a = Inventory(name="A", type="INVENTORY", owner_id=admin.id)
     inv_b = Inventory(name="B", type="INVENTORY", owner_id=admin.id)
-    db.add_all([inv_a, inv_b])
+    list_a = Inventory(name="Lista A", type="CHECKLIST", owner_id=admin.id)
+    list_b = Inventory(name="Lista B", type="CHECKLIST", owner_id=admin.id)
+    db.add_all([inv_a, inv_b, list_a, list_b])
     db.commit()
     state = {"user_id": admin.id}
 
@@ -58,6 +63,8 @@ def ctx():
         "db": db,
         "inv_a": inv_a.id,
         "inv_b": inv_b.id,
+        "list_a": list_a.id,
+        "list_b": list_b.id,
         "viewer_id": viewer.id,
         "state": state,
     }
@@ -113,29 +120,89 @@ def test_upca_scan_matches_ean13(ctx):
     assert [m["item_id"] for m in found["matches"]] == [item["id"]]
 
 
-def test_conflict_within_inventory_but_not_across(ctx):
+def test_barcode_unique_by_container_type(ctx):
     client = ctx["client"]
     first = _create_item(client, ctx["inv_a"], barcodes=[{"code": "111"}])
     other = _create_item(client, ctx["inv_a"], name="Altro")
 
     conflict = client.post(f"/item/{other['id']}/barcodes", json={"code": "111"})
     assert conflict.status_code == 409
-    assert "Latte" in conflict.json()["detail"]
+    assert "inventario" in conflict.json()["detail"]
 
     dup = client.post("/item/", json={"name": "X", "quantity": 1, "inventory_id": ctx["inv_a"], "barcodes": [{"code": "111"}]})
     assert dup.status_code == 409
 
-    in_other_inventory = _create_item(client, ctx["inv_b"], name="Latte B", barcodes=[{"code": "111"}])
+    dup_other_inventory = client.post("/item/", json={"name": "Altro", "quantity": 1, "inventory_id": ctx["inv_b"], "barcodes": [{"code": "111"}]})
+    assert dup_other_inventory.status_code == 409
+    in_list = _create_item(client, ctx["list_a"], name="Latte lista", barcodes=[{"code": "111"}])
     both = client.get("/barcode/lookup", params={"code": "111", "external": False}).json()
-    assert {m["item_id"] for m in both["matches"]} == {first["id"], in_other_inventory["id"]}
-    scoped = client.get("/barcode/lookup", params={"code": "111", "inventory_id": ctx["inv_b"], "external": False}).json()
-    assert [m["item_id"] for m in scoped["matches"]] == [in_other_inventory["id"]]
+    assert {m["item_id"] for m in both["matches"]} == {first["id"], in_list["id"]}
+    scoped = client.get("/barcode/lookup", params={"code": "111", "inventory_id": ctx["list_a"], "external": False}).json()
+    assert [m["item_id"] for m in scoped["matches"]] == [in_list["id"]]
+    other_list_item = _create_item(client, ctx["list_b"], name="Altro")
+    assert client.post(f"/item/{other_list_item['id']}/barcodes", json={"code": "111"}).status_code == 409
 
     move = client.patch(
-        f"/item/{in_other_inventory['id']}",
-        json={"name": "Latte B", "description": None, "quantity": 1, "inventory_id": ctx["inv_a"]},
+        f"/item/{in_list['id']}",
+        json={"name": "Latte lista", "description": None, "quantity": 1, "inventory_id": ctx["inv_b"]},
     )
     assert move.status_code == 409
+
+
+def test_move_barcode_between_types_and_admin_correction(ctx):
+    client = ctx["client"]
+    item = _create_item(client, ctx["list_a"], barcodes=[{"code": "1234"}])
+    moved = client.patch(f"/item/{item['id']}", json={"name": "Latte", "description": None, "quantity": 1, "inventory_id": ctx["inv_a"]})
+    assert moved.status_code == 200, moved.text
+    _create_item(client, ctx["list_b"], barcodes=[{"code": "1234"}])
+    other = _create_item(client, ctx["inv_b"], barcodes=[{"code": "5678"}])
+    corrected = client.put(f"/barcode/admin/codes/{other['barcodes'][0]['id']}", json={"code": "1234"})
+    assert corrected.status_code == 409
+
+
+def test_barcode_migration_preserves_data_and_refuses_existing_duplicates():
+    from sqlalchemy import inspect, text
+
+    revision = importlib.import_module("migrations.versions.c2d3e4f5a6b7_barcode_type_uniqueness")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO inventories (id, name, type) VALUES (1, 'A', 'INVENTORY'), (2, 'B', 'INVENTORY'), (3, 'C', 'CHECKLIST')"))
+        connection.execute(text("INSERT INTO items (id, name, inventory_id) VALUES (1, 'a', 1), (2, 'b', 2), (3, 'c', 3)"))
+        with Operations.context(MigrationContext.configure(connection)):
+            revision.downgrade()
+        connection.execute(text("INSERT INTO item_barcodes (item_id, code) VALUES (1, '123'), (2, '123'), (3, '123')"))
+        with Operations.context(MigrationContext.configure(connection)):
+            with pytest.raises(RuntimeError, match="Barcode duplicati"):
+                revision.upgrade()
+        assert "container_type" not in {col["name"] for col in inspect(connection).get_columns("item_barcodes")}
+        assert connection.execute(text("SELECT COUNT(*) FROM item_barcodes")).scalar_one() == 3
+        connection.execute(text("DELETE FROM item_barcodes WHERE item_id = 2"))
+        with Operations.context(MigrationContext.configure(connection)):
+            revision.upgrade()
+        assert set(connection.execute(text("SELECT container_type FROM item_barcodes")).scalars()) == {"INVENTORY", "CHECKLIST"}
+    engine.dispose()
+
+
+def test_database_rejects_duplicate_barcode_in_same_type(ctx):
+    from sqlalchemy.exc import IntegrityError
+
+    _create_item(ctx["client"], ctx["inv_a"], barcodes=[{"code": "unique-db"}])
+    other = _create_item(ctx["client"], ctx["inv_b"])
+    ctx["db"].add(ItemBarcode(item_id=other["id"], code="unique-db", container_type="INVENTORY"))
+    with pytest.raises(IntegrityError):
+        ctx["db"].flush()
+    ctx["db"].rollback()
+
+
+def test_restore_old_barcode_rows_derives_container_type(ctx):
+    from routes.backup import _insert_restored_rows
+
+    item = _create_item(ctx["client"], ctx["list_a"])
+    db = ctx["db"]
+    _insert_restored_rows(db, ItemBarcode.__table__, [{"item_id": item["id"], "code": "old-backup"}], None, None, False, {})
+    assert db.query(ItemBarcode).filter_by(item_id=item["id"]).one().container_type == "CHECKLIST"
+    db.rollback()
 
 
 def test_same_item_duplicate_and_idempotent_create(ctx):

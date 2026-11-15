@@ -3,6 +3,7 @@ from typing import Any, List, cast
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from models import User, Item, Inventory, ItemVersion, ItemBarcode
 from assignment_service import apply_check_change, build_assignment_summary, pending_assigned_by_source
 from notification_service import emit_item_change, emit_item_created, emit_item_deleted, emit_item_updated, emit_removed_item_links, remove_resource_events
@@ -185,11 +186,15 @@ def _dedupe_barcodes(payloads: List[ItemBarcodeCreate]) -> list[tuple[str, str |
     return list(seen.items())
 
 def _ensure_barcode_free(db: Session, code: str, inventory_id: int, exclude_item_id: int | None = None) -> None:
-    """Un codice identifica un solo item per inventario: segnala 409 con l'item in conflitto."""
+    """Un codice identifica al massimo un item per tipo di contenitore."""
+    inventory = db.get(Inventory, inventory_id)
+    if inventory is None:
+        raise HTTPException(status_code=404, detail="Contenitore non trovato")
     query = (
         db.query(Item)
         .join(ItemBarcode, ItemBarcode.item_id == Item.id)
-        .filter(ItemBarcode.code == code, Item.inventory_id == inventory_id)
+        .join(Inventory, Inventory.id == Item.inventory_id)
+        .filter(ItemBarcode.code == code, Inventory.type == inventory.type)
     )
     if exclude_item_id is not None:
         query = query.filter(Item.id != exclude_item_id)
@@ -197,8 +202,20 @@ def _ensure_barcode_free(db: Session, code: str, inventory_id: int, exclude_item
     if other:
         raise HTTPException(
             status_code=409,
-            detail=f"Codice {code} gia' associato all'item '{other.name}' (id {other.id}) in questo inventario",
+            detail=f"Codice {code} già associato a un item {'di una lista' if cast(str, inventory.type) == 'CHECKLIST' else 'di un inventario'}",
         )
+
+def _flush_barcode_changes(db: Session) -> None:
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        message = str(exc.orig)
+        if "uq_item_barcodes_type_code" in message or (
+            "item_barcodes.container_type" in message and "item_barcodes.code" in message
+        ):
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Codice già associato a un item dello stesso tipo di contenitore") from exc
+        raise
 
 def _assignment_fields(db: Session, item: Item) -> dict:
     if item.inventory is not None and item.inventory.type == "CHECKLIST":
@@ -275,9 +292,9 @@ def create_item(item: ItemCreate, db: Session = Depends(get_db), user=Depends(ge
     db_item.user_ins = user.id
     db_item.user_mod = user.id
     for code, fmt in new_barcodes:
-        db_item.barcodes.append(ItemBarcode(code=code, format=fmt, user_ins=user.id, user_mod=user.id))
+        db_item.barcodes.append(ItemBarcode(code=code, format=fmt, container_type=inventory.type, user_ins=user.id, user_mod=user.id))
     db.add(db_item)
-    db.flush()                                   # ottieni db_item.id senza commit
+    _flush_barcode_changes(db)                    # ottieni db_item.id senza commit
     metadata_changes = []
     if item.metadata_values:
         from routes.metadata import _upsert_metadata_values
@@ -324,6 +341,7 @@ def update_item(
             raise HTTPException(status_code=403, detail="Accesso negato all'inventario di destinazione")
         for barcode in item.barcodes:
             _ensure_barcode_free(db, cast(str, barcode.code), new_inventory_id, exclude_item_id=cast(int, item.id))
+            barcode.container_type = target_inventory.type
     priority_inventory = target_inventory or item.inventory
     if priority_inventory.type != "CHECKLIST":
         if update_data.get("priority", 0) != 0:
@@ -335,6 +353,8 @@ def update_item(
             if isinstance(value, (int, float)) and value < 0:
                 raise HTTPException(status_code=400, detail=f"{field} non può essere negativo")
         setattr(item, field, value)
+    if target_inventory is not None:
+        _flush_barcode_changes(db)
     item.user_mod = user.id
     if "quantity" in update_data:
         apply_check_change(
@@ -381,9 +401,9 @@ def add_item_barcode(item_id: int, payload: ItemBarcodeCreate, db: Session = Dep
 
     old_snapshot = _snapshot_item(item)
     old_codes = [b.code for b in item.barcodes]
-    barcode = ItemBarcode(item_id=item.id, code=code, format=payload.format, user_ins=user.id, user_mod=user.id)
+    barcode = ItemBarcode(item_id=item.id, code=code, format=payload.format, container_type=item.inventory.type, user_ins=user.id, user_mod=user.id)
     db.add(barcode)
-    db.flush()
+    _flush_barcode_changes(db)
     db.refresh(item)
     item.user_mod = user.id
     _write_item_version(

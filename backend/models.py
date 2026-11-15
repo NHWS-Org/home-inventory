@@ -341,10 +341,13 @@ class ItemBarcode(Base, LoggingData):
     __tablename__ = "item_barcodes"
     __table_args__ = (
         UniqueConstraint("item_id", "code", name="uq_item_barcodes_item_code"),
+        UniqueConstraint("container_type", "code", name="uq_item_barcodes_type_code"),
+        CheckConstraint("container_type IN ('INVENTORY', 'CHECKLIST')", name="ck_item_barcodes_container_type"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    container_type = Column(String(16), nullable=False)
     code = Column(String(255), nullable=False, index=True)
     format = Column(String(32), nullable=True)  # es. ean_13, qr_code, code_128
 

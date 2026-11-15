@@ -112,10 +112,11 @@ export default function GlobalBarcodeScan() {
         setMode(lookup.matches.length > 0 ? 'menu' : canEdit ? 'create' : 'menu');
         setScan({ code: lookup.code, format, lookup });
 
-        if (canEdit && lookup.matches.length === 0) {
+        if (canEdit) {
           const all = await loadTargets();
+          const available = all.filter((t) => !lookup.matches.some((match) => kindOf(match) === t.kind));
           const preferred =
-            all.find((t) => currentTarget && t.kind === currentTarget.kind && t.id === currentTarget.id) ?? all[0];
+            available.find((t) => currentTarget && t.kind === currentTarget.kind && t.id === currentTarget.id) ?? available[0];
           setTargetKeySel(preferred ? targetKey(preferred) : '');
         }
       } catch (err) {
@@ -236,6 +237,7 @@ export default function GlobalBarcodeScan() {
 
   const product = scan?.lookup.product ?? null;
   const matches = scan?.lookup.matches ?? [];
+  const availableTargets = targets.filter((t) => !matches.some((match) => kindOf(match) === t.kind));
   const isChecklistMatch = (m: BarcodeMatch) => m.inventory_type === 'CHECKLIST';
 
   const targetSelect = (
@@ -250,7 +252,7 @@ export default function GlobalBarcodeScan() {
           setSelectedItemId(null);
         }}
       >
-        {targets.map((t) => (
+        {availableTargets.map((t) => (
           <option key={targetKey(t)} value={targetKey(t)}>
             {t.kind === 'checklists' ? '☑️' : '📦'} {t.name}
           </option>
@@ -375,6 +377,11 @@ export default function GlobalBarcodeScan() {
                       })}
                     </ul>
                     {error && <p className="mb-2 mt-3 text-sm text-red-600" role="alert">{error}</p>}
+                    {canEdit && availableTargets.length > 0 && (
+                      <button onClick={() => setMode('associate')} className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 px-4 font-medium text-white hover:bg-blue-700">
+                        Associa a un altro tipo di contenitore
+                      </button>
+                    )}
                     <button onClick={rescan} className="mt-3 min-h-12 w-full rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Scansiona un altro codice</button>
                   </>
                 ) : (

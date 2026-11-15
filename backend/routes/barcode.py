@@ -9,7 +9,7 @@ from barcode_service import is_isbn13, is_valid_gtin, lookup_enabled, lookup_pro
 from dependencies import get_db, role_required
 from models import BarcodeProductCache, Inventory, Item, ItemBarcode, RoleEnum
 from routes.auth import get_current_user
-from routes.item import _ensure_barcode_free, _snapshot_item, _write_item_version, can_access_item
+from routes.item import _ensure_barcode_free, _flush_barcode_changes, _snapshot_item, _write_item_version, can_access_item
 from schemas import BarcodeLookupResponse, BarcodeMatch, BarcodeProduct
 
 router = APIRouter()
@@ -135,7 +135,7 @@ def correct_registered_barcode(
     barcode.format = payload.format
     barcode.user_mod = user.id
     item.user_mod = user.id
-    db.flush()
+    _flush_barcode_changes(db)
     db.refresh(item)
     _write_item_version(
         db,

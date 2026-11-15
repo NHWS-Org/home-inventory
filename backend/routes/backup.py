@@ -408,6 +408,15 @@ def _insert_restored_rows(
             for name, value in source_row.items()
             if name in columns
         }
+        if table.name == "item_barcodes":
+            item = Base.metadata.tables["items"]
+            inventory = Base.metadata.tables["inventories"]
+            container_type = db.execute(
+                select(inventory.c.type).select_from(
+                    item.join(inventory, item.c.inventory_id == inventory.c.id)
+                ).where(item.c.id == row["item_id"])
+            ).scalar_one()
+            row["container_type"] = container_type
         for column in user_fk_columns:
             if (
                 skip_admin

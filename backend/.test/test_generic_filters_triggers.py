@@ -81,7 +81,7 @@ def setup():
             ItemMetadataValue(item_id=1, definition_id=1, value_date=date(2026, 11, 13)),
             ItemMetadataValue(item_id=2, definition_id=1, value_date=date(2026, 11, 14)),
             ItemMetadataValue(item_id=1, definition_id=2, value_text="a%b"),
-            ItemBarcode(item_id=2, code="012345"),
+            ItemBarcode(item_id=2, code="012345", container_type="INVENTORY"),
         ])
     app = FastAPI()
     for router, prefix in ((filter_router, "/filters"), (trigger_router, "/triggers"), (inbox_router, "/notifications")):
@@ -532,7 +532,7 @@ def test_new_migration_alembic_smoke_with_isolated_database():
             with Operations.context(MigrationContext.configure(connection)):
                 revision.downgrade()
         alembic("stamp", revision.down_revision)
-        assert alembic("heads").split() == [revision.revision, "(head)"]
+        assert alembic("heads").split() == ["c2d3e4f5a6b7", "(head)"]
         alembic("upgrade", "head")
         with engine.begin() as connection:
             assert {"scheduled_triggers", "trigger_runs", "trigger_subscriptions"} <= set(inspect(connection).get_table_names())
