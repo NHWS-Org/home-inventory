@@ -90,6 +90,65 @@ test('a known barcode can be linked to an item of the other container type', asy
       await act(async () => item.click());
       await act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === 'Associa').click());
       assert.ok(requests.some(request => request.url === '/item/20/barcodes' && JSON.parse(request.data).code === '123456'));
+      const dialog = document.querySelector('[role="dialog"]');
+      assert.ok(dialog.textContent.includes('Prodotti trovati'));
+      assert.ok(dialog.textContent.includes(targetName));
+      assert.equal(dialog.querySelector('li').textContent.includes(targetName), true);
+      assert.ok(dialog.textContent.includes(type === 'INVENTORY' ? 'Segna completato' : '+1 pezzo'));
+      assert.equal(dialog.textContent.includes('Codice 123456 associato'), false);
+      const currentControls = dialog.querySelector('li');
+      const actionLabel = type === 'INVENTORY' ? 'Segna completato' : '+1 pezzo';
+      await act(async () => [...currentControls.querySelectorAll('button')].find(button => button.textContent === actionLabel).click());
+      assert.ok(requests.some(request => request.url === '/item/20' && JSON.parse(request.data).quantity === 1));
+    }
+  } finally {
+    api.defaults.adapter = adapter;
+  }
+});
+
+test('creating a scanned item opens its product controls without an initial quantity field', async () => {
+  const adapter = api.defaults.adapter;
+  try {
+    for (const [kind, quantity] of [['inventories', 1], ['checklists', 0]]) {
+      const requests = [];
+      let failCreate = kind === 'inventories';
+      api.defaults.adapter = async config => {
+        requests.push(config);
+        if (config.url === '/item/' && failCreate) {
+          failCreate = false;
+          throw { response: { data: { detail: 'Creazione non riuscita' } } };
+        }
+        const data = config.url === '/barcode/lookup'
+          ? { code: '654321', product: { name: 'Riso', brand: null, quantity_label: null }, matches: [] }
+          : config.url === '/inventory/' ? [{ id: 1, name: 'Dispensa' }]
+          : config.url === '/checklist/' ? [{ id: 2, name: 'Spesa' }]
+          : config.url === '/item/' ? { id: 50, name: 'Riso', quantity, inventory_id: kind === 'inventories' ? 1 : 2 }
+          : [];
+        return { config, data, status: 200, statusText: 'OK', headers: {} };
+      };
+      await act(async () => root.render(createElement(MemoryRouter, {
+        key: kind, initialEntries: [`/${kind}/${kind === 'inventories' ? 1 : 2}`],
+      }, createElement(AuthContext.Provider, { value: { user: { username: 'admin', role: { name: 'admin' } } } },
+      createElement(GlobalBarcodeScan)))));
+      await act(async () => {
+        for (const key of '654321') window.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true }));
+        window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      assert.equal(document.querySelector('#barcode-new-quantity'), null);
+      assert.equal(document.querySelector('[role="dialog"]').textContent.includes('Quantità iniziale'), false);
+      if (kind === 'inventories') {
+        await act(async () => document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+        assert.ok(document.querySelector('[role="alert"]').textContent.includes('Creazione non riuscita'));
+        assert.ok(document.querySelector('form'));
+      }
+      await act(async () => document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+      const request = requests.find(entry => entry.url === '/item/');
+      assert.equal(JSON.parse(request.data).quantity, quantity);
+      const dialog = document.querySelector('[role="dialog"]');
+      assert.ok(dialog.textContent.includes('Prodotto trovato'));
+      assert.ok(dialog.textContent.includes('Riso'));
+      assert.ok(dialog.textContent.includes(kind === 'inventories' ? '+1 pezzo' : 'Segna completato'));
+      assert.ok(dialog.textContent.includes('Apri prodotto'));
     }
   } finally {
     api.defaults.adapter = adapter;

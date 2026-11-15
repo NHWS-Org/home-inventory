@@ -48,7 +48,6 @@ export default function GlobalBarcodeScan() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('menu');
 
   const [targets, setTargets] = useState<Target[]>([]);
@@ -56,7 +55,6 @@ export default function GlobalBarcodeScan() {
   const [targetItems, setTargetItems] = useState<ListItem[]>([]);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
-  const [newQuantity, setNewQuantity] = useState(1);
   const [search, setSearch] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [quantities, setQuantities] = useState<Record<number, string>>({});
@@ -83,7 +81,6 @@ export default function GlobalBarcodeScan() {
     async (rawCode: string, format: string | null) => {
       setScannerOpen(false);
       setError(null);
-      setDone(null);
       // I QR stampati per un inventario/lista contengono il suo link diretto.
       // Gli altri QR e i barcode continuano nel normale flusso di lookup item.
       try {
@@ -104,7 +101,6 @@ export default function GlobalBarcodeScan() {
         const product = lookup.product;
         setNewName(product?.name ?? lookup.matches[0]?.name ?? '');
         setNewDescription([product?.brand, product?.quantity_label].filter(Boolean).join(' - '));
-        setNewQuantity(1);
         setSearch('');
         setSelectedItemId(null);
         setQuantities({});
@@ -154,19 +150,26 @@ export default function GlobalBarcodeScan() {
   const closeAll = () => {
     setScan(null);
     setError(null);
-    setDone(null);
     setMode('menu');
   };
 
   const notifyChanged = () => window.dispatchEvent(new Event(ITEMS_CHANGED_EVENT));
 
-  const run = async (action: () => Promise<string>) => {
+  const run = async (action: () => Promise<BarcodeMatch>) => {
     setBusy(true);
     setError(null);
     try {
-      const message = await action();
+      const match = await action();
       notifyChanged();
-      setDone(message);
+      setScan((current) => current && {
+        ...current,
+        lookup: {
+          ...current.lookup,
+          matches: [match, ...current.lookup.matches.filter((existing) => existing.item_id !== match.item_id)],
+        },
+      });
+      setMatchQty((current) => ({ ...current, [match.item_id]: match.quantity ?? 0 }));
+      setMode('menu');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -208,22 +211,31 @@ export default function GlobalBarcodeScan() {
       if (!scan || !target) throw new Error('Seleziona inventario o lista');
       const name = newName.trim();
       if (!name) throw new Error('Nome obbligatorio');
-      await createItem({
+      const item = await createItem({
         name,
         description: newDescription.trim() || undefined,
-        quantity: target.kind === 'checklists' ? 0 : newQuantity,
+        quantity: target.kind === 'checklists' ? 0 : 1,
         inventory_id: target.id,
         barcodes: [{ code: scan.code, format: scan.format }],
       });
-      return `Creato "${name}" in ${target.name} con codice ${scan.code}`;
+      return {
+        item_id: item.id, name: item.name, quantity: item.quantity,
+        inventory_id: target.id, inventory_name: target.name,
+        inventory_type: target.kind === 'checklists' ? 'CHECKLIST' : 'INVENTORY',
+      };
     });
 
   const submitAssociate = () =>
     run(async () => {
-      if (!scan || selectedItemId === null) throw new Error('Seleziona un oggetto');
+      if (!scan || !target || selectedItemId === null) throw new Error('Seleziona un oggetto');
       const item = targetItems.find((i) => i.id === selectedItemId);
+      if (!item) throw new Error('Oggetto non trovato');
       await addItemBarcode(selectedItemId, scan.code, scan.format);
-      return `Codice ${scan.code} associato a "${item?.name ?? ''}"`;
+      return {
+        item_id: item.id, name: item.name, quantity: item.quantity,
+        inventory_id: target.id, inventory_name: target.name,
+        inventory_type: target.kind === 'checklists' ? 'CHECKLIST' : 'INVENTORY',
+      };
     });
 
   const rescan = () => {
@@ -231,7 +243,7 @@ export default function GlobalBarcodeScan() {
     setScannerOpen(true);
   };
 
-  const scanSheetDrag = useBottomSheetDrag(closeAll);
+  const scanSheetDrag = useBottomSheetDrag(() => { if (!busy) closeAll(); });
 
   if (!user?.username) return null;
 
@@ -303,7 +315,7 @@ export default function GlobalBarcodeScan() {
                 ) : (
                   <Dialog.Title className="text-lg font-semibold">Scansione non riuscita</Dialog.Title>
                 )}
-                {!loading && <button type="button" onClick={closeAll} aria-label="Chiudi" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">×</button>}
+                {!loading && <button type="button" disabled={busy} onClick={closeAll} aria-label="Chiudi" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-2xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800">×</button>}
               </div>
             </div>
             <div className="overflow-y-auto px-5 pb-5 sm:px-6">
@@ -311,15 +323,7 @@ export default function GlobalBarcodeScan() {
               {!loading && !scan && error && <p className="rounded-xl bg-red-50 p-4 text-red-700 dark:bg-red-950/40 dark:text-red-300" role="alert">{error}</p>}
               {!loading && scan && (
                 <>
-                {done ? (
-                  <>
-                    <div className="rounded-2xl bg-green-50 p-4 text-green-800 dark:bg-green-950/40 dark:text-green-300" role="status">✅ {done}</div>
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <button onClick={closeAll} className="min-h-12 rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Chiudi</button>
-                      <button onClick={rescan} className="min-h-12 rounded-xl bg-purple-600 px-4 font-medium text-white hover:bg-purple-700">Scansiona altro</button>
-                    </div>
-                  </>
-                ) : mode === 'menu' ? (
+                {mode === 'menu' ? (
                   <>
                     {matches.length === 0 && (
                       <p className="mb-3 rounded-xl bg-gray-100 p-3 text-sm dark:bg-gray-800">Nessun oggetto ha questo codice.</p>
@@ -436,22 +440,9 @@ export default function GlobalBarcodeScan() {
                           <label htmlFor="barcode-new-description" className="mb-1 block text-sm font-medium">Descrizione</label>
                           <input id="barcode-new-description" className="min-h-12 w-full rounded-xl border border-gray-300 px-3 dark:border-gray-700 dark:bg-gray-800" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} />
                         </div>
-                        {target?.kind !== 'checklists' && (
-                          <div className="mb-4">
-                            <label htmlFor="barcode-new-quantity" className="mb-1 block text-sm font-medium">Quantità iniziale</label>
-                            <input
-                              id="barcode-new-quantity"
-                              type="number"
-                              min="0"
-                              className="min-h-12 w-28 rounded-xl border border-gray-300 px-3 text-center dark:border-gray-700 dark:bg-gray-800"
-                              value={newQuantity}
-                              onChange={(e) => setNewQuantity(Math.max(0, Number(e.target.value)))}
-                            />
-                          </div>
-                        )}
                         {error && <p className="mb-3 text-sm text-red-600" role="alert">{error}</p>}
                         <div className="grid grid-cols-2 gap-2 pt-1">
-                          <button type="button" onClick={closeAll} className="min-h-12 rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Annulla</button>
+                          <button type="button" disabled={busy} onClick={closeAll} className="min-h-12 rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Annulla</button>
                           <button type="submit" disabled={busy || !newName.trim() || !target} className="min-h-12 rounded-xl bg-purple-600 px-4 font-medium text-white hover:bg-purple-700 disabled:opacity-50">Crea prodotto</button>
                         </div>
                       </form>
@@ -482,7 +473,7 @@ export default function GlobalBarcodeScan() {
                         {selectedItemId !== null && <p className="mb-3 text-sm text-gray-600 dark:text-gray-300" aria-live="polite">Prodotto selezionato: {targetItems.find((item) => item.id === selectedItemId)?.name}</p>}
                         {error && <p className="mb-3 text-sm text-red-600" role="alert">{error}</p>}
                         <div className="grid grid-cols-2 gap-2 pt-1">
-                          <button type="button" onClick={closeAll} className="min-h-12 rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Annulla</button>
+                          <button type="button" disabled={busy} onClick={closeAll} className="min-h-12 rounded-xl border border-gray-300 px-4 font-medium dark:border-gray-700">Annulla</button>
                           <button
                             type="button"
                             disabled={busy || selectedItemId === null}
